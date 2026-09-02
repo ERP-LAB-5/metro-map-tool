@@ -1,0 +1,3 @@
+flask>=3.0
+# only needed for mcp_server.py (agent access); the designer itself needs Flask alone
+mcp>=2,<3

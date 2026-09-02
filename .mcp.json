@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "metro-map": {
+      "command": ".venv/bin/python",
+      "args": ["mcp_server.py"],
+      "env": {}
+    }
+  }
+}
