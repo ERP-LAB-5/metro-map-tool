@@ -25,7 +25,10 @@ async function api(method, path, payload) {
   const res = await fetch(path, opts);
   let data = null;
   try { data = await res.json(); } catch (_) { /* empty body */ }
-  if (!res.ok) throw { status: res.status, errors: (data && data.errors) || [`${method} ${path} failed (${res.status})`] };
+  if (!res.ok) {
+    throw { status: res.status, data,
+            errors: (data && data.errors) || [`${method} ${path} failed (${res.status})`] };
+  }
   return data;
 }
 
@@ -40,6 +43,8 @@ const S = {
 
   sel: { kind: null, id: null },           // "station" | "line"
   dirty: false,
+  version: null,                           // content hash of the map as loaded
+  ignoreVersion: null,                     // an external change we chose to keep out
   undo: [],
   redo: [],
   zoom: 1,
@@ -976,6 +981,9 @@ function saveAsDialog() {
 function newMap() {
   if (!confirmDiscard()) return;
   S.name = null;
+  S.version = null;
+  S.ignoreVersion = null;
+  hideLive();
   S.spec = normalise({});
   S.style = { ...DEFAULT_STYLE };
   S.snap = 1;
@@ -998,12 +1006,14 @@ function confirmDiscard() {
   return !S.dirty || confirm("This map has unsaved changes. Discard them?");
 }
 
-async function loadMap(name) {
-  if (!confirmDiscard()) return;
+async function loadMap(name, { force = false } = {}) {
+  if (!force && !confirmDiscard()) return;
   let data;
   try { data = await api("GET", `/api/maps/${encodeURIComponent(name)}`); }
   catch (err) { showProblems(err.errors); return; }
   S.name = data.name;
+  S.version = data.version || null;
+  S.ignoreVersion = null;
   S.spec = normalise(data.spec);
   S.style = { ...DEFAULT_STYLE, ...(data.spec.style || {}) };
   S.snap = Number((data.spec.editor || {}).snap) || 1;
@@ -1011,9 +1021,11 @@ async function loadMap(name) {
   S.undo.length = 0; S.redo.length = 0;
   rememberMap(S.name);
   markClean();
+  hideLive();
   refreshPanels();
   scheduleRender();
   setTimeout(fitToView, 250);
+  startWatching();
 }
 
 async function saveMap(name) {
@@ -1022,10 +1034,13 @@ async function saveMap(name) {
   const spec = clone(S.spec);
   spec.style = { ...S.style };
   spec.editor = { snap: S.snap };
+  const body = { spec, auto_interchange: S.autoIx };
+  if (name === S.name && S.version) body.base_version = S.version;   // same map
   try {
-    const data = await api("PUT", `/api/maps/${encodeURIComponent(name)}`,
-      { spec, auto_interchange: S.autoIx });
+    const data = await api("PUT", `/api/maps/${encodeURIComponent(name)}`, body);
     S.name = data.name;
+    S.version = data.version || null;
+    S.ignoreVersion = null;
     S.spec = normalise(data.spec);
     delete S.spec.style;               // the editor keeps style and snap outside the spec
     delete S.spec.editor;
@@ -1034,6 +1049,20 @@ async function saveMap(name) {
     refreshPanels();
     scheduleRender();
   } catch (err) {
+    if (err.status === 409) {
+      // someone saved in between; let the human decide, never merge silently
+      showLive(`“${name}” was saved by someone else while you were editing.`, [
+        { label: "Load theirs (lose mine)",
+          fn: async () => { S.dirty = false; await loadMap(name, { force: true }); } },
+        { label: "Overwrite theirs", cls: "primary",
+          fn: async () => {
+            S.version = (err.data && err.data.version) || null;   // adopt, then win
+            hideLive();
+            await saveMap(name);
+          } },
+      ]);
+      return;
+    }
     showProblems(err.errors);
   }
 }
@@ -1065,11 +1094,71 @@ function stopServer() {
     .catch(() => {})
     .finally(() => {
       window.removeEventListener("beforeunload", guardUnload);
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
       document.body.innerHTML =
         `<div class="stopped"><h1>Designer stopped</h1>
          <p>The local server has shut down. Run <code>./run.sh</code>
          (or <code>run.ps1</code> on Windows) to start it again.</p></div>`;
     });
+}
+
+/* ----------------------------------------------------------------- live -- */
+
+const POLL_MS = 2000;
+let pollTimer = null;
+
+/** Watch the open map for saves made elsewhere — another tab, or an agent. */
+function startWatching() {
+  if (pollTimer) return;
+  pollTimer = setInterval(checkForExternalSave, POLL_MS);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) checkForExternalSave();      // catch up on refocus
+  });
+}
+
+async function checkForExternalSave() {
+  if (!S.name || document.hidden) return;
+  let maps;
+  try { maps = await api("GET", "/api/maps"); }
+  catch (_) { return; }                    // server stopped or restarting; try later
+  const mine = maps.find((m) => m.name === S.name);
+  if (!mine || !mine.version) return;
+  if (mine.version === S.version || mine.version === S.ignoreVersion) return;
+
+  if (!S.dirty) {
+    await loadMap(S.name, { force: true });
+    flashLive(`“${S.name}” was updated elsewhere — reloaded.`);
+    return;
+  }
+  showLive(`“${S.name}” changed on disk while you have unsaved edits.`, [
+    { label: "Load theirs", cls: "primary",
+      fn: async () => { S.dirty = false; await loadMap(S.name, { force: true }); } },
+    { label: "Keep mine", fn: () => { S.ignoreVersion = mine.version; hideLive(); } },
+  ]);
+}
+
+function showLive(message, actions) {
+  const bar = $("#live");
+  bar.hidden = false;
+  bar.innerHTML = `<span class="grow">${esc(message)}</span>`;
+  for (const a of actions || []) {
+    const btn = document.createElement("button");
+    btn.textContent = a.label;
+    if (a.cls) btn.className = a.cls;
+    btn.addEventListener("click", a.fn);
+    bar.appendChild(btn);
+  }
+}
+
+function hideLive() {
+  const bar = $("#live");
+  bar.hidden = true;
+  bar.innerHTML = "";
+}
+
+function flashLive(message) {
+  showLive(message, [{ label: "Dismiss", fn: hideLive }]);
+  setTimeout(() => { if ($("#live").textContent.startsWith(message.slice(0, 12))) hideLive(); }, 6000);
 }
 
 /* ------------------------------------------------------------ undo/redo -- */

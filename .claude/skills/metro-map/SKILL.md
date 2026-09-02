@@ -11,8 +11,9 @@ standalone SVG — octilinear (0° / 45° / 90°) segments, parallel tracks wher
 lines share a corridor, automatic label placement, light and dark grounds.
 
 Two front ends over the same files: a browser designer (`app.py`, drag stations
-on a live canvas) and the `metro-map` MCP tools. They share `maps/*.json`, so a
-person and an agent can work on the same diagram.
+on a live canvas) and the `metro-map` MCP tools. Both go through one server, so
+a person and an agent can work on the same diagram — a `save_map` reaches their
+canvas within a couple of seconds.
 
 ## Design order — do not skip it
 
@@ -87,6 +88,10 @@ The `metro-map` server (`.mcp.json` in the repo) starts the designer on demand.
 Read → modify → `validate_map` → `save_map`. Never hand-write a spec and save it
 unvalidated: an unknown station id in a route is the usual mistake, and
 validation names it.
+
+**Read immediately before you write.** Someone may have the same map open in the
+browser; `read_map` → edit → `save_map` keeps that window short. Saving a spec
+you read minutes ago silently drops whatever they did in between.
 
 ## Without MCP
 

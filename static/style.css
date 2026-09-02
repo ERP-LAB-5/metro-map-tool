@@ -298,3 +298,17 @@ button.stop:hover { filter: brightness(1.1); border-color: var(--danger); }
 .stopped { padding: 48px; font: 14px/1.6 var(--font); color: var(--ink); }
 .stopped h1 { font-size: 20px; margin: 0 0 8px; }
 .stopped code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
+
+/* a save that happened elsewhere — another tab, or an agent through MCP */
+.live {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--accent) 14%, var(--paper));
+  border-top: 1px solid var(--accent);
+}
+.live .grow { flex: 1 1 auto; }
+.live button { padding: 3px 10px; }

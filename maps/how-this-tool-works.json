@@ -4,25 +4,29 @@
       "label": "git clone",
       "gx": 0,
       "gy": 3,
-      "label_at": "above"
+      "label_at": "above",
+      "interchange": true
     },
     "reqs": {
       "label": "requirements.txt",
       "gx": 2,
       "gy": 3,
-      "label_at": "above"
+      "label_at": "above",
+      "interchange": true
     },
     "run": {
       "label": "./run.sh · run.ps1",
       "gx": 5,
       "gy": 3,
-      "label_at": "above"
+      "label_at": "above",
+      "interchange": true
     },
     "serve": {
       "label": "127.0.0.1:8765",
       "gx": 7,
       "gy": 3,
-      "label_at": "above"
+      "label_at": "above",
+      "interchange": true
     },
     "stations": {
       "label": "Place stations",
@@ -64,19 +68,22 @@
       "label": "maps/*.json",
       "gx": 16,
       "gy": 3,
-      "label_at": "above"
+      "label_at": "above",
+      "interchange": true
     },
     "export": {
       "label": "Export SVG",
       "gx": 16,
       "gy": 5,
-      "label_at": "right"
+      "label_at": "right",
+      "interchange": true
     },
     "stop": {
       "label": "Stop the server",
       "gx": 16,
       "gy": 7,
-      "label_at": "right"
+      "label_at": "right",
+      "interchange": true
     },
     "menu": {
       "label": "Terminal menu",

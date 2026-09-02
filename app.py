@@ -17,6 +17,7 @@ moves specs between the browser and disk.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import ipaddress
 import json
 import os
@@ -47,6 +48,18 @@ def map_path(name: str) -> Path:
     if path.parent != MAPS_DIR:            # belt and braces after the name check
         abort(400, "map name escapes the maps directory")
     return path
+
+
+def spec_version(path: Path) -> str:
+    """Short content hash of a map file — the token editors compare.
+
+    Content, not mtime: two writes inside one filesystem timestamp tick would
+    share an mtime, and a restored file can carry an older one.
+    """
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+    except OSError:
+        return ""
 
 
 def read_spec(path: Path) -> dict:
@@ -93,7 +106,8 @@ def list_maps():
     MAPS_DIR.mkdir(parents=True, exist_ok=True)
     out = []
     for path in sorted(MAPS_DIR.glob("*.json")):
-        entry = {"name": path.stem, "mtime": path.stat().st_mtime}
+        entry = {"name": path.stem, "mtime": path.stat().st_mtime,
+                 "version": spec_version(path)}
         try:
             spec = read_spec(path)
             entry["stations"] = len(spec["stations"])
@@ -111,7 +125,8 @@ def get_map(name: str):
     if not path.exists():
         abort(404, f"no map called '{name}'")
     try:
-        return jsonify({"name": name, "spec": read_spec(path)})
+        return jsonify({"name": name, "spec": read_spec(path),
+                        "version": spec_version(path)})
     except (OSError, ValueError) as exc:
         abort(400, f"could not read '{name}': {exc}")
 
@@ -124,6 +139,20 @@ def put_map(name: str):
     errors = mm.validate_spec(spec)
     if errors:
         return jsonify({"errors": errors}), 400
+    # Optimistic concurrency: a client that read version X may only overwrite
+    # version X. Anything else means someone — the other editor, or an agent —
+    # saved in between, and last-writer-wins would silently eat their work.
+    base = data.get("base_version")
+    if base is not None and path.exists():
+        current = spec_version(path)
+        if current != base:
+            return jsonify({
+                "conflict": True,
+                "errors": [f"'{name}' changed since you loaded it — "
+                           "another editor or an agent saved it"],
+                "name": name, "spec": read_spec(path), "version": current,
+            }), 409
+
     if data.get("auto_interchange", True):
         mm.auto_interchanges(spec)
     try:
@@ -131,6 +160,7 @@ def put_map(name: str):
     except OSError as exc:
         abort(500, f"could not write '{name}': {exc}")
     return jsonify({"name": name, "spec": spec, "saved": True,
+                    "version": spec_version(path),
                     "warnings": mm.spec_warnings(spec)})
 
 

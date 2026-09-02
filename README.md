@@ -86,8 +86,13 @@ Flask.
 ```
 
 Tools: `list_maps`, `read_map`, `save_map`, `delete_map`, `render_map`,
-`validate_map`, `spec_reference`, `designer_url`, `stop_designer`. Agent and human share `maps/`, so a save on
-one side is visible on the other.
+`validate_map`, `spec_reference`, `designer_url`, `stop_designer`.
+
+Agent and human work through one server and one maps directory, and the browser
+watches the open map, so **an agent's save reaches the canvas within a couple of
+seconds** with no reload. Unsaved edits of your own are never overwritten — you
+get *Load theirs* / *Keep mine*. And a Save that would clobber a version you
+never saw is refused by the server (HTTP 409), offering the same choice.
 
 `.claude/skills/metro-map/SKILL.md` teaches an agent the spec, the design order
 and the judgement calls. Link it into `~/.claude/skills/` to use it outside this
