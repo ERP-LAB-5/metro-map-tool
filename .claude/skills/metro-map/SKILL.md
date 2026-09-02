@@ -1,6 +1,6 @@
 ---
 name: metro-map
-description: Draw transit-map style diagrams — stations on a grid, coloured lines routed through them, zones banding groups of stations — and render them to a standalone light/dark SVG. Use for landscape, migration, architecture, pipeline or roadmap diagrams whenever the shape is "things connected by named paths": SAP landscapes (ECC → RISE → BTP), data flows, deployment topologies, phase plans. Covers the JSON spec, the design order (stations, then lines, then zones), line service states (out of service with dead ends, under construction, planned), label placement and rotation, the metro-map MCP tools, and the browser designer at diagrams/. Triggers on "metro map", "transit map", "landscape diagram", "draw the landscape", "diagram the migration", "tube map", or an ask to edit an existing maps/*.json.
+description: Draw transit-map style diagrams — stations on a grid, coloured lines routed through them, zones banding groups of stations — and render them to a standalone light/dark SVG. Use for landscape, migration, architecture, pipeline or roadmap diagrams whenever the shape is "things connected by named paths": SAP landscapes (ECC → RISE → BTP), data flows, deployment topologies, phase plans. Covers the JSON spec, the design order (stations, then lines, then zones), line service states (out of service with dead ends, under construction, planned), label placement and rotation, the metro-map MCP tools, and the browser designer that ships with it. Triggers on "metro map", "transit map", "landscape diagram", "draw the landscape", "diagram the migration", "tube map", or an ask to edit an existing maps/*.json.
 ---
 
 # Metro map
@@ -96,7 +96,7 @@ you read minutes ago silently drops whatever they did in between.
 ## Without MCP
 
 ```bash
-cd diagrams
+cd metro-map-tool          # or wherever you cloned it
 ./run.sh                    # designer on 127.0.0.1:8765 (restarts if already up)
 ./run.sh --stop             # or the red Stop button in the toolbar
 .\run.ps1                   # same on Windows;  .\run.ps1 -Stop

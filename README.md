@@ -1,4 +1,4 @@
-# diagrams
+# metro-map-tool
 
 Transit-map diagrams for landscapes, pipelines and migrations: a JSON spec of
 **stations** on a grid, **lines** routed through them and **zones** banding
@@ -15,6 +15,7 @@ capped with a dead-end bar.
 ## The web designer
 
 ```bash
+git clone https://github.com/ERP-LAB-5/metro-map-tool.git && cd metro-map-tool
 ./run.sh                 # creates .venv on first run, then serves 127.0.0.1:8765
 ./run.sh --stop          # shut it down
 .\run.ps1                # Windows: same thing  (.\run.ps1 -Stop to stop)
@@ -81,8 +82,8 @@ Flask.
 
 ```json
 {"mcpServers": {"metro-map": {
-  "command": "/path/to/diagrams/.venv/bin/python",
-  "args": ["/path/to/diagrams/mcp_server.py"]}}}
+  "command": "/path/to/metro-map-tool/.venv/bin/python",
+  "args": ["/path/to/metro-map-tool/mcp_server.py"]}}}
 ```
 
 Tools: `list_maps`, `read_map`, `save_map`, `delete_map`, `render_map`,
