@@ -189,20 +189,6 @@ def validate_map(spec: dict) -> dict:
 
 
 @server.tool()
-def preview_grid(name: str) -> str:
-    """A saved map's grid as text — the cheap way to see the layout."""
-    ensure_designer()
-    return call("GET", f"/api/ascii?map={urllib.parse.quote(name)}")["grid"]
-
-
-@server.tool()
-def list_templates() -> list[dict]:
-    """Starting points: a SAP landscape, a diagram pipeline, and an empty map."""
-    ensure_designer()
-    return call("GET", "/api/templates")
-
-
-@server.tool()
 def spec_reference() -> dict:
     """The vocabulary a spec may use: label sides and angles, line states, palette."""
     ensure_designer()

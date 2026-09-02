@@ -51,7 +51,6 @@ Usage
     python3 app.py                             # browser designer on :8765
     python3 metro_map.py spec.json -o map.svg
     python3 metro_map.py spec.json --cell 140 --bundle-gap 14 -o map.svg
-    python3 metro_map.py spec.json --ascii     # rough grid in the terminal
 
 Any stop used by two or more lines can be flagged as an interchange automatically
 (--auto-interchange, and the toggle in the designer's toolbar).
@@ -752,73 +751,7 @@ def auto_interchanges(spec: dict) -> int:
     return changed
 
 
-def ascii_scale(spec: dict) -> int:
-    """Multiplier that puts half- and quarter-cell placements on whole characters."""
-    for k in (1, 2, 3, 4):
-        if all(abs(v * k - round(v * k)) < 1e-6
-               for st in spec["stations"].values() for v in (st["gx"], st["gy"])):
-            return k
-    return 4
-
-
-def ascii_preview(spec: dict, width: int = 4) -> str:
-    """Rough terminal view of the grid — enough to place stations before rendering."""
-    if not spec["stations"]:
-        return "  (no stations yet)"
-    k = ascii_scale(spec)
-    if k > 1:                       # keep sub-cell placements from colliding
-        spec = json.loads(json.dumps(spec))
-        for st in spec["stations"].values():
-            st["gx"], st["gy"] = st["gx"] * k, st["gy"] * k
-    xs = [int(round(s["gx"])) for s in spec["stations"].values()]
-    ys = [int(round(s["gy"])) for s in spec["stations"].values()]
-    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
-    cols, rows = x1 - x0 + 1, y1 - y0 + 1
-    grid = [[list("    "[:width]) for _ in range(cols)] for _ in range(rows)]
-
-    def put(gx: int, gy: int, ch: str, fill: bool = False) -> None:
-        cx, cy = gx - x0, gy - y0
-        if 0 <= cy < rows and 0 <= cx < cols:
-            if fill:
-                grid[cy][cx] = list(ch * width)
-            else:
-                grid[cy][cx][1] = ch
-
-    glyph = {(1, 0): "-", (-1, 0): "-", (0, 1): "|", (0, -1): "|",
-             (1, 1): "\\", (-1, -1): "\\", (1, -1): "/", (-1, 1): "/"}
-
-    for ln in spec["lines"]:
-        ids = ln["stations"]
-        for a, b in zip(ids, ids[1:]):
-            pa = (int(round(spec["stations"][a]["gx"])), int(round(spec["stations"][a]["gy"])))
-            for wp in octilinear(pa, (int(round(spec["stations"][b]["gx"])),
-                                      int(round(spec["stations"][b]["gy"])))):
-                wp = (int(round(wp[0])), int(round(wp[1])))
-                step = (int(sign(wp[0] - pa[0])), int(sign(wp[1] - pa[1])))
-                cur = pa
-                while cur != wp:
-                    cur = (cur[0] + step[0], cur[1] + step[1])
-                    g = glyph[step]
-                    put(cur[0], cur[1], g, fill=(g == "-"))
-                pa = wp
-
-    for sid, st in spec["stations"].items():
-        put(int(round(st["gx"])), int(round(st["gy"])),
-            "O" if st.get("interchange") else "o")
-
-    out = []
-    for r, row in enumerate(grid):
-        out.append(f"  {(y0 + r) // k if (y0 + r) % k == 0 else '':>4} |" + "".join("".join(c) for c in row))
-    # only whole cells get a number, so sub-cell columns do not crowd the ruler
-    out.append("      " + "".join(
-        f"{(x0 + c) // k:<{width}g}" if (x0 + c) % k == 0 else " " * width
-        for c in range(cols)))
-    out.append("")
-    out.append("  O interchange   o stop")
-    return "\n".join(out)
-
-
-# ----------------------------------------------------------- templates ----
+# ------------------------------------------------------------- palette ----
 
 PALETTE: List[Tuple[str, str]] = [
     ("blue", "#0098d4"), ("magenta", "#9b0058"), ("orange", "#ee7c0e"),
@@ -826,68 +759,6 @@ PALETTE: List[Tuple[str, str]] = [
     ("teal", "#00a4a7"), ("brown", "#8d5b2d"), ("gold", "#c8a415"),
     ("grey", "#8f9aa4"),
 ]
-
-SAP_TEMPLATE: dict = {
-    "stations": {
-        "ecc":     {"label": "ECC 6.0 · Db2", "gx": 0, "gy": 3},
-        "conv":    {"label": "System conversion", "gx": 2, "gy": 3},
-        "sit":     {"label": "SIT · compression", "gx": 4, "gy": 3},
-        "azure":   {"label": "RISE on Azure", "gx": 6, "gy": 2},
-        "cdc":     {"label": "RISE on CDC", "gx": 6, "gy": 4},
-        "s4":      {"label": "S/4HANA Private", "gx": 8, "gy": 3, "label_at": "above-right"},
-        "alm":     {"label": "Cloud ALM · run", "gx": 10, "gy": 3},
-        "btp_int": {"label": "BTP Integration Suite", "gx": 8, "gy": 1},
-        "btp_cap": {"label": "CAP · Build Apps", "gx": 10, "gy": 1},
-        "btp_ai":  {"label": "Agent skills · MCP", "gx": 12, "gy": 1},
-        "slt":     {"label": "SLT initial load", "gx": 2, "gy": 5},
-        "bronze":  {"label": "Bronze · Delta Lake", "gx": 4, "gy": 5},
-        "di":      {"label": "Data Intelligence", "gx": 6, "gy": 5},
-        "sara":    {"label": "SARA · ADK", "gx": 2, "gy": 6},
-        "jivs":    {"label": "JiVS · ILM Store", "gx": 4, "gy": 6},
-        "blob":    {"label": "ArchiveLink · Blob", "gx": 6, "gy": 6},
-    },
-    "lines": [
-        {"name": "Option A · Azure", "color": "#0098d4",
-         "stations": ["ecc", "conv", "sit", "azure", "s4", "alm"]},
-        {"name": "Option B · CDC", "color": "#9b0058",
-         "stations": ["ecc", "conv", "sit", "cdc", "s4", "alm"]},
-        {"name": "Extend · BTP", "color": "#ee7c0e",
-         "stations": ["s4", "btp_int", "btp_cap", "btp_ai"]},
-        {"name": "Data", "color": "#007d32",
-         "stations": ["ecc", "slt", "bronze", "di"]},
-        {"name": "Archive", "color": "#e1251b",
-         "stations": ["ecc", "sara", "jivs", "blob"]},
-    ],
-}
-
-
-def empty_spec() -> dict:
-    return {"stations": {}, "lines": [], "zones": []}
-
-
-PIPELINE_TEMPLATE: dict = {
-    "stations": {
-        "nl": {"label": "Natural language", "gx": 0, "gy": 2},
-        "author": {"label": "Hand-XML / Mermaid", "gx": 2, "gy": 2},
-        "layout": {"label": "Auto-layout", "gx": 4, "gy": 2},
-        "drawio": {"label": ".drawio (editable)", "gx": 6, "gy": 2, "label_at": "above-left"},
-        "export": {"label": "PNG · SVG · PDF", "gx": 8, "gy": 2},
-        "code": {"label": "Code / IaC / SQL", "gx": 1, "gy": 4},
-        "extract": {"label": "Extract graph", "gx": 3, "gy": 4},
-        "svg": {"label": "SVG animation", "gx": 6, "gy": 4},
-        "html": {"label": "HTML viewer", "gx": 8, "gy": 4},
-        "diff": {"label": "Diff / drift", "gx": 6, "gy": 0},
-        "compress": {"label": "Exec compress", "gx": 8, "gy": 0},
-    },
-    "lines": [
-        {"name": "Author", "color": "#0098d4",
-         "stations": ["nl", "author", "layout", "drawio", "export"]},
-        {"name": "Import", "color": "#007d32", "stations": ["code", "extract", "layout"]},
-        {"name": "Repurpose", "color": "#ee7c0e", "stations": ["drawio", "svg", "html"]},
-        {"name": "Analyze", "color": "#e1251b", "stations": ["drawio", "diff", "compress"]},
-    ],
-}
-
 
 # ----------------------------------------------------------------- cli ----
 
@@ -914,8 +785,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--label-size", type=float)
     ap.add_argument("--auto-interchange", action="store_true",
                     help="flag every stop shared by two or more lines as an interchange")
-    ap.add_argument("--ascii", action="store_true",
-                    help="print the grid as text instead of rendering SVG")
     args = ap.parse_args(argv)
 
     if not args.spec:
@@ -946,10 +815,6 @@ def main(argv: Optional[List[str]] = None) -> int:
                          ("label_size", args.label_size)):
         if value is not None:
             setattr(style, field, value)
-
-    if args.ascii:
-        print(ascii_preview(spec))
-        return 0
 
     svg = render(spec, style)
     if args.out == "-":

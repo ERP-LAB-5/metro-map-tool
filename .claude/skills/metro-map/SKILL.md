@@ -17,7 +17,8 @@ person and an agent can work on the same diagram.
 ## Design order — do not skip it
 
 1. **Stations first.** Nothing else can reference a station that does not exist.
-   Place them on the grid, then check the shape with `preview_grid`.
+   Place them on the grid — gx/gy in the spec are the layout, so read those back
+   rather than the rendered SVG when checking a position.
 2. **Then lines.** A line is an ordered route through station ids. Reusing an id
    in two lines makes that stop an interchange (drawn as a white ring).
 3. **Then zones**, if the diagram groups things — "Upgrade", "Preferred".
@@ -78,10 +79,8 @@ The `metro-map` server (`.mcp.json` in the repo) starts the designer on demand.
 | `read_map(name)` | the whole spec, to edit |
 | `save_map(name, spec)` | write it back — validates first, refuses a spec that will not draw |
 | `validate_map(spec)` | check before saving; returns `errors` (fatal) and `warnings` (a line with one stop, an empty zone, a station on no line) |
-| `preview_grid(name)` | the layout as text — read this instead of the SVG |
 | `render_map(name, out_path=…)` | write the SVG to a file; pass `out_path` rather than pulling markup through the transcript |
 | `spec_reference` | palette, label sides and angles, line states, style defaults |
-| `list_templates` | a SAP landscape and a pipeline to start from |
 | `designer_url` | hand the human a link to take over in the browser |
 | `stop_designer` | shut the local server down |
 
@@ -97,8 +96,7 @@ cd diagrams
 ./run.sh --stop             # or the red Stop button in the toolbar
 .\run.ps1                   # same on Windows;  .\run.ps1 -Stop
 
-python3 metro_map.py maps/sap_landscape.json -o landscape.svg
-python3 metro_map.py maps/sap_landscape.json --ascii     # the grid as text
+python3 metro_map.py maps/how-this-tool-works.json -o guide.svg
 python3 metro_map.py spec.json --cell 140 -o big.svg     # flags beat spec.style
 ```
 
@@ -113,5 +111,5 @@ A spec that will not draw is reported line by line and exits 2.
   and `label_angle` only when a column is genuinely too narrow.
 - **A branch that is being retired is its own line**, not a status on a shared
   one — that is what makes the dead-end bar land in the right place.
-- **Check the render, do not assume it.** `preview_grid` catches a wrong grid
-  position; for anything subtler, render to a file and look at it.
+- **Check the render, do not assume it.** Reading gx/gy back catches a wrong
+  grid position; for anything subtler, render to a file and look at it.

@@ -1,0 +1,172 @@
+{
+  "stations": {
+    "clone": {
+      "label": "git clone",
+      "gx": 0,
+      "gy": 3,
+      "label_at": "above"
+    },
+    "reqs": {
+      "label": "requirements.txt",
+      "gx": 2,
+      "gy": 3,
+      "label_at": "above"
+    },
+    "run": {
+      "label": "./run.sh · run.ps1",
+      "gx": 5,
+      "gy": 3,
+      "label_at": "above"
+    },
+    "serve": {
+      "label": "127.0.0.1:8765",
+      "gx": 7,
+      "gy": 3,
+      "label_at": "above"
+    },
+    "stations": {
+      "label": "Place stations",
+      "gx": 10,
+      "gy": 1,
+      "label_at": "above"
+    },
+    "lines": {
+      "label": "Route lines",
+      "gx": 12,
+      "gy": 1,
+      "label_at": "above"
+    },
+    "zones": {
+      "label": "Band zones",
+      "gx": 14,
+      "gy": 1,
+      "label_at": "above"
+    },
+    "mcp": {
+      "label": "MCP · metro-map",
+      "gx": 10,
+      "gy": 5,
+      "label_at": "below"
+    },
+    "tools": {
+      "label": "read_map · save_map",
+      "gx": 12,
+      "gy": 5,
+      "label_at": "below"
+    },
+    "check": {
+      "label": "validate_map",
+      "gx": 14,
+      "gy": 5,
+      "label_at": "below"
+    },
+    "save": {
+      "label": "maps/*.json",
+      "gx": 16,
+      "gy": 3,
+      "label_at": "above"
+    },
+    "export": {
+      "label": "Export SVG",
+      "gx": 16,
+      "gy": 5,
+      "label_at": "right"
+    },
+    "stop": {
+      "label": "Stop the server",
+      "gx": 16,
+      "gy": 7,
+      "label_at": "right"
+    },
+    "menu": {
+      "label": "Terminal menu",
+      "gx": 4,
+      "gy": 6,
+      "label_at": "below"
+    }
+  },
+  "lines": [
+    {
+      "name": "Web designer",
+      "color": "#0098d4",
+      "stations": [
+        "clone",
+        "reqs",
+        "run",
+        "serve",
+        "stations",
+        "lines",
+        "zones",
+        "save",
+        "export",
+        "stop"
+      ]
+    },
+    {
+      "name": "Agent · MCP and skill",
+      "color": "#ee7c0e",
+      "stations": [
+        "clone",
+        "reqs",
+        "run",
+        "serve",
+        "mcp",
+        "tools",
+        "check",
+        "save",
+        "export",
+        "stop"
+      ]
+    },
+    {
+      "name": "Terminal menu · removed",
+      "color": "#e1251b",
+      "status": "out-of-service",
+      "stations": [
+        "serve",
+        "menu"
+      ]
+    }
+  ],
+  "zones": [
+    {
+      "name": "Setup",
+      "color": "#00a4a7",
+      "stations": [
+        "clone",
+        "reqs"
+      ]
+    },
+    {
+      "name": "Startup",
+      "color": "#007d32",
+      "stations": [
+        "run",
+        "serve"
+      ]
+    },
+    {
+      "name": "Design",
+      "color": "#7b3fb5",
+      "stations": [
+        "stations",
+        "lines",
+        "zones",
+        "mcp",
+        "tools",
+        "check"
+      ]
+    }
+  ],
+  "style": {
+    "cell": 120,
+    "stroke": 10,
+    "corner": 22,
+    "bundle_gap": 13,
+    "label_size": 18,
+    "zone_pad": 30
+  },
+  "editor": {
+    "snap": 1
+  }
+}

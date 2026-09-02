@@ -1,8 +1,16 @@
 # diagrams
 
 Transit-map diagrams for landscapes, pipelines and migrations: a JSON spec of
-**stations** on a grid and **lines** through them, rendered to a standalone,
-octilinear, light/dark-aware SVG.
+**stations** on a grid, **lines** routed through them and **zones** banding
+groups of them, rendered to a standalone, octilinear, light/dark-aware SVG.
+
+![The designer showing how-this-tool-works: setup and startup on one trunk, the
+browser and MCP ways of designing forking through the Design zone, meeting again
+at the saved file](docs/how-this-tool-works.png)
+
+That is the map the designer opens with, drawn by the tool itself. The retired
+red stub is the terminal menu the browser UI replaced — dashed, faded, and
+capped with a dead-end bar.
 
 ## The web designer
 
@@ -15,6 +23,10 @@ octilinear, light/dark-aware SVG.
 Both scripts replace an instance already holding the port rather than failing on
 it, so re-running one is how you restart. The red **Stop** button in the toolbar
 shuts the server down from the browser.
+
+It opens on **how-this-tool-works**, a map of the tool itself — setup, startup,
+then the two ways of designing (the browser and the MCP tools) forking apart and
+meeting again at the saved file. After that it reopens whatever you had last.
 
 - **Stations first.** Add a station, then drag its dot on the canvas — it snaps
   to the grid and the map re-routes live. Arrow keys nudge, Delete removes.
@@ -51,9 +63,8 @@ The same specs render headlessly, so a map designed in the browser drops
 straight into a build or a docs pipeline:
 
 ```bash
-python3 metro_map.py maps/sap_landscape.json -o landscape.svg
-python3 metro_map.py maps/sap_landscape.json --cell 140 --bundle-gap 14 -o big.svg
-python3 metro_map.py maps/sap_landscape.json --ascii      # rough grid in the terminal
+python3 metro_map.py maps/how-this-tool-works.json -o guide.svg
+python3 metro_map.py maps/how-this-tool-works.json --cell 140 -o big.svg
 cat spec.json | python3 metro_map.py - > map.svg
 ```
 
@@ -75,8 +86,7 @@ Flask.
 ```
 
 Tools: `list_maps`, `read_map`, `save_map`, `delete_map`, `render_map`,
-`validate_map`, `preview_grid`, `list_templates`, `spec_reference`,
-`designer_url`, `stop_designer`. Agent and human share `maps/`, so a save on
+`validate_map`, `spec_reference`, `designer_url`, `stop_designer`. Agent and human share `maps/`, so a save on
 one side is visible on the other.
 
 `.claude/skills/metro-map/SKILL.md` teaches an agent the spec, the design order

@@ -180,20 +180,6 @@ def download_svg(name: str):
         "Content-Disposition": f'attachment; filename="{name}.svg"'})
 
 
-@app.get("/api/templates")
-def templates():
-    return jsonify([
-        {"id": "sap", "name": "SAP landscape",
-         "note": "ECC to RISE options, BTP, data and archive branches",
-         "spec": mm.SAP_TEMPLATE},
-        {"id": "pipeline", "name": "Diagram pipeline",
-         "note": "authoring, import, repurpose and analyse tracks",
-         "spec": mm.PIPELINE_TEMPLATE},
-        {"id": "empty", "name": "Empty map",
-         "note": "start from nothing", "spec": mm.empty_spec()},
-    ])
-
-
 @app.get("/api/palette")
 def palette():
     return jsonify([{"name": n, "color": c} for n, c in mm.PALETTE])
@@ -214,24 +200,6 @@ def defaults():
                     "line_statuses": [{"value": k, "label": STATUS_TITLES.get(k, k)}
                                       for k in mm.STATUS_CLASS],
                     "label_angles": list(mm.LABEL_ANGLES)})
-
-
-@app.get("/api/ascii")
-def ascii_grid():
-    """The terminal-style grid — cheap for an agent to read back."""
-    name = request.args.get("map")
-    if name:
-        path = map_path(name)
-        if not path.exists():
-            abort(404, f"no map called '{name}'")
-        spec = read_spec(path)
-    else:
-        abort(400, "pass ?map=<name>")
-    errors = mm.validate_spec(spec)
-    if errors:
-        return jsonify({"errors": errors}), 400
-    return jsonify({"name": name, "grid": mm.ascii_preview(spec),
-                    "warnings": mm.spec_warnings(spec)})
 
 
 @app.post("/api/shutdown")

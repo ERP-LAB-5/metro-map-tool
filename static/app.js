@@ -54,6 +54,18 @@ let LABEL_ANGLES = [0, 45, 90];
 let PALETTE = [];
 let lastSVG = "";
 
+const GUIDE_MAP = "how-this-tool-works";     // the map that explains the tool
+const LAST_MAP_KEY = "metro-map:last";
+
+/** Remember the map this browser had open. Storage can be blocked; never throw. */
+function rememberMap(name) {
+  try { localStorage.setItem(LAST_MAP_KEY, name); } catch (_) { /* no storage */ }
+}
+
+function rememberedMap() {
+  try { return localStorage.getItem(LAST_MAP_KEY); } catch (_) { return null; }
+}
+
 function snapshot() {
   return { spec: clone(S.spec), style: { ...S.style }, sel: { ...S.sel } };
 }
@@ -960,31 +972,24 @@ function saveAsDialog() {
   });
 }
 
-async function newDialog() {
+/** Start over: an empty grid, unnamed until it is saved. */
+function newMap() {
   if (!confirmDiscard()) return;
-  let templates;
-  try { templates = await api("GET", "/api/templates"); }
-  catch (err) { showProblems(err.errors); return; }
-  dialog("New map", `<div class="pick-list">${templates.map((t, i) => `
-    <div class="row" data-tpl="${i}"><span class="grow">
-      <span class="lbl">${esc(t.name)}</span><span class="meta">${esc(t.note)}</span></span></div>`).join("")}
-    </div><div class="actions"><button value="cancel">Cancel</button></div>`, (form, dlg) => {
-    form.querySelectorAll("[data-tpl]").forEach((row) =>
-      row.addEventListener("click", () => {
-        dlg.close();
-        const t = templates[Number(row.dataset.tpl)];
-        S.name = null;
-        S.undo.length = 0; S.redo.length = 0;
-        S.spec = normalise(clone(t.spec));
-        S.style = { ...DEFAULT_STYLE, ...(t.spec.style || {}) };
-        S.snap = Number((t.spec.editor || {}).snap) || 1;
-        S.sel = { kind: null, id: null };
-        markDirty();
-        refreshPanels();
-        scheduleRender();
-        setTimeout(fitToView, 250);
-      }));
-  });
+  S.name = null;
+  S.spec = normalise({});
+  S.style = { ...DEFAULT_STYLE };
+  S.snap = 1;
+  S.sel = { kind: null, id: null };
+  S.undo.length = 0;
+  S.redo.length = 0;
+  S.zoom = 1;
+  S.pan = { x: 0, y: 0 };
+  $("#style-editor").dataset.built = "";
+  markDirty();
+  refreshPanels();
+  scheduleRender();
+  currentTab() === "stations" || document.querySelector('.tab[data-tab="stations"]').click();
+  setHint();
 }
 
 /* ------------------------------------------------------------------ io -- */
@@ -1004,6 +1009,7 @@ async function loadMap(name) {
   S.snap = Number((data.spec.editor || {}).snap) || 1;
   S.sel = { kind: null, id: null };
   S.undo.length = 0; S.redo.length = 0;
+  rememberMap(S.name);
   markClean();
   refreshPanels();
   scheduleRender();
@@ -1147,7 +1153,7 @@ async function boot() {
   $("#btn-add-station").addEventListener("click", addStation);
   $("#btn-add-line").addEventListener("click", addLine);
   $("#btn-add-zone").addEventListener("click", addZone);
-  $("#btn-new").addEventListener("click", newDialog);
+  $("#btn-new").addEventListener("click", newMap);
   $("#btn-open").addEventListener("click", openDialog);
   $("#btn-save").addEventListener("click", () => saveMap());
   $("#btn-saveas").addEventListener("click", saveAsDialog);
@@ -1176,12 +1182,16 @@ async function boot() {
   refreshPanels();
   setHint();
 
-  // Open the most recently touched map, so the tool starts with something to look at.
+  // Start on whatever this browser had open, else the map that explains the
+  // tool, else the most recently touched one — never on a blank canvas.
   try {
     const maps = await api("GET", "/api/maps");
     if (maps.length) {
-      maps.sort((a, b) => b.mtime - a.mtime);
-      await loadMap(maps[0].name);
+      const last = rememberedMap();
+      const pick = maps.find((m) => m.name === last)
+        || maps.find((m) => m.name === GUIDE_MAP)
+        || maps.slice().sort((a, b) => b.mtime - a.mtime)[0];
+      await loadMap(pick.name);
       return;
     }
   } catch (_) { /* fall through to an empty workspace */ }
