@@ -10,6 +10,10 @@ them, **zones** banding groups of them. `metro_map.py` renders it to a
 standalone SVG — octilinear (0° / 45° / 90°) segments, parallel tracks where
 lines share a corridor, automatic label placement, light and dark grounds.
 
+A rendered map carries **both** palettes and lets the reader's own setting pick,
+so never ask for a themed file unless someone wants one pinned; the designer's
+theme switch is a view setting for the person drawing, not part of the map.
+
 Two modes. **metro** (the default) is an abstract grid where gx only means
 "further right". **roadmap** gives gx a calendar and draws a Gantt-style ruler
 over the diagram. Everything else is identical between them.

@@ -40,6 +40,7 @@ const S = {
   spec: { stations: {}, lines: [], zones: [] },
   style: { cell: 120, stroke: 10, corner: 22, bundle_gap: 13, label_size: 16 },
   autoIx: true,
+  theme: "auto",                           // designer chrome and preview only
   snap: 1,                                 // grid step when dragging or nudging
 
   sel: { kind: null, id: null },           // "station" | "line"
@@ -69,6 +70,34 @@ let TIMELINE = null;                         // ruler the server resolved, or nu
 
 const GUIDE_MAP = "how-this-tool-works";     // the map that explains the tool
 const LAST_MAP_KEY = "metro-map:last";
+const THEME_KEY = "metro-map:theme";
+
+/* --------------------------------------------------------------- theme -- */
+
+/* A per-browser preference, not part of any map: it themes the designer and
+   its preview, never an exported file. An export has to keep both palettes,
+   because it may be opened anywhere. */
+
+function storedTheme() {
+  try { return localStorage.getItem(THEME_KEY) || "auto"; } catch (_) { return "auto"; }
+}
+
+function applyTheme(theme) {
+  S.theme = ["auto", "light", "dark"].includes(theme) ? theme : "auto";
+  const root = document.documentElement;
+  if (S.theme === "auto") delete root.dataset.theme;
+  else root.dataset.theme = S.theme;
+  try { localStorage.setItem(THEME_KEY, S.theme); } catch (_) { /* no storage */ }
+  const select = $("#theme-select");
+  if (select && select.value !== S.theme) select.value = S.theme;
+}
+
+/** What the preview should actually be drawn as, resolving "auto" now. */
+function resolvedTheme() {
+  if (S.theme !== "auto") return S.theme;
+  return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? "dark" : "light";
+}
 
 /** Remember the map this browser had open. Storage can be blocked; never throw. */
 function rememberMap(name, folder) {
@@ -227,6 +256,7 @@ async function doRender() {
   try {
     data = await api("POST", "/api/render", {
       spec: S.spec, style: S.style, auto_interchange: S.autoIx,
+      theme: resolvedTheme(),
     });
   } catch (err) {
     showProblems(err.errors);
@@ -1436,9 +1466,23 @@ async function saveMap(name, folder) {
   }
 }
 
-function exportSVG() {
-  if (!lastSVG) { showProblems(["nothing rendered to export yet"]); return; }
-  const blob = new Blob([lastSVG], { type: "image/svg+xml;charset=utf-8" });
+async function exportSVG() {
+  if (!Object.keys(S.spec.stations).length) {
+    showProblems(["nothing rendered to export yet"]);
+    return;
+  }
+  // Re-render rather than reuse the preview: the preview is baked to whatever
+  // theme the toolbar is showing, and a file that leaves here has to keep both
+  // palettes so it suits whoever opens it.
+  let svg;
+  try {
+    const data = await api("POST", "/api/render", {
+      spec: S.spec, style: S.style, auto_interchange: S.autoIx, theme: "auto",
+    });
+    svg = data.svg;
+  } catch (err) { showProblems(err.errors); return; }
+  if (!svg) { showProblems(["nothing rendered to export yet"]); return; }
+  const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -1596,6 +1640,7 @@ function initKeys() {
 /* ---------------------------------------------------------------- boot -- */
 
 async function boot() {
+  applyTheme(storedTheme());          // before anything paints, to avoid a flash
   try {
     const [defaults, palette] = await Promise.all([
       api("GET", "/api/defaults"), api("GET", "/api/palette"),
@@ -1619,6 +1664,15 @@ async function boot() {
   $("#mode-select").innerHTML = MODES.map((m) =>
     `<option value="${esc(m.value)}">${esc(m.label)}</option>`).join("");
   $("#mode-select").addEventListener("change", (ev) => setMode(ev.target.value));
+  $("#theme-select").addEventListener("change", (ev) => {
+    applyTheme(ev.target.value);
+    scheduleRender();                 // the preview is drawn in the theme, not styled into it
+  });
+  // while on auto, follow the system if it changes under us
+  if (window.matchMedia) {
+    window.matchMedia("(prefers-color-scheme: dark)")
+      .addEventListener("change", () => { if (S.theme === "auto") scheduleRender(); });
+  }
 
   initTabs();
   initCanvas();

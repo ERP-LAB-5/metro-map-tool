@@ -755,7 +755,14 @@ def lighten(hex_color: str, floor: float = 0.58) -> str:
     return "#%02x%02x%02x" % (round(r * 255), round(g * 255), round(b * 255))
 
 
-def render(spec: dict, style: Style) -> str:
+# A rendered map normally carries both palettes and lets the reader's own
+# setting choose — that is what an exported file wants, since it may land in a
+# light README or a dark slide. The designer needs to force one instead, so its
+# preview obeys the toggle in its toolbar rather than the operating system.
+THEMES = ("auto", "light", "dark")
+
+
+def render(spec: dict, style: Style, theme: str = "auto") -> str:
     m = Map(spec, style)
     s = style
     bounds: List[Tuple[float, float, float, float]] = []
@@ -985,6 +992,22 @@ def render(spec: dict, style: Style) -> str:
            for i, zn in enumerate(spec.get("zones", []) or [])]
     )
 
+    # "auto" ships both palettes behind a media query — the default, and what an
+    # exported file gets. A named theme bakes that one in and drops the query,
+    # so a forced choice is not undone by the reader's system setting.
+    if theme not in THEMES:
+        theme = "auto"
+    if theme == "dark":
+        ground = "--paper: #131b21; --ink: #e8eef3;"
+        theme_block = dark.replace("      .", "    .") + ("\n" if dark else "")
+    else:
+        ground = "--paper: #ffffff; --ink: #101820;"
+        theme_block = f"""    @media (prefers-color-scheme: dark) {{
+      svg {{ --paper: #131b21; --ink: #e8eef3; }}
+{dark}
+    }}
+""" if theme == "auto" else ""
+
     dead_group = f"""  <g id="dead-ends">
 {chr(10).join(dead_ends)}
   </g>
@@ -997,7 +1020,7 @@ def render(spec: dict, style: Style) -> str:
 
     return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="{x0:.0f} {y0:.0f} {x1 - x0:.0f} {y1 - y0:.0f}" width="{x1 - x0:.0f}" height="{y1 - y0:.0f}" role="img" data-cell="{s.cell:g}" data-x0="{x0:.0f}" data-y0="{y0:.0f}">
   <style>
-    svg {{ --paper: #ffffff; --ink: #101820; background: var(--paper); color: var(--ink); }}
+    svg {{ {ground} background: var(--paper); color: var(--ink); }}
     .route {{ fill: none; stroke-width: {s.stroke}; stroke-linecap: round; stroke-linejoin: round; }}
     .status-out {{ stroke-dasharray: {s.stroke * 1.8:.1f} {s.stroke * 1.2:.1f};
                   stroke-linecap: butt; opacity: {s.status_fade}; }}
@@ -1014,11 +1037,7 @@ def render(spec: dict, style: Style) -> str:
 {timeline_css}    .stop {{ fill: var(--paper); stroke-width: {s.stop_ring}; }}
     .interchange {{ fill: var(--paper); stroke: var(--ink); stroke-width: {s.stop_ring}; }}
     .label {{ font-family: {s.font}; font-size: {s.label_size}px; font-weight: 600; fill: var(--ink); }}
-{note_css}{legend_css}    @media (prefers-color-scheme: dark) {{
-      svg {{ --paper: #131b21; --ink: #e8eef3; }}
-{dark}
-    }}
-  </style>
+{note_css}{legend_css}{theme_block}  </style>
 {timeline_group}{zone_group}  <g id="routes">
 {chr(10).join(routes)}
   </g>

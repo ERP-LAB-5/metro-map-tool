@@ -240,8 +240,9 @@ def render_map():
         return jsonify(out)
 
     style = mm.style_from(data.get("style") or spec.get("style"))
+    # the designer previews in one theme; anything downloaded stays adaptive
     try:
-        svg = mm.render(spec, style)
+        svg = mm.render(spec, style, data.get("theme") or "auto")
     except (KeyError, ValueError, ZeroDivisionError) as exc:
         return jsonify({"errors": [f"render failed: {exc}"]}), 400
     out = {"svg": svg, "interchanges_changed": changed,
@@ -326,6 +327,7 @@ def defaults():
                               for k in mm.MODES],
                     "intervals": list(mm.INTERVALS),
                     "legend_positions": list(mm.LEGEND_AT),
+                    "themes": list(mm.THEMES),
                     "default_legend": mm.DEFAULT_LEGEND,
                     "folders": [{"value": k, "label": FOLDER_TITLES.get(k, k)}
                                 for k in FOLDERS],

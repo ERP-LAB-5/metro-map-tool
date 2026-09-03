@@ -65,6 +65,11 @@ meeting again at the saved file. After that it reopens whatever you had last.
   a station: everything past it shifts by the grid x and y you give, in one undo
   step. Negative values close a gap. A checkbox moves the anchor station too, for
   when you mean "insert a column *here*" rather than "make room after this".
+- **Theme** (top bar) switches the designer between *auto*, *light* and *dark*.
+  It themes the workspace and its live preview only, and is remembered per
+  browser — *auto*, the default, follows Windows or your desktop setting. An
+  **exported SVG is never themed by it**: it keeps both palettes and adapts to
+  whoever opens it, so the same file suits a light README and a dark slide.
 - **Style** (cell size, route width, corner radius, track spacing, label size,
   zone padding) is saved with the map.
 - Upgrading from before the folder split? Anything still in `maps/` is no longer
@@ -122,6 +127,10 @@ cat spec.json | python3 metro_map.py - > map.svg
 
 Flags override the `style` block saved in the spec. A spec that would not draw
 is reported line by line and exits 2, so it fails loudly in CI.
+
+Command-line renders always carry both palettes, so an SVG follows the reader's
+own light or dark setting. The designer's theme switch changes only what you
+see while drawing.
 
 `metro_map.py` is standard library only; only the web designer (`app.py`) needs
 Flask.

@@ -14,8 +14,11 @@
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+/* Three states, the usual shape: no data-theme follows the system, and an
+   explicit one wins in both directions. The dark tokens are written twice
+   rather than once, because a media query cannot be told to stand down. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --paper: #131b21;
     --ink: #e8eef3;
     --muted: #93a3af;
@@ -24,6 +27,16 @@
     --edge: #2c3a45;
     --accent: #4cc2ef;
   }
+}
+
+:root[data-theme="dark"] {
+  --paper: #131b21;
+  --ink: #e8eef3;
+  --muted: #93a3af;
+  --panel: #182129;
+  --panel-2: #202b34;
+  --edge: #2c3a45;
+  --accent: #4cc2ef;
 }
 
 * { box-sizing: border-box; }
