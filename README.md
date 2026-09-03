@@ -1,5 +1,7 @@
 # metro-map-tool
 
+**v2.5.0** · MIT · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
+
 Transit-map diagrams for landscapes, pipelines and migrations: a JSON spec of
 **stations** on a grid, **lines** routed through them and **zones** banding
 groups of them, rendered to a standalone, octilinear, light/dark-aware SVG.
@@ -22,6 +24,8 @@ git clone https://github.com/ERP-LAB-5/metro-map-tool.git && cd metro-map-tool
 run.cmd                  # Windows: same thing  (run.cmd -Stop to stop)
 .\run.ps1                # Windows, if PowerShell scripts are allowed
 ```
+
+No git? See [Installing without a clone](#installing-without-a-clone).
 
 `run.cmd` is a plain batch file for machines where PowerShell execution is
 blocked; `run.ps1` does the same job where it is allowed. All three replace an
@@ -65,6 +69,10 @@ meeting again at the saved file. After that it reopens whatever you had last.
   a station: everything past it shifts by the grid x and y you give, in one undo
   step. Negative values close a gap. A checkbox moves the anchor station too, for
   when you mean "insert a column *here*" rather than "make room after this".
+- **About** (top bar) shows the installed version, checks github.com for a newer
+  one, and links to the repository. The check is a single request for a text
+  file, sends nothing about you or your maps, is cached for six hours, and is
+  skipped silently when there is no network — `--no-update-check` turns it off.
 - **Theme** (top bar) switches the designer between *auto*, *light* and *dark*.
   It themes the workspace and its live preview only, and is remembered per
   browser — *auto*, the default, follows Windows or your desktop setting. An
@@ -75,7 +83,7 @@ meeting again at the saved file. After that it reopens whatever you had last.
 - Upgrading from before the folder split? Anything still in `maps/` is no longer
   read — the designer says so at startup. Move those files into `mymaps/`.
 - Maps live in two folders — `mymaps/` for your own work, which git ignores, and
-  `shared-maps/` for the maps that ship with the repo. Open groups them under
+  `metro_map_tool/shared-maps/` for the maps that ship with the tool. Open groups them under
   *My maps* and *Shared*; **Save** writes back to the folder a map came from, so
   editing a shared map updates it instead of quietly forking a copy, and *Save
   as* lets you pick. Open, Save, Save as and Export SVG are in the top bar;
@@ -83,6 +91,34 @@ meeting again at the saved file. After that it reopens whatever you had last.
 
 Any stop shared by two or more lines is drawn as a white interchange ring while
 the *interchanges* toggle is on.
+
+## Installing without a clone
+
+**A release tarball** — needs neither git nor pip. `curl` and `tar` both ship
+with Windows 10 and later, and with every Linux and macOS:
+
+```bash
+curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.5.0.tar.gz | tar xz
+cd metro-map-tool-2.5.0
+./run.sh                 # or run.cmd on Windows
+```
+
+**Or install it properly**, with no source tree to keep. This puts three
+commands on your PATH in their own virtual environment:
+
+```bash
+pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.5.0
+metro-map-designer                    # the browser designer
+metro-map spec.json -o map.svg        # the renderer
+metro-map-mcp                         # the MCP server, for agents
+```
+
+`pip install` works the same way if you would rather manage the environment
+yourself. Installed like this, **`mymaps/` follows your working directory**, so
+run `metro-map-designer` from wherever you keep your maps; the maps that ship
+with the tool travel inside the package and are always available.
+
+Upgrading is the same command with a later tag, or `pipx upgrade metro-map-tool`.
 
 ## Roadmap mode
 
@@ -110,7 +146,7 @@ thin out rather than overlap when a column is narrow. Everything else — lines,
 zones, service states, interchanges — works exactly as in metro mode, and the
 dates are kept if you switch back, so flipping modes costs nothing.
 
-`shared-maps/roadmap-example.json` is a worked example.
+`metro_map_tool/shared-maps/roadmap-example.json` is a worked example.
 
 ## The command line
 
@@ -118,11 +154,14 @@ The same specs render headlessly, so a map designed in the browser drops
 straight into a build or a docs pipeline:
 
 ```bash
-python3 metro_map.py shared-maps/how-this-tool-works.json -o guide.svg
-python3 metro_map.py shared-maps/roadmap-example.json -o roadmap.svg
-python3 metro_map.py shared-maps/how-this-tool-works.json --cell 140 -o big.svg
-python3 metro_map.py spec.json --legend hide -o plain.svg    # or top/left/right
-cat spec.json | python3 metro_map.py - > map.svg
+# installed (pipx / pip)
+metro-map spec.json -o map.svg
+metro-map spec.json --cell 140 -o big.svg
+metro-map spec.json --legend hide -o plain.svg      # or top/left/right
+cat spec.json | metro-map - > map.svg
+
+# from a checkout, without installing
+python3 -m metro_map_tool.metro_map spec.json -o map.svg
 ```
 
 Flags override the `style` block saved in the spec. A spec that would not draw
@@ -132,18 +171,19 @@ Command-line renders always carry both palettes, so an SVG follows the reader's
 own light or dark setting. The designer's theme switch changes only what you
 see while drawing.
 
-`metro_map.py` is standard library only; only the web designer (`app.py`) needs
-Flask.
+`metro_map_tool/metro_map.py` is standard library only; only the web designer
+(`app.py`) needs Flask, and only the MCP server needs `mcp`.
 
 ## For agents
 
-`mcp_server.py` exposes the designer over MCP (stdio), starting it on demand.
+`metro_map_tool/mcp_server.py` exposes the designer over MCP (stdio), starting
+it on demand.
 `.mcp.json` registers it for this repo; point another agent at it with:
 
 ```json
 {"mcpServers": {"metro-map": {
   "command": "/path/to/metro-map-tool/.venv/bin/python",
-  "args": ["/path/to/metro-map-tool/mcp_server.py"]}}}
+  "args": ["-m", "metro_map_tool.mcp_server"]}}}
 ```
 
 Tools: `list_maps`, `read_map`, `save_map`, `delete_map`, `render_map`,

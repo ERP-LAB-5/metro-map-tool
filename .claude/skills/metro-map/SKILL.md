@@ -6,7 +6,7 @@ description: Draw transit-map style diagrams — stations on a grid, coloured li
 # Metro map
 
 A diagram is one JSON spec: **stations** on a grid, **lines** routed through
-them, **zones** banding groups of them. `metro_map.py` renders it to a
+them, **zones** banding groups of them. `metro_map_tool/metro_map.py` renders it to a
 standalone SVG — octilinear (0° / 45° / 90°) segments, parallel tracks where
 lines share a corridor, automatic label placement, light and dark grounds.
 
@@ -18,7 +18,7 @@ Two modes. **metro** (the default) is an abstract grid where gx only means
 "further right". **roadmap** gives gx a calendar and draws a Gantt-style ruler
 over the diagram. Everything else is identical between them.
 
-Two front ends over the same files: a browser designer (`app.py`, drag stations
+Two front ends over the same files: a browser designer (drag stations
 on a live canvas) and the `metro-map` MCP tools. Both go through one server, so
 a person and an agent can work on the same diagram — a `save_map` reaches their
 canvas within a couple of seconds.
@@ -163,11 +163,18 @@ cd metro-map-tool          # or wherever you cloned it
 run.cmd                     # Windows;  run.cmd -Stop   (no PowerShell needed)
 .\run.ps1                   # Windows, where PowerShell scripts are allowed
 
-python3 metro_map.py shared-maps/how-this-tool-works.json -o guide.svg
-python3 metro_map.py shared-maps/roadmap-example.json -o roadmap.svg
-python3 metro_map.py spec.json --cell 140 -o big.svg     # flags beat spec.style
-python3 metro_map.py spec.json --legend hide -o plain.svg
+# the renderer: installed as `metro-map`, or from a checkout as a module
+metro-map spec.json -o map.svg
+metro-map spec.json --cell 140 -o big.svg        # flags beat spec.style
+metro-map spec.json --legend hide -o plain.svg
+python3 -m metro_map_tool.metro_map spec.json -o map.svg
 ```
+
+Installed without a clone with
+`pipx install git+https://github.com/ERP-LAB-5/metro-map-tool`, the same three
+commands exist as `metro-map`, `metro-map-designer` and `metro-map-mcp`. The
+shipped maps live inside the package; `mymaps/` follows the working directory
+the designer was started from.
 
 A spec that will not draw is reported line by line and exits 2.
 

@@ -1342,6 +1342,55 @@ function saveAsDialog() {
   });
 }
 
+/** Version, licence and where this came from. */
+async function aboutDialog() {
+  const repo = "https://github.com/ERP-LAB-5/metro-map-tool";
+  dialog("About metro map", `
+    <div class="about">
+      <p class="about-lead">A transit-map drawing tool: stations on a grid, lines
+        routed through them, zones banding groups of them.</p>
+      <dl class="about-grid">
+        <dt>Installed</dt><dd id="a-installed">…</dd>
+        <dt>Latest</dt><dd id="a-latest">checking…</dd>
+        <dt>Repository</dt>
+        <dd><a href="${repo}" target="_blank" rel="noopener noreferrer">${repo.replace("https://", "")}</a></dd>
+        <dt>Licence</dt><dd>MIT</dd>
+      </dl>
+      <p class="note" id="a-note"></p>
+    </div>
+    <div class="actions"><button value="cancel" class="primary">Close</button></div>`);
+
+  let info;
+  try { info = await api("GET", "/api/version"); }
+  catch (_) { info = null; }
+  const installed = $("#a-installed");
+  const latest = $("#a-latest");
+  const note = $("#a-note");
+  if (!installed) return;                       // dialog closed while we asked
+
+  if (!info) {
+    installed.textContent = "unknown";
+    latest.textContent = "—";
+    note.textContent = "The designer did not answer.";
+    return;
+  }
+  installed.textContent = info.installed;
+  if (info.disabled) {
+    latest.textContent = "not checked";
+    note.textContent = "The update check is off (--no-update-check).";
+  } else if (info.offline || !info.latest) {
+    latest.textContent = "unknown";
+    note.textContent = "Could not reach github.com — offline, or behind a proxy.";
+  } else if (info.update_available) {
+    latest.innerHTML = `<strong>${esc(info.latest)}</strong> — `
+      + `<a href="${esc(info.releases)}" target="_blank" rel="noopener noreferrer">update available</a>`;
+    note.textContent = `You are on ${info.installed}.`;
+  } else {
+    latest.textContent = info.latest;
+    note.textContent = "Up to date.";
+  }
+}
+
 /** Start over: an empty grid, unnamed until it is saved. */
 function newMap() {
   if (!confirmDiscard()) return;
@@ -1688,6 +1737,7 @@ async function boot() {
   $("#btn-saveas").addEventListener("click", saveAsDialog);
   $("#btn-export").addEventListener("click", exportSVG);
   $("#btn-stop").addEventListener("click", stopServer);
+  $("#btn-about").addEventListener("click", aboutDialog);
   $("#btn-undo").addEventListener("click", undo);
   $("#btn-redo").addEventListener("click", redo);
   $("#btn-style-reset").addEventListener("click", () => {

@@ -7,16 +7,17 @@ read, write, validate and render maps while a human has the same maps open in
 the browser. Both sides talk to one Flask server and one maps directory, so a
 save from either shows up in the other on the next read.
 
-    python3 mcp_server.py                       # talks to 127.0.0.1:8765
-    python3 mcp_server.py --port 9000
-    python3 mcp_server.py --no-autostart        # fail instead of starting one
+    metro-map-mcp                               # talks to 127.0.0.1:8765
+    metro-map-mcp --port 9000
+    metro-map-mcp --no-autostart                # fail instead of starting one
+    python3 -m metro_map_tool.mcp_server        # the same, from a checkout
 
 The designer is started automatically if it is not already answering. Register
 it with an agent as a stdio server, for example in .mcp.json:
 
     {"mcpServers": {"metro-map": {
         "command": "/path/to/metro-map-tool/.venv/bin/python",
-        "args": ["/path/to/metro-map-tool/mcp_server.py"]}}}
+        "args": ["-m", "metro_map_tool.mcp_server"]}}}
 
 Nothing may be written to stdout: that is the MCP transport. Log to stderr.
 """
@@ -101,8 +102,8 @@ def ensure_designer() -> None:
     port = urllib.parse.urlparse(BASE).port or 8765
     log(f"no designer on {BASE} — starting one")
     subprocess.Popen(
-        [sys.executable, str(HERE / "app.py"), "--port", str(port)],
-        cwd=HERE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        [sys.executable, "-m", "metro_map_tool.app", "--port", str(port)],
+        cwd=HERE.parent, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
     for _ in range(40):

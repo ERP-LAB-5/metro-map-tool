@@ -348,3 +348,16 @@ button.stop:hover { filter: brightness(1.1); border-color: var(--danger); }
 
 .hops { display: flex; flex-direction: column; gap: 6px; }
 .hops .hop span { color: var(--muted); font-size: 11px; }
+
+/* --------------------------------------------------------------- about -- */
+
+.about-lead { margin: 0 0 12px; color: var(--muted); }
+.about-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 14px;
+  margin: 0 0 10px;
+}
+.about-grid dt { color: var(--muted); font-size: 12px; }
+.about-grid dd { margin: 0; font-family: var(--mono); font-size: 12px; }
+.about-grid a { color: var(--accent); }

@@ -73,7 +73,7 @@ if errorlevel 1 exit /b 1
 echo   starting designer on http://%BIND%:%PORT%
 :: its own minimised window, so the server outlives this script when run.cmd
 :: was double-clicked and its console closes
-start "metro-map designer" /min "%PY_VENV%" "%SCRIPT_DIR%app.py" --host %BIND% --port %PORT%
+start "metro-map designer" /min "%PY_VENV%" -m metro_map_tool.app --host %BIND% --port %PORT%
 
 :: Wait loop - one second a turn, so give up after fifteen rather than forty
 set "READY=0"

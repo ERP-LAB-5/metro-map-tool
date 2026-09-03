@@ -13,8 +13,9 @@ name plus folder; an unqualified read looks in mymaps first, so a personal copy
 shadows a shared one of the same name, and a save goes back to the folder the
 map came from.
 
-    python3 app.py                       # http://127.0.0.1:8765
-    python3 app.py --port 9000 --maps-dir ~/maps --shared-maps-dir ./shared-maps
+    metro-map-designer                   # http://127.0.0.1:8765
+    metro-map-designer --port 9000 --maps-dir ~/maps
+    python3 -m metro_map_tool.app        # the same, from a checkout
 
 The rendering, geometry and validation all live in metro_map; this module only
 moves specs between the browser and disk.
@@ -30,13 +31,14 @@ import os
 import re
 import tempfile
 import threading
+import time
 from datetime import timedelta
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 from flask import Flask, Response, abort, jsonify, render_template, request
 
-import metro_map as mm
+from . import metro_map as mm
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024      # a spec is a few KB
@@ -44,8 +46,12 @@ app.config["JSON_SORT_KEYS"] = False
 
 # Two folders, one namespace. mymaps is yours and git-ignored; shared is what
 # the repo ships. Search order matters: an unqualified name finds mymaps first.
+# mymaps follows the working directory, because it is the user's own work and
+# they may keep several sets. shared-maps travels with the code, so a pip
+# install still opens on the map that explains the tool.
+HERE = Path(__file__).resolve().parent
 FOLDERS: Dict[str, Path] = {"mymaps": Path("mymaps").resolve(),
-                            "shared": Path("shared-maps").resolve()}
+                            "shared": (HERE / "shared-maps").resolve()}
 DEFAULT_FOLDER = "mymaps"
 NAME_RE = re.compile(r"[A-Za-z0-9 _-]{1,64}$")
 
@@ -124,6 +130,80 @@ def body() -> dict:
     if not isinstance(data, dict):
         abort(400, "expected a JSON object body")
     return data
+
+
+# ---------------------------------------------------------------- version ----
+#
+# The About box wants to say what is installed and what is current. "Current"
+# is the VERSION file on main, fetched raw rather than through the GitHub API:
+# the API allows 60 unauthenticated calls an hour per address, which a few
+# designer restarts could plausibly spend, and raw.githubusercontent has no
+# such budget. Nothing about the map, the machine or the user is sent.
+
+LATEST_URL = ("https://raw.githubusercontent.com/"
+              "ERP-LAB-5/metro-map-tool/main/VERSION")
+UPDATE_CHECK = True                 # --no-update-check turns it off
+CHECK_EVERY = 6 * 60 * 60           # seconds; the answer changes rarely
+_latest: Dict[str, object] = {"version": None, "at": 0.0, "error": None}
+
+
+def version_tuple(text: str) -> Tuple[int, ...]:
+    """A comparable version, tolerant of a leading v and of junk after it."""
+    parts = re.findall(r"\d+", (text or "").strip().lstrip("vV"))[:4]
+    return tuple(int(p) for p in parts) or (0,)
+
+
+def fetch_latest() -> Optional[str]:
+    """The published version, or None when we could not reach it.
+
+    Any failure is a None: no network, DNS down, a proxy in the way, GitHub
+    having a bad day. None of those are worth an error in the user's face.
+    """
+    import urllib.request           # local: the CLI path never needs it
+    try:
+        req = urllib.request.Request(
+            LATEST_URL, headers={"User-Agent": f"metro-map-tool/{mm.__version__}"})
+        with urllib.request.urlopen(req, timeout=4) as res:
+            text = res.read(64).decode("utf-8", "replace").strip()
+        return text if re.match(r"v?\d+(\.\d+)*$", text) else None
+    except Exception:               # noqa: BLE001 - offline is not an error here
+        return None
+
+
+def latest_version(force: bool = False) -> Dict[str, object]:
+    """Cached view of what is published, refreshed at most every CHECK_EVERY."""
+    now = time.time()
+    if not UPDATE_CHECK:
+        return {"version": None, "checked": False, "disabled": True}
+    if force or (now - float(_latest["at"] or 0)) > CHECK_EVERY:
+        found = fetch_latest()
+        # keep the last good answer if this attempt failed, rather than
+        # flapping between "2.6.0 available" and "offline" on a flaky link
+        if found or not _latest["version"]:
+            _latest["version"] = found
+        _latest["at"] = now
+        _latest["error"] = None if found else "could not reach github.com"
+    return {"version": _latest["version"], "checked": True,
+            "error": _latest["error"], "disabled": False}
+
+
+@app.get("/api/version")
+def version_info():
+    """Installed vs published, for the About box. Never fails."""
+    installed = mm.__version__
+    found = latest_version(force=request.args.get("force") == "1")
+    latest = found.get("version")
+    behind = bool(latest and version_tuple(latest) > version_tuple(installed))
+    return jsonify({
+        "installed": installed,
+        "latest": latest,
+        "update_available": behind,
+        "checked": found.get("checked"),
+        "disabled": found.get("disabled", False),
+        "offline": bool(found.get("error")),
+        "repo": mm.REPO_URL,
+        "releases": f"{mm.REPO_URL}/releases",
+    })
 
 
 # ------------------------------------------------------------------ page ----
@@ -387,10 +467,17 @@ def main() -> int:
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--maps-dir", default="mymaps",
                     help="your own maps (default: mymaps)")
-    ap.add_argument("--shared-maps-dir", default="shared-maps",
-                    help="maps that ship with the tool (default: shared-maps)")
+    ap.add_argument("--shared-maps-dir", default=str(HERE / "shared-maps"),
+                    help="maps that ship with the tool (default: the installed set)")
     ap.add_argument("--debug", action="store_true")
+    ap.add_argument("--no-update-check", action="store_true",
+                    help="never contact github.com to compare versions")
+    ap.add_argument("--version", action="version",
+                    version=f"metro-map-tool {mm.__version__}")
     args = ap.parse_args()
+
+    global UPDATE_CHECK
+    UPDATE_CHECK = not args.no_update_check
 
     FOLDERS["mymaps"] = Path(args.maps_dir).expanduser().resolve()
     FOLDERS["shared"] = Path(args.shared_maps_dir).expanduser().resolve()
@@ -398,6 +485,8 @@ def main() -> int:
         base.mkdir(parents=True, exist_ok=True)
         print(f"  {folder:<7} maps: {base}")
     warn_legacy_maps()
+    print(f"  version:        {mm.__version__}"
+          + ("" if UPDATE_CHECK else "  (update check off)"))
     print(f"  designer:       http://{args.host}:{args.port}")
     app.run(host=args.host, port=args.port, debug=args.debug)
     return 0

@@ -69,9 +69,10 @@ beside them; the web designer writes it, and command-line flags override it.
 
 Usage
 -----
-    python3 app.py                             # browser designer on :8765
-    python3 metro_map.py spec.json -o map.svg
-    python3 metro_map.py spec.json --cell 140 --bundle-gap 14 -o map.svg
+    metro-map-designer                         # browser designer on :8765
+    metro-map spec.json -o map.svg
+    metro-map spec.json --cell 140 --bundle-gap 14 -o map.svg
+    python3 -m metro_map_tool.metro_map spec.json -o map.svg
 
 Any stop used by two or more lines can be flagged as an interchange automatically
 (--auto-interchange, and the toggle in the designer's toolbar).
@@ -93,6 +94,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 Point = Tuple[float, float]
 EPS = 1e-9
+
+from . import REPO_URL, __version__          # noqa: F401  (re-exported)
 
 
 # ---------------------------------------------------------------- style ----
@@ -1294,7 +1297,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     ap = argparse.ArgumentParser(
         description="Render a transit-map spec to SVG. "
-                    "Design one in the browser with: python3 app.py")
+                    "Design one in the browser with: metro-map-designer")
     ap.add_argument("spec", nargs="?", help="JSON spec file, or - for stdin")
     ap.add_argument("-o", "--out", default="-", help="output SVG file (default: stdout)")
     ap.add_argument("--cell", type=float, help="pixels per grid cell")
@@ -1304,13 +1307,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--label-size", type=float)
     ap.add_argument("--legend", choices=LEGEND_AT,
                     help="where the line-name legend goes (default: %s)" % DEFAULT_LEGEND)
+    ap.add_argument("--version", action="version",
+                    version=f"metro-map-tool {__version__}")
     ap.add_argument("--auto-interchange", action="store_true",
                     help="flag every stop shared by two or more lines as an interchange")
     args = ap.parse_args(argv)
 
     if not args.spec:
         ap.print_help()
-        print("\n  no spec given — start the web designer with:  python3 app.py",
+        print("\n  no spec given — start the web designer with:  metro-map-designer",
               file=sys.stderr)
         return 2
 

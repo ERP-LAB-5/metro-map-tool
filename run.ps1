@@ -33,11 +33,10 @@ function Get-DesignerPids {
                    ForEach-Object { ($_ -split '\s+')[-1] })
     }
     # match our own app.py only — never someone else's project on this machine
-    $mine = [regex]::Escape((Join-Path $PSScriptRoot "app.py"))
+    $mine = "metro_map_tool.app"
     $found += Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" |
-              Where-Object { $_.CommandLine -match $mine -or
-                             ($_.CommandLine -match 'app\.py' -and
-                              $_.CommandLine -match [regex]::Escape($PSScriptRoot)) } |
+              Where-Object { $_.CommandLine -match $mine -and
+                             $_.CommandLine -match [regex]::Escape($PSScriptRoot) } |
               ForEach-Object { $_.ProcessId }
     $found | Where-Object { $_ } | Sort-Object -Unique
 }
@@ -83,7 +82,7 @@ if (-not (Test-Path $py)) {
 Stop-Designer
 Write-Host "  starting designer on http://${Bind}:$Port"
 $proc = Start-Process -FilePath $py `
-    -ArgumentList @((Join-Path $PSScriptRoot "app.py"), "--host", $Bind, "--port", $Port) `
+    -ArgumentList @("-m", "metro_map_tool.app", "--host", $Bind, "--port", $Port) `
     -WorkingDirectory $PSScriptRoot -PassThru
 
 # wait for it to answer before opening a tab at a dead port

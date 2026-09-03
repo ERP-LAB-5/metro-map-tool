@@ -60,4 +60,4 @@ fi
 
 stop_designer
 echo "  starting designer on http://$BIND:$PORT"
-exec .venv/bin/python app.py --host "$BIND" --port "$PORT"
+exec .venv/bin/python -m metro_map_tool.app --host "$BIND" --port "$PORT"
