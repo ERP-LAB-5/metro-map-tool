@@ -330,3 +330,8 @@ button.stop:hover { filter: brightness(1.1); border-color: var(--danger); }
 
 .row-btns { display: flex; gap: 8px; }
 .row-btns button { flex: 1; }
+
+/* ------------------------------------------------------- segment notes -- */
+
+.hops { display: flex; flex-direction: column; gap: 6px; }
+.hops .hop span { color: var(--muted); font-size: 11px; }

@@ -12,6 +12,16 @@
         "blueprint",
         "build",
         "golive"
+      ],
+      "notes": [
+        {
+          "at": 0,
+          "text": "6 weeks"
+        },
+        {
+          "at": 2,
+          "text": "2 quarters"
+        }
       ]
     },
     {
@@ -33,6 +43,12 @@
         "migrate",
         "cutover",
         "golive"
+      ],
+      "notes": [
+        {
+          "at": 1,
+          "text": "dry run"
+        }
       ]
     },
     {
@@ -42,7 +58,13 @@
         "cutover",
         "decom"
       ],
-      "status": "under-construction"
+      "status": "under-construction",
+      "notes": [
+        {
+          "at": 0,
+          "text": "after sign-off"
+        }
+      ]
     }
   ],
   "mode": "roadmap",

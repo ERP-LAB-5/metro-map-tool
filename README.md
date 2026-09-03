@@ -10,7 +10,8 @@ at the saved file](docs/how-this-tool-works.png)
 
 That is the map the designer opens with, drawn by the tool itself. The retired
 red stub is the terminal menu the browser UI replaced — dashed, faded, and
-capped with a dead-end bar.
+capped with a dead-end bar. The strip under the map is the **legend**, and the
+small labels riding the tracks are **segment notes**.
 
 ## The web designer
 
@@ -53,12 +54,21 @@ meeting again at the saved file. After that it reopens whatever you had last.
 - **Labels** place themselves on the first free side of a station; override the
   side per station, and tilt the text 0°, 45° or 90° when a column is tight —
   a tilted label reads outward from its stop.
+- **Legend** (Style tab) names every line on the drawing beside a swatch in its
+  own colour and dash pattern, so a retired line reads as retired there too.
+  Put it at the top, left, bottom or right, or `hide` it. It defaults to
+  **bottom**, so a map drawn before v3 gains one the first time you render it.
+- **Notes between stops** (Lines tab, *Between stops*) put a short label on the
+  track between two stations — "6 weeks", "nightly batch". They rotate to follow
+  the track, never read upside down, and a vertical one reads top-to-bottom.
 - **Insert space** (in the station editor) opens or closes a column and a row at
   a station: everything past it shifts by the grid x and y you give, in one undo
   step. Negative values close a gap. A checkbox moves the anchor station too, for
   when you mean "insert a column *here*" rather than "make room after this".
 - **Style** (cell size, route width, corner radius, track spacing, label size,
   zone padding) is saved with the map.
+- Upgrading from before the folder split? Anything still in `maps/` is no longer
+  read — the designer says so at startup. Move those files into `mymaps/`.
 - Maps live in two folders — `mymaps/` for your own work, which git ignores, and
   `shared-maps/` for the maps that ship with the repo. Open groups them under
   *My maps* and *Shared*; **Save** writes back to the folder a map came from, so
@@ -106,6 +116,7 @@ straight into a build or a docs pipeline:
 python3 metro_map.py shared-maps/how-this-tool-works.json -o guide.svg
 python3 metro_map.py shared-maps/roadmap-example.json -o roadmap.svg
 python3 metro_map.py shared-maps/how-this-tool-works.json --cell 140 -o big.svg
+python3 metro_map.py spec.json --legend hide -o plain.svg    # or top/left/right
 cat spec.json | python3 metro_map.py - > map.svg
 ```
 
@@ -159,10 +170,12 @@ ln -s "$PWD/.claude/skills/metro-map" ~/.claude/skills/metro-map
   },
   "lines": [
     {"name": "Option A · Azure", "color": "#0098d4",
-     "stations": ["ecc", "conv", "sit", "azure", "s4"]},
+     "stations": ["ecc", "conv", "sit", "azure", "s4"],
+     "notes": [{"at": 0, "text": "6 weeks"}]},
     {"name": "Archive", "color": "#e1251b", "status": "out-of-service",
      "stations": ["ecc", "sara", "jivs"]}
   ],
+  "legend": "bottom",
   "zones": [
     {"name": "Preferred", "color": "#00a4a7", "stations": ["azure", "s4"]}
   ],
@@ -172,6 +185,9 @@ ln -s "$PWD/.claude/skills/metro-map" ~/.claude/skills/metro-map
 
 `mode` is `metro` (the default, and left out) or `roadmap`; a roadmap adds a
 `timeline` of `{start, end, interval}` and its grid x becomes a calendar.
+`legend` is `bottom` (the default), `top`, `left`, `right` or `hide`. A line's
+`notes` are `{"at": <hop index>, "text": str}` — hop `0` is the gap between the
+first two stops, so the last legal `at` is two less than the number of stops.
 `gx`/`gy` are grid cells, not pixels, and need not be whole numbers — `9.5`
 sits half a cell along.
 `status` is one of `live` (the default, and left out), `out-of-service`,

@@ -1,6 +1,6 @@
 ---
 name: metro-map
-description: Draw transit-map style diagrams — stations on a grid, coloured lines routed through them, zones banding groups of stations — and render them to a standalone light/dark SVG. Two modes: a metro map on an abstract grid, or a roadmap whose x axis is a dated Gantt-style calendar. Use for landscape, migration, architecture, pipeline, phase-plan or roadmap diagrams whenever the shape is "things connected by named paths": SAP landscapes (ECC → RISE → BTP), data flows, deployment topologies, delivery timelines. Covers the JSON spec, the design order (stations, then lines, then zones), roadmap timelines, line service states (out of service with dead ends, under construction, planned), label placement and rotation, the metro-map MCP tools, and the browser designer that ships with it. Triggers on "metro map", "transit map", "roadmap", "landscape diagram", "draw the landscape", "diagram the migration", "timeline diagram", "tube map", or an ask to edit an existing mymaps/*.json or shared-maps/*.json.
+description: Draw transit-map style diagrams — stations on a grid, coloured lines routed through them, zones banding groups of stations, a legend naming the lines and short notes riding the track between two stops — and render them to a standalone light/dark SVG. Two modes: a metro map on an abstract grid, or a roadmap whose x axis is a dated Gantt-style calendar. Use for landscape, migration, architecture, pipeline, phase-plan or roadmap diagrams whenever the shape is "things connected by named paths": SAP landscapes (ECC → RISE → BTP), data flows, deployment topologies, delivery timelines. Covers the JSON spec, the design order (stations, then lines, then zones), roadmap timelines, line service states (out of service with dead ends, under construction, planned), label placement and rotation, the metro-map MCP tools, and the browser designer that ships with it. Triggers on "metro map", "transit map", "roadmap", "landscape diagram", "draw the landscape", "diagram the migration", "timeline diagram", "tube map", or an ask to edit an existing mymaps/*.json or shared-maps/*.json.
 ---
 
 # Metro map
@@ -34,6 +34,7 @@ canvas within a couple of seconds.
 {
   "mode": "roadmap",
   "timeline": {"start": "2026-01-01", "end": "2027-07-01", "interval": "quarter"},
+  "legend": "bottom",
   "stations": {
     "s4": {"label": "S/4HANA Private", "gx": 8, "gy": 3,
            "interchange": true,
@@ -41,7 +42,8 @@ canvas within a couple of seconds.
   },
   "lines": [
     {"name": "Option A · Azure", "color": "#0098d4",
-     "stations": ["ecc", "conv", "sit", "s4"]},
+     "stations": ["ecc", "conv", "sit", "s4"],
+     "notes": [{"at": 0, "text": "6 weeks"}]},
     {"name": "Archive", "color": "#e1251b", "status": "out-of-service",
      "stations": ["ecc", "sara", "jivs"]}
   ],
@@ -57,6 +59,8 @@ canvas within a couple of seconds.
 | Field | Notes |
 |---|---|
 | `mode` | `metro` (default, leave it out) or `roadmap`. |
+| `legend` | `bottom` (the default), `top`, `left`, `right` or `hide`. Names every line beside a swatch in its own colour and dash pattern. Leave it out unless the map wants it elsewhere or off. |
+| `notes` | On a **line**, not a station: `[{"at": <hop>, "text": str, "flip": bool?}]`. `at` is the hop index — `0` is the gap between `stations[0]` and `stations[1]`, so the last legal value is `len(stations) - 2`. |
 | `timeline` | Roadmap only: `{start, end, interval}` with ISO dates and an interval of `day`, `week`, `month`, `quarter` or `year`. |
 | `gx` / `gy` | Grid cells, **not pixels**, and may be fractional — `0.5` steps put two stations half a cell apart. Keep whole numbers unless the layout needs the room. |
 | `interchange` | White ring instead of a coloured tick. Leave it out and let `auto_interchange` (on by default) set it. |
@@ -77,6 +81,23 @@ drawn. Zones may overlap; they are painted in list order, behind everything.
 
 **Line order matters.** Lines sharing a corridor are spread into parallel
 tracks in list order, so the first line sits innermost.
+
+## Notes between stops
+
+A note is a short label riding the track of one hop — "6 weeks", "nightly
+batch", "after sign-off". It rotates to follow the track, is kept out of
+upside-down territory automatically, and gets a paper halo so it stays readable
+where it crosses something.
+
+- **Address it by hop index, not by station id.** A route may visit the same
+  station twice; an id would be ambiguous. `at: 0` is the first gap.
+- **Editing a route strands notes.** Removing or reordering stops changes what
+  each index means. The designer prunes them for you; when you edit a spec
+  through MCP, re-check every `at` after you touch `stations`, or `save_map`
+  refuses the spec.
+- **Keep them to two or three words.** A note is a caption on a line, not a
+  paragraph; long ones overrun the hop and collide with the stations at each end.
+- `flip: true` moves a note to the other side of its track.
 
 ## Roadmap mode
 
@@ -111,7 +132,7 @@ The `metro-map` server (`.mcp.json` in the repo) starts the designer on demand.
 | `validate_map(spec)` | check before saving; returns `errors` (fatal) and `warnings` (a line with one stop, an empty zone, a station on no line) |
 | `render_map(name, out_path=…)` | write the SVG to a file; pass `out_path` rather than pulling markup through the transcript |
 | `resolve_timeline(timeline)` | a roadmap's columns: snapped start, count, and the gx, date and name of each — use it to place milestones on dates |
-| `spec_reference` | palette, label sides and angles, line states, modes, intervals, style defaults |
+| `spec_reference` | palette, label sides and angles, line states, modes, intervals, legend positions, style defaults |
 | `designer_url` | hand the human a link to take over in the browser |
 | `stop_designer` | shut the local server down |
 
@@ -141,6 +162,7 @@ run.cmd                     # Windows;  run.cmd -Stop   (no PowerShell needed)
 python3 metro_map.py shared-maps/how-this-tool-works.json -o guide.svg
 python3 metro_map.py shared-maps/roadmap-example.json -o roadmap.svg
 python3 metro_map.py spec.json --cell 140 -o big.svg     # flags beat spec.style
+python3 metro_map.py spec.json --legend hide -o plain.svg
 ```
 
 A spec that will not draw is reported line by line and exits 2.
@@ -156,7 +178,10 @@ A spec that will not draw is reported line by line and exits 2.
   one — that is what makes the dead-end bar land in the right place.
 - **Making room is arithmetic, not a redraw.** To open a column, add the shift
   to the gx of every station past that point (and gy for a row) — do not move
-  stations one at a time. The designer has an *Insert space* button that does
-  exactly this in one undo step.
+  stations one at a time, and add the raw offset rather than re-snapping, or a
+  station deliberately placed on a half cell jumps to the next whole one. The
+  designer has an *Insert space* button that does exactly this in one undo step.
+- **Name the lines well — they are now on the drawing.** The legend prints
+  `name` verbatim, so "Option A · Azure" reads better there than "Line 1".
 - **Check the render, do not assume it.** Reading gx/gy back catches a wrong
   grid position; for anything subtler, render to a file and look at it.

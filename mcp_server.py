@@ -51,7 +51,9 @@ server = MCPServer(
         "validate_map before saving anything you assembled by hand. "
         "Maps live in two folders: 'mymaps' (the user's own, where saves go by "
         "default) and 'shared' (what the repo ships). Set mode to 'roadmap' "
-        "with a timeline block to turn the x axis into a calendar."
+        "with a timeline block to turn the x axis into a calendar; 'legend' "
+        "names the lines on the drawing, and a line's 'notes' label the track "
+        "between two of its stops."
     ),
 )
 
@@ -219,6 +221,7 @@ def spec_reference() -> dict:
             "modes": defaults["modes"],
             "intervals": defaults["intervals"],
             "folders": defaults["folders"],
+            "legend_positions": defaults["legend_positions"],
             "palette": call("GET", "/api/palette"),
             "style_defaults": defaults["style"],
             "grid": "gx/gy are grid cells and may be fractional (0.5 puts two "
@@ -226,7 +229,15 @@ def spec_reference() -> dict:
             "roadmap": 'set "mode": "roadmap" and a "timeline" of '
                        '{start, end, interval} to make gx a calendar: column k '
                        "covers gx in [k, k+1), so a whole gx is a period "
-                       "boundary. resolve_timeline turns dates into gx"}
+                       "boundary. resolve_timeline turns dates into gx",
+            "legend": '"legend" names the lines on the drawing: hide, top, '
+                      "left, bottom or right. It defaults to bottom, so leave "
+                      'it out unless the map wants it elsewhere or off',
+            "notes": 'a line may carry "notes": [{"at": <hop>, "text": str, '
+                     '"flip": bool?}] — a short label riding the track between '
+                     "two stops. 'at' is the hop index, so 0 is the gap "
+                     "between stations[0] and stations[1], and the last legal "
+                     "value is len(stations) - 2"}
 
 
 @server.tool()

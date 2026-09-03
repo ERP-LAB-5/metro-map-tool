@@ -226,8 +226,19 @@ def render_map():
     if errors:
         return jsonify({"errors": errors}), 400
     changed = mm.auto_interchanges(spec) if data.get("auto_interchange", True) else 0
+    # the resolved ruler, so the browser can name dates without redoing the
+    # maths. It rides on the empty answer too: a roadmap with no stations yet
+    # still has real dates, and the Timeline panel should say so rather than
+    # claim they are broken.
+    tl = mm.spec_timeline(spec)
+    timeline = timeline_payload(tl) if tl else None
+
     if not spec["stations"]:
-        return jsonify({"svg": "", "empty": True, "interchanges_changed": 0})
+        out = {"svg": "", "empty": True, "interchanges_changed": 0}
+        if timeline:
+            out["timeline"] = timeline
+        return jsonify(out)
+
     style = mm.style_from(data.get("style") or spec.get("style"))
     try:
         svg = mm.render(spec, style)
@@ -235,10 +246,8 @@ def render_map():
         return jsonify({"errors": [f"render failed: {exc}"]}), 400
     out = {"svg": svg, "interchanges_changed": changed,
            "warnings": mm.spec_warnings(spec), "stations": spec["stations"]}
-    # the resolved ruler, so the browser can name dates without redoing the maths
-    tl = mm.spec_timeline(spec)
-    if tl:
-        out["timeline"] = timeline_payload(tl)
+    if timeline:
+        out["timeline"] = timeline
     return jsonify(out)
 
 
@@ -316,6 +325,8 @@ def defaults():
                     "modes": [{"value": k, "label": MODE_TITLES.get(k, k)}
                               for k in mm.MODES],
                     "intervals": list(mm.INTERVALS),
+                    "legend_positions": list(mm.LEGEND_AT),
+                    "default_legend": mm.DEFAULT_LEGEND,
                     "folders": [{"value": k, "label": FOLDER_TITLES.get(k, k)}
                                 for k in FOLDERS],
                     "default_folder": DEFAULT_FOLDER})
@@ -349,6 +360,25 @@ def as_json(exc):
 
 # ------------------------------------------------------------------ main ----
 
+def warn_legacy_maps() -> None:
+    """Say something if maps/ still holds specs from before the folder split.
+
+    Before v2 every map lived in ./maps, tracked by git. Nothing reads that
+    directory any more, so a personal spec left there simply stops appearing —
+    and a silent auto-move is worse, because it is the user's data and mymaps
+    may already hold the same name.
+    """
+    legacy = sorted(Path("maps").glob("*.json"))
+    if not legacy:
+        return
+    names = ", ".join(p.stem for p in legacy[:4])
+    if len(legacy) > 4:
+        names += f", and {len(legacy) - 4} more"
+    print(f"  ! maps/ still holds {len(legacy)} map(s) — {names}")
+    print(f"  ! nothing reads that folder now; move them into "
+          f"{FOLDERS[DEFAULT_FOLDER]} to see them again")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("--host", default="127.0.0.1")
@@ -365,6 +395,7 @@ def main() -> int:
     for folder, base in FOLDERS.items():
         base.mkdir(parents=True, exist_ok=True)
         print(f"  {folder:<7} maps: {base}")
+    warn_legacy_maps()
     print(f"  designer:       http://{args.host}:{args.port}")
     app.run(host=args.host, port=args.port, debug=args.debug)
     return 0

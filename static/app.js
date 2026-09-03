@@ -62,6 +62,8 @@ let MODES = [{ value: "metro", label: "Metro map" }, { value: "roadmap", label: 
 let INTERVALS = ["day", "week", "month", "quarter", "year"];
 let FOLDERS = [{ value: "mymaps", label: "My maps" }, { value: "shared", label: "Shared" }];
 let DEFAULT_FOLDER = "mymaps";
+let LEGEND_POSITIONS = ["hide", "top", "left", "bottom", "right"];
+let DEFAULT_LEGEND = "bottom";
 let lastSVG = "";
 let TIMELINE = null;                         // ruler the server resolved, or null
 
@@ -88,6 +90,7 @@ function rememberedMap() {
 /* ------------------------------------------------------------ roadmap -- */
 
 function specMode() { return S.spec.mode || "metro"; }
+function legendAt() { return S.spec.legend || DEFAULT_LEGEND; }
 function isRoadmap() { return specMode() === "roadmap"; }
 
 /** A sensible first timeline: this year and the next, by quarter. */
@@ -143,6 +146,10 @@ function normalise(spec) {
   spec.stations = spec.stations || {};
   spec.lines = spec.lines || [];
   spec.zones = spec.zones || [];
+  // a hand-written or agent-written roadmap may arrive with no dates at all —
+  // a GET does not validate, only a PUT does. Repair it on the way in, where
+  // the map is being replaced wholesale anyway, not mid-render.
+  if (spec.mode === "roadmap" && !spec.timeline) spec.timeline = defaultTimeline();
   return spec;
 }
 
@@ -207,7 +214,10 @@ async function doRender() {
   const canvas = $("#canvas");
   const nStations = Object.keys(S.spec.stations).length;
   $("#empty").classList.toggle("is-on", nStations === 0);
-  if (nStations === 0) {
+  // An empty metro map needs no round trip. An empty roadmap does: its dates
+  // are real before its first station is, and the Timeline panel reads them
+  // back off the render answer.
+  if (nStations === 0 && !isRoadmap()) {
     canvas.innerHTML = "";
     lastSVG = "";
     showProblems([]);
@@ -647,9 +657,13 @@ function dateForGX(gx) {
 /** The column holding a date, as a whole grid x — null when it is off the ruler. */
 function gxForDate(iso) {
   const cols = (TIMELINE && TIMELINE.columns_at) || [];
-  if (!iso || !cols.length || iso < cols[0].date) return null;
+  if (!iso || !cols.length) return null;
+  const last = cols[cols.length - 1];
+  // ISO dates compare correctly as strings; both ends have to be checked, or a
+  // date past the ruler quietly resolves to its final column
+  if (iso < cols[0].date || iso > last.ends) return null;
   let found = null;
-  for (const col of cols) {              // ISO dates compare correctly as strings
+  for (const col of cols) {
     if (col.date <= iso) found = col.gx; else break;
   }
   return found;
@@ -670,7 +684,13 @@ function renameStation(oldId, newId) {
 function deleteStation(sid) {
   applyChange(() => {
     delete S.spec.stations[sid];
-    for (const ln of S.spec.lines) ln.stations = ln.stations.filter((s) => s !== sid);
+    for (const ln of S.spec.lines) {
+      ln.stations = ln.stations.filter((s) => s !== sid);
+      pruneNotes(ln);
+    }
+    for (const zn of S.spec.zones) {
+      if (zn.stations) zn.stations = zn.stations.filter((s) => s !== sid);
+    }
     S.sel = { kind: null, id: null };
   });
 }
@@ -731,6 +751,44 @@ function renderLines() {
   renderLineEditor();
 }
 
+/** A stop's label for the notes editor, falling back to its id. */
+function stopName(sid) {
+  return (S.spec.stations[sid] || {}).label || sid;
+}
+
+function noteAt(ln, hop) {
+  const found = (ln.notes || []).find((n) => n && n.at === hop);
+  return found ? found.text : "";
+}
+
+/** Drop notes whose hop no longer exists — a shorter route has fewer gaps.
+
+    Without this, removing a stop leaves a note pointing past the end of the
+    route and the next save is refused by validation for something the user
+    cannot see. */
+function pruneNotes(ln) {
+  if (!ln.notes) return;
+  const hops = (ln.stations || []).length - 1;
+  const kept = ln.notes.filter((n) => n && n.at >= 0 && n.at < hops);
+  if (kept.length) ln.notes = kept; else delete ln.notes;
+}
+
+/** Write one hop's note, dropping the entry entirely when it is cleared. */
+function setNote(ln, hop, text) {
+  const notes = ln.notes || [];
+  const at = notes.findIndex((n) => n && n.at === hop);
+  if (!text.trim()) {
+    if (at >= 0) notes.splice(at, 1);
+    // an empty notes array is noise in the saved file
+    if (notes.length) ln.notes = notes; else delete ln.notes;
+    return;
+  }
+  if (at >= 0) notes[at].text = text;
+  else notes.push({ at: hop, text });
+  notes.sort((a, b) => a.at - b.at);
+  ln.notes = notes;
+}
+
 function statusLabel(value) {
   const found = LINE_STATUSES.find((st) => st.value === value);
   return found ? found.label.replace(" — dead end", "") : value;
@@ -786,6 +844,17 @@ function renderLineEditor() {
         </div>`).join("") || `<p class="note">Empty — pick stations below, or click them on the canvas.</p>`}
     </div>
 
+    ${ln.stations.length > 1 ? `<h3>Between stops</h3>
+    <p class="note">A short label riding the track — “6 weeks”, “nightly batch”. Leave one blank to remove it.</p>
+    <div class="hops" id="l-notes">
+      ${ln.stations.slice(0, -1).map((sid, k) => `
+        <label class="field hop">
+          <span>${esc(stopName(sid))} → ${esc(stopName(ln.stations[k + 1]))}</span>
+          <input type="text" data-note="${k}" value="${esc(noteAt(ln, k))}"
+                 placeholder="nothing yet">
+        </label>`).join("")}
+    </div>` : ""}
+
     <h3>Available stations</h3>
     <div class="pick" id="l-pick">
       ${stationIds.length ? stationIds.map((sid) =>
@@ -822,7 +891,19 @@ function renderLineEditor() {
   box.querySelectorAll("[data-add]").forEach((btn) =>
     btn.addEventListener("click", () => applyChange(() => ln.stations.push(btn.dataset.add))));
   box.querySelectorAll("[data-drop]").forEach((btn) =>
-    btn.addEventListener("click", () => applyChange(() => ln.stations.splice(Number(btn.dataset.drop), 1))));
+    btn.addEventListener("click", () => applyChange(() => {
+      ln.stations.splice(Number(btn.dataset.drop), 1);
+      pruneNotes(ln);
+    })));
+
+  box.querySelectorAll("[data-note]").forEach((input) => {
+    input.addEventListener("focus", pushUndo);
+    input.addEventListener("input", () => {
+      setNote(ln, Number(input.dataset.note), input.value);
+      markDirty();
+      scheduleRender();
+    });
+  });
 
   initRouteDnD(ln);
   $("#l-del").addEventListener("click", () => applyChange(() => {
@@ -847,6 +928,7 @@ function initRouteDnD(ln) {
       applyChange(() => {
         const [sid] = ln.stations.splice(from, 1);
         ln.stations.splice(to, 0, sid);
+        pruneNotes(ln);
       });
       from = null;
     });
@@ -976,7 +1058,11 @@ function renderTimeline() {
   const box = $("#timeline-editor");
   if (!box) return;
   if (!isRoadmap()) { box.innerHTML = ""; box.dataset.built = ""; return; }
-  const tl = S.spec.timeline || (S.spec.timeline = defaultTimeline());
+  // never install a default here: writing to the spec from inside a render pass
+  // would persist dates nobody chose, with no undo step and no dirty mark.
+  // normalise() puts one on a roadmap that arrives without one.
+  const tl = S.spec.timeline;
+  if (!tl) { box.innerHTML = ""; box.dataset.built = ""; return; }
 
   // rebuilt only when the values changed under it — otherwise a date input
   // would lose focus on every keystroke that triggers a re-render
@@ -1018,6 +1104,13 @@ function renderTimelineReadout() {
   const last = TIMELINE.columns_at[TIMELINE.columns_at.length - 1];
   out.textContent = `${TIMELINE.columns} columns, ${first.full} to ${last.full}`
     + ` · ruler starts ${TIMELINE.start}, closes ${TIMELINE.end}`;
+  // a start is snapped back to the period holding it, so show what the ruler
+  // actually begins on rather than leaving 14 Feb in a field that means 1 Feb
+  const startField = $("#t-start");
+  if (startField && document.activeElement !== startField
+      && startField.value !== TIMELINE.start) {
+    startField.value = TIMELINE.start;
+  }
   setHint();
 }
 
@@ -1037,6 +1130,8 @@ const SNAP_STEPS = [[1, "1 cell"], [0.5, "½ cell"], [1 / 3, "⅓ cell"], [0.25,
 function renderStyle() {
   const box = $("#style-editor");
   if (box.dataset.built === "1") {
+    const legend = box.querySelector("#f-legend");
+    if (legend && legend.value !== legendAt()) legend.value = legendAt();
     const snap = box.querySelector("#f-snap");
     if (snap && Math.abs(Number(snap.value) - S.snap) > 1e-6) {
       snap.value = SNAP_STEPS.reduce((best, [v]) =>
@@ -1051,6 +1146,10 @@ function renderStyle() {
     return;
   }
   box.innerHTML = `<div class="card">
+    <label class="field"><span>Legend — where the line names go</span>
+      <select id="f-legend">${LEGEND_POSITIONS.map((v) =>
+        `<option value="${v}" ${legendAt() === v ? "selected" : ""}>${v}</option>`).join("")}
+      </select></label>
     <label class="field"><span>Grid snap — how close two stations may sit</span>
       <select id="f-snap">${SNAP_STEPS.map(([v, label]) =>
         `<option value="${v}" ${Math.abs(v - S.snap) < 1e-6 ? "selected" : ""}>${label}</option>`).join("")}
@@ -1060,6 +1159,11 @@ function renderStyle() {
       <input type="range" data-style="${key}" min="${min}" max="${max}" step="${step}" value="${S.style[key]}">
     </label>`).join("")}</div>`;
   box.dataset.built = "1";
+  $("#f-legend").addEventListener("change", (ev) => applyChange(() => {
+    // bottom is the default, so it stays out of the spec the way "live" does
+    if (ev.target.value === DEFAULT_LEGEND) delete S.spec.legend;
+    else S.spec.legend = ev.target.value;
+  }));
   $("#f-snap").addEventListener("change", (ev) => {
     S.snap = Number(ev.target.value);
     markDirty();
@@ -1173,10 +1277,14 @@ function insertSpace(sid, dx, dy, withAnchor) {
   // read the anchor's position before the loop — it may be one of the movers
   const ax = anchor.gx, ay = anchor.gy;
   const past = (v, at) => (withAnchor ? v >= at - 1e-9 : v > at + 1e-9);
+  // A rigid shift, not a re-snap: rounding onto S.snap would drag a station
+  // deliberately placed on a half cell onto the next whole one, collapsing the
+  // spacing the author chose. Round only to keep float noise out of the spec.
+  const shift = (v, by) => Math.round((v + by) * 1000) / 1000;
   applyChange(() => {
     for (const st of Object.values(S.spec.stations)) {
-      if (dx && past(st.gx, ax)) st.gx = snapTo(st.gx + dx);
-      if (dy && past(st.gy, ay)) st.gy = snapTo(st.gy + dy);
+      if (dx && past(st.gx, ax)) st.gx = shift(st.gx, dx);
+      if (dy && past(st.gy, ay)) st.gy = shift(st.gy, dy);
     }
   });
 }
@@ -1263,6 +1371,18 @@ async function loadMap(name, { force = false, folder = null } = {}) {
   startWatching();
 }
 
+/** Ask before a Save-as lands on a map that already exists. True to go ahead. */
+async function confirmOverwrite(name, folder) {
+  let maps;
+  try { maps = await api("GET", "/api/maps"); }
+  catch (_) { return true; }         // cannot check; the save itself will report
+  const hit = maps.find((m) => m.name === name && m.folder === folder);
+  if (!hit) return true;
+  const where = (FOLDERS.find((f) => f.value === folder) || {}).label || folder;
+  return confirm(`“${name}” already exists in ${where}`
+    + ` (${hit.stations} stations, ${hit.lines} lines).\n\nReplace it?`);
+}
+
 async function saveMap(name, folder) {
   name = name || S.name;
   if (!name) { saveAsDialog(); return; }
@@ -1275,6 +1395,10 @@ async function saveMap(name, folder) {
   const body = { spec, auto_interchange: S.autoIx, folder };
   const sameMap = name === S.name && folder === S.folder;
   if (sameMap && S.version) body.base_version = S.version;
+  // Saving under a different name or into the other folder carries no base
+  // version, so the server's concurrency check cannot fire — nothing else
+  // stands between "Save as" and a map of the same name already sitting there.
+  if (!sameMap && !(await confirmOverwrite(name, folder))) return;
   try {
     const data = await api("PUT", `/api/maps/${encodeURIComponent(name)}`, body);
     S.name = data.name;
@@ -1484,6 +1608,8 @@ async function boot() {
     INTERVALS = defaults.intervals || INTERVALS;
     FOLDERS = defaults.folders || FOLDERS;
     DEFAULT_FOLDER = defaults.default_folder || DEFAULT_FOLDER;
+    LEGEND_POSITIONS = defaults.legend_positions || LEGEND_POSITIONS;
+    DEFAULT_LEGEND = defaults.default_legend || DEFAULT_LEGEND;
     PALETTE = palette;
     S.style = { ...defaults.style };
   } catch (err) {

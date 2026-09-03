@@ -18,8 +18,13 @@ Input JSON
   "zones": [ {"name": str, "color": "#rrggbb", "stations": ["<id>", ...]} ]?,
   "mode": "metro"|"roadmap"?,                    # metro is the default
   "timeline": {"start": "yyyy-mm-dd", "end": "yyyy-mm-dd",
-               "interval": "day"|"week"|"month"|"quarter"|"year"}?   # roadmap only
+               "interval": "day"|"week"|"month"|"quarter"|"year"}?,  # roadmap only
+  "legend": "hide"|"top"|"left"|"bottom"|"right"?   # bottom is the default
 }
+
+A line may also carry "notes": [{"at": <hop index>, "text": str, "flip": bool?}],
+a short label riding the track between two of its stops — hop 0 is the gap
+between stations[0] and stations[1].
 
 Geometry rules
 --------------
@@ -51,6 +56,13 @@ Geometry rules
    ruler spans the whole declared start..end, whether or not a station reaches
    the far end, and column names thin out rather than overlap when a column is
    narrow. A timeline left on a metro map is kept but not drawn.
+9. The legend names every line beside a swatch drawn in its own colour and dash
+   pattern, laid outside everything else — outside the roadmap header too. On a
+   horizontal edge the entries wrap into rows rather than running off the side.
+10. A note rides the middle of one hop, measured along the track after bundling
+   so it follows its own line out of a shared corridor, and is rotated to the
+   track. The rotation is kept within (-90, 90], so a note never reads upside
+   down and a vertical one reads top to bottom.
 
 An optional "style" object (cell, stroke, corner, bundle_gap, label_size) may sit
 beside them; the web designer writes it, and command-line flags override it.
@@ -106,6 +118,11 @@ class Style:
     tl_row_h: float = 22.0       # height of one roadmap header row
     tl_label_size: float = 12.0  # period name under the header
     tl_major_size: float = 13.0  # the coarser period above it
+    legend_size: float = 13.0    # line name in the legend
+    legend_row_h: float = 22.0   # height of one legend entry
+    legend_swatch: float = 26.0  # length of the colour stroke beside a name
+    legend_gap: float = 10.0     # swatch to name, and note to track
+    note_size: float = 12.0      # a note riding a track between two stations
     font: str = '"Hanken Grotesk","Helvetica Neue",Helvetica,Arial,sans-serif'
 
 
@@ -253,11 +270,15 @@ class Map:
     def _build_segments(self) -> None:
         for li, line in enumerate(self.lines):
             ids = line["stations"]
-            for a, b in zip(ids, ids[1:]):
+            # "hop" is the index of the station pair a leg belongs to, so a note
+            # written against hop k can find the legs that carry it — one leg
+            # when the pair is octilinear already, two when it bends
+            for hop, (a, b) in enumerate(zip(ids, ids[1:])):
                 pa = self.pos[a]
                 first = None
                 for q in octilinear(pa, self.pos[b]):
-                    seg = {"line": li, "p": pa, "q": q, "offset": 0.0, "shift": (0.0, 0.0)}
+                    seg = {"line": li, "hop": hop, "p": pa, "q": q,
+                           "offset": 0.0, "shift": (0.0, 0.0)}
                     self.segments.append(seg)
                     first = first or seg
                     pa = q
@@ -284,6 +305,28 @@ class Map:
         return drop_collinear(out)
 
     # -- stations ----------------------------------------------------------
+
+    def hop_midpoint(self, line_index: int, hop: int) -> Optional[Tuple[Point, Point]]:
+        """The middle of one station-to-station hop, and the way the track runs.
+
+        Measured along the legs *after* bundling, so a note on a line sharing a
+        corridor rides that line's own track rather than the corridor centre.
+        A hop that bends is walked by arc length, so the midpoint of an
+        L-shaped run lands where the eye expects it rather than at the corner.
+        """
+        legs = [(add(g["p"], g["shift"]), add(g["q"], g["shift"]))
+                for g in self.segments
+                if g["line"] == line_index and g["hop"] == hop]
+        if not legs:
+            return None
+        spans = [dist(a, b) for a, b in legs]
+        half = sum(spans) / 2
+        for (a, b), span in zip(legs, spans):
+            if half <= span or span == spans[-1]:
+                t = (half / span) if span > EPS else 0.0
+                return add(a, scale(sub(b, a), min(t, 1.0))), norm(sub(b, a))
+            half -= span
+        return None
 
     def lines_through(self, sid: str) -> List[int]:
         return [i for i, ln in enumerate(self.lines) if sid in ln["stations"]]
@@ -471,10 +514,13 @@ def build_timeline(tl: object) -> Timeline:
     interval = tl.get("interval") or "month"
     if interval not in INTERVALS:
         raise ValueError("timeline.interval must be one of " + ", ".join(INTERVALS))
-    start = period_start(parse_date(tl.get("start")), interval)
+    begins = parse_date(tl.get("start"))
     finish = parse_date(tl.get("end"))
-    if finish <= start:
+    # compare before snapping: a start of 15 Jan snaps back to 1 Jan, and an end
+    # of 10 Jan would then look like a valid one-column January
+    if finish <= begins:
         raise ValueError("timeline.end must fall after timeline.start")
+    start = period_start(begins, interval)
     columns = 1
     while step(start, interval, columns) < finish:
         columns += 1
@@ -564,6 +610,111 @@ def timeline_svg(tl: Timeline, style: Style, top: float, bottom: float
             f'{(tl.boundary(k + 1) - timedelta(days=1)).isoformat()}</title></text>')
 
     return "\n".join(parts), header
+
+
+# -------------------------------------------------------------- legend ----
+#
+# Line names never reached the drawing before: they lived in the spec and in the
+# designer's side panel, and a reader had to infer what a colour meant from the
+# stations it happened to touch.
+
+LEGEND_AT = ("hide", "top", "left", "bottom", "right")
+DEFAULT_LEGEND = "bottom"
+
+# The route dash patterns are written in multiples of style.stroke, which on a
+# 26px swatch shows barely one dash. These are the same shapes at swatch scale.
+LEGEND_DASH = {
+    "live": "",
+    "out-of-service": "6 4",
+    "under-construction": "10 4",
+    "planned": "1 3.5",
+}
+
+
+def legend_at(spec: dict) -> str:
+    """Where a spec wants its legend. Anything unrecognised falls back."""
+    at = spec.get("legend")
+    if at is None:
+        return DEFAULT_LEGEND
+    return at if at in LEGEND_AT else DEFAULT_LEGEND
+
+
+def legend_svg(entries: List[Tuple[int, dict]], at: str, style: Style,
+               box: Tuple[float, float, float, float]
+               ) -> Tuple[str, Tuple[float, float, float, float]]:
+    """The legend group, and the drawing bounds grown to hold it.
+
+    `entries` pairs each line with its index in spec.lines — not its position in
+    this list — because the swatch borrows the `.l{i}` rule that gives the route
+    its dark-mode colour, and a line with no name would otherwise shift every
+    index after it onto the wrong colour.
+
+    `box` is the drawing's extent so far; the block is laid alongside it and
+    centred against it. Entries on a horizontal edge wrap into rows rather than
+    running off the side.
+    """
+    s = style
+    x0, y0, x1, y1 = box
+    pad = s.legend_gap
+
+    def entry_w(name: str) -> float:
+        return s.legend_swatch + pad + len(name) * s.legend_size * 0.56 + pad * 1.6
+
+    widths = [entry_w(ln["name"]) for _, ln in entries]
+
+    if at in ("top", "bottom"):
+        # pack greedily into rows no wider than the drawing, but never split an
+        # entry that is simply longer than the map is wide
+        limit = max(x1 - x0, max(widths))
+        rows: List[List[int]] = [[]]
+        used = 0.0
+        for i, w in enumerate(widths):
+            if rows[-1] and used + w > limit:
+                rows.append([])
+                used = 0.0
+            rows[-1].append(i)
+            used += w
+        height = len(rows) * s.legend_row_h
+        block_w = max(sum(widths[i] for i in row) for row in rows)
+        left = x0 + (x1 - x0 - block_w) / 2
+        top = (y0 - pad - height) if at == "top" else (y1 + pad)
+    else:
+        block_w = max(widths)
+        height = len(entries) * s.legend_row_h
+        rows = [[i] for i in range(len(entries))]
+        left = (x0 - pad - block_w) if at == "left" else (x1 + pad)
+        top = y0 + (y1 - y0 - height) / 2
+
+    # the union, never just the legend's own box: the caller uses this as the
+    # drawing's new extent, and a legend below the map must not shrink it
+    bounds = (min(x0, left), min(y0, top),
+              max(x1, left + block_w), max(y1, top + height))
+
+    parts: List[str] = []
+    for r, row in enumerate(rows):
+        cy = top + r * s.legend_row_h + s.legend_row_h / 2
+        cx = left
+        for i in row:
+            li, ln = entries[i]
+            state = line_status(ln)
+            dash = LEGEND_DASH.get(state, "")
+            faded = ' opacity=".55"' if state == "out-of-service" else ""
+            # the l{i} class carries the dark-mode colour the routes already use
+            parts.append(
+                f'    <g class="legend-item"{faded}>'
+                f'<line class="legend-swatch l{li}" x1="{cx:.1f}" y1="{cy:.1f}" '
+                f'x2="{cx + s.legend_swatch:.1f}" y2="{cy:.1f}" '
+                f'stroke="{ln["color"]}"'
+                + (f' stroke-dasharray="{dash}"' if dash else "")
+                + f'/><text class="legend-name" '
+                f'x="{cx + s.legend_swatch + pad:.1f}" '
+                f'y="{cy + s.legend_size * 0.36:.1f}">{esc(ln["name"])}'
+                + (f'<title>{esc(ln["name"])}{STATUS_LABEL.get(state, "")}</title>'
+                   if state != "live" else "")
+                + '</text></g>')
+            cx += widths[i]
+
+    return "\n".join(parts), bounds
 
 
 # ----------------------------------------------------------------- svg ----
@@ -658,6 +809,38 @@ def render(spec: dict, style: Style) -> str:
                 f'ends here</title></line>'
             )
             grow(min(a[0], b[0]), min(a[1], b[1]), max(a[0], b[0]), max(a[1], b[1]))
+
+    # notes riding the track between two stations — "6 weeks", "nightly batch"
+    notes = []
+    for i, line in enumerate(m.lines):
+        for note in line.get("notes") or []:
+            if not isinstance(note, dict):
+                continue
+            text = (note.get("text") or "").strip()
+            found = m.hop_midpoint(i, note.get("at"))
+            if not text or not found:
+                continue
+            at, d = found
+            # perpendicular clearance, on the side the note asks for
+            side = perp(d) if not note.get("flip") else perp((-d[0], -d[1]))
+            gap = s.stroke / 2 + s.legend_gap
+            anchor = add(at, scale(side, gap))
+            # Read the text along the track, but never upside down: an angle
+            # outside (-90, 90] is turned through 180. A leg running straight up
+            # therefore becomes +90 rather than -90, so a vertical note always
+            # reads top to bottom.
+            angle = math.degrees(math.atan2(d[1], d[0]))
+            angle = (angle + 180) % 360 - 180        # into (-180, 180] first
+            if angle > 90:
+                angle -= 180
+            elif angle <= -90:
+                angle += 180
+            notes.append(
+                f'    <text class="note" x="{anchor[0]:.1f}" y="{anchor[1]:.1f}" '
+                f'transform="rotate({angle:g} {anchor[0]:.1f} {anchor[1]:.1f})" '
+                f'text-anchor="middle">{esc(text)}</text>')
+            half = len(text) * s.note_size * 0.56 / 2 + s.note_size * 0.6
+            grow(anchor[0] - half, anchor[1] - half, anchor[0] + half, anchor[1] + half)
 
     # stations and labels
     stops, labels = [], []
@@ -764,6 +947,36 @@ def render(spec: dict, style: Style) -> str:
   </g>
 """
 
+    # the legend goes outside the ruler, not between the ruler and the map, so
+    # it is laid out last against everything the drawing has claimed so far
+    legend_group = legend_css = ""
+    at = legend_at(spec)
+    named = [(i, ln) for i, ln in enumerate(m.lines)
+             if (ln.get("name") or "").strip()]
+    if at != "hide" and named:
+        legend_css = f"""    .legend-swatch {{ fill: none; stroke-width: {max(4.0, s.stroke * 0.55):.1f};
+                     stroke-linecap: round; }}
+    .legend-name {{ font-family: {s.font}; font-size: {s.legend_size}px;
+                   font-weight: 600; fill: var(--ink); }}
+"""
+        body, lbox = legend_svg(named, at, s, (cx0, cy0, cx1, cy1))
+        cx0, cy0, cx1, cy1 = lbox
+        legend_group = f"""  <g id="legend">
+{body}
+  </g>
+"""
+
+    note_group = note_css = ""
+    if notes:
+        note_css = f"""    .note {{ font-family: {s.font}; font-size: {s.note_size}px; font-weight: 600;
+            fill: var(--ink); stroke: var(--paper); stroke-width: 3.5;
+            paint-order: stroke; opacity: .85; }}
+"""
+        note_group = f"""  <g id="notes">
+{chr(10).join(notes)}
+  </g>
+"""
+
     x0, y0, x1, y1 = cx0 - s.margin, cy0 - s.margin, cx1 + s.margin, cy1 + s.margin
 
     dark = "\n".join(
@@ -801,7 +1014,7 @@ def render(spec: dict, style: Style) -> str:
 {timeline_css}    .stop {{ fill: var(--paper); stroke-width: {s.stop_ring}; }}
     .interchange {{ fill: var(--paper); stroke: var(--ink); stroke-width: {s.stop_ring}; }}
     .label {{ font-family: {s.font}; font-size: {s.label_size}px; font-weight: 600; fill: var(--ink); }}
-    @media (prefers-color-scheme: dark) {{
+{note_css}{legend_css}    @media (prefers-color-scheme: dark) {{
       svg {{ --paper: #131b21; --ink: #e8eef3; }}
 {dark}
     }}
@@ -809,13 +1022,13 @@ def render(spec: dict, style: Style) -> str:
 {timeline_group}{zone_group}  <g id="routes">
 {chr(10).join(routes)}
   </g>
-{dead_group}  <g id="stations">
+{dead_group}{note_group}  <g id="stations">
 {chr(10).join(stops)}
   </g>
   <g id="labels">
 {chr(10).join(labels)}
   </g>
-</svg>
+{legend_group}</svg>
 """
 
 
@@ -852,6 +1065,10 @@ def validate_spec(spec: object) -> List[str]:
     errors: List[str] = []
     if not isinstance(spec, dict):
         return ["spec must be a JSON object"]
+
+    at = spec.get("legend")
+    if at is not None and at not in LEGEND_AT:
+        errors.append("spec.legend must be one of " + ", ".join(LEGEND_AT))
 
     mode = spec.get("mode") or "metro"
     if mode not in MODES:
@@ -939,6 +1156,29 @@ def validate_spec(spec: object) -> List[str]:
         for sid in route:
             if sid not in stations:
                 errors.append(f"{where}: unknown station '{sid}'")
+
+        notes = ln.get("notes")
+        if notes is None:
+            continue
+        if not isinstance(notes, list):
+            errors.append(f"{where}: notes must be a list")
+            continue
+        hops = len(route) - 1          # a note rides the gap between two stops
+        for n, note in enumerate(notes, 1):
+            if not isinstance(note, dict):
+                errors.append(f"{where}: note {n} must be an object")
+                continue
+            if not isinstance(note.get("text"), str) or not note["text"].strip():
+                errors.append(f"{where}: note {n} needs a non-empty text")
+            spot = note.get("at")
+            if not isinstance(spot, int) or isinstance(spot, bool):
+                errors.append(f"{where}: note {n} needs an integer 'at'")
+            elif hops < 1:
+                errors.append(f"{where}: note {n} has nowhere to sit — "
+                              "a line needs two stops before it has a gap")
+            elif not 0 <= spot < hops:
+                errors.append(f"{where}: note {n} sits at {spot}, outside the "
+                              f"{hops} gap(s) this route has (0 to {hops - 1})")
     return errors
 
 
@@ -976,7 +1216,9 @@ def style_from(source: object, base: Optional[Style] = None) -> Style:
                       "stop_ring", "inter_r", "label_size", "label_gap", "margin",
                       "zone_pad", "zone_radius", "zone_fill", "zone_label_size",
                       "status_fade", "buffer_len",
-                      "tl_row_h", "tl_label_size", "tl_major_size"):
+                      "tl_row_h", "tl_label_size", "tl_major_size",
+                      "legend_size", "legend_row_h", "legend_swatch",
+                      "legend_gap", "note_size"):
             v = source.get(field)
             if isinstance(v, (int, float)) and not isinstance(v, bool):
                 setattr(style, field, float(v))
@@ -1041,6 +1283,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--corner", type=float, help="corner radius")
     ap.add_argument("--bundle-gap", type=float, help="spacing between parallel tracks")
     ap.add_argument("--label-size", type=float)
+    ap.add_argument("--legend", choices=LEGEND_AT,
+                    help="where the line-name legend goes (default: %s)" % DEFAULT_LEGEND)
     ap.add_argument("--auto-interchange", action="store_true",
                     help="flag every stop shared by two or more lines as an interchange")
     args = ap.parse_args(argv)
@@ -1065,6 +1309,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.auto_interchange:
         auto_interchanges(spec)
+
+    if args.legend:                 # a flag beats what the spec asked for
+        spec["legend"] = args.legend
 
     # A spec saved by the web designer carries its own style; flags override it.
     style = style_from(spec.get("style"))

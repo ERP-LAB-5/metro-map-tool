@@ -15,7 +15,7 @@
       "interchange": true
     },
     "run": {
-      "label": "./run.sh · run.ps1",
+      "label": "./run.sh · run.cmd",
       "gx": 5,
       "gy": 3,
       "label_at": "above",
@@ -65,7 +65,7 @@
       "label_at": "below"
     },
     "save": {
-      "label": "maps/*.json",
+      "label": "mymaps · shared-maps",
       "gx": 16,
       "gy": 3,
       "label_at": "above",
@@ -107,6 +107,12 @@
         "save",
         "export",
         "stop"
+      ],
+      "notes": [
+        {
+          "at": 3,
+          "text": "drag on the canvas"
+        }
       ]
     },
     {
@@ -123,6 +129,12 @@
         "save",
         "export",
         "stop"
+      ],
+      "notes": [
+        {
+          "at": 4,
+          "text": "read → edit → save"
+        }
       ]
     },
     {
@@ -132,6 +144,12 @@
       "stations": [
         "serve",
         "menu"
+      ],
+      "notes": [
+        {
+          "at": 0,
+          "text": "replaced by the browser"
+        }
       ]
     }
   ],
