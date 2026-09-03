@@ -1,6 +1,15 @@
 @echo off
 setlocal enabledelayedexpansion
 
+:: Start the metro-map designer on Windows, without needing PowerShell.
+::
+::   run.cmd                  start (or restart) on 127.0.0.1:8765
+::   run.cmd -Port 9000       somewhere else
+::   run.cmd -Stop            shut the running one down and exit
+::   run.cmd -NoBrowser       start it but do not open a tab
+::
+:: Only ASCII is echoed here: a console on cp850 or cp437 garbles anything else.
+
 :: Target default settings
 set "PORT=8765"
 set "BIND=127.0.0.1"
@@ -23,6 +32,7 @@ cd /d "%SCRIPT_DIR%"
 
 if "%STOP_ONLY%"=="1" (
     call :stop_designer
+    echo   stopped
     exit /b 0
 )
 
@@ -31,60 +41,66 @@ set "PY_VENV=%SCRIPT_DIR%.venv\Scripts\python.exe"
 if not exist "%PY_VENV%" (
     where py >nul 2>&1 && (set "BOOTSTRAP=py") || (
         where python >nul 2>&1 && (set "BOOTSTRAP=python") || (
-            echo no Python found on PATH — install Python 3.10+ from python.org
+            echo   ! no Python found on PATH - install Python 3.10+ from python.org
             exit /b 1
         )
     )
     echo   creating .venv ...
     !BOOTSTRAP! -m venv .venv
     if errorlevel 1 (
-        echo could not create .venv — is Python 3.10+ installed?
+        echo   ! could not create .venv - is Python 3.10+ installed?
         exit /b 1
     )
-    "%SCRIPT_DIR%.venv\Scripts\python.exe" -m pip install --quiet --upgrade pip
-    "%SCRIPT_DIR%.venv\Scripts\python.exe" -m pip install --quiet -r requirements.txt
+    "%PY_VENV%" -m pip install --quiet --upgrade pip
+    "%PY_VENV%" -m pip install --quiet -r requirements.txt
 )
 
 :: Restart Logic
 call :stop_designer
 echo   starting designer on http://%BIND%:%PORT%
-start "" /b "%PY_VENV%" "%SCRIPT_DIR%app.py" --host %BIND% --port %PORT%
+:: its own minimised window, so the server outlives this script when run.cmd
+:: was double-clicked and its console closes
+start "metro-map designer" /min "%PY_VENV%" "%SCRIPT_DIR%app.py" --host %BIND% --port %PORT%
 
-:: Wait loop
+:: Wait loop - one second a turn, so give up after fifteen rather than forty
 set "READY=0"
-for /l %%i in (1,1,40) do (
-    timeout /t 1 /nobreak >nul
-    curl -s --max-time 2 "http://127.0.0.1:%PORT%/api/maps" >nul && (
-        set "READY=1"
-        goto loop_end
+for /l %%i in (1,1,15) do (
+    if "!READY!"=="0" (
+        timeout /t 1 /nobreak >nul 2>&1
+        curl -s --max-time 2 "http://127.0.0.1:%PORT%/api/maps" >nul 2>&1 && set "READY=1"
     )
 )
-:loop_end
 
 if "%READY%"=="0" (
-    echo the designer did not come up on port %PORT%
+    echo   ! the designer did not come up on port %PORT%
     exit /b 1
 )
 
-echo   ready — designer is active
-echo   stop it with:  run.cmd -Stop
+echo   ready - designer is active
+echo   stop it with the red Stop button, or:  run.cmd -Stop
 if "%NO_BROWSER%"=="0" start "" "http://127.0.0.1:%PORT%/"
 exit /b 0
 
 :: Functions
 :stop_designer
-:: Kill process holding the port via netstat tracking
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr /r /c:":%PORT% *[^ ]* *LISTENING"') do (
-    if not "%%a"=="0" (
-        curl -s -X POST --max-time 2 "http://127.0.0.1:%PORT%/api/shutdown" >nul 2>&1
-        timeout /t 1 /nobreak >nul
-        taskkill /f /pid %%a >nul 2>&1
-    )
+:: Whatever holds the port is the designer - the same rule run.sh uses. Ask it
+:: to close itself first so a save in flight can finish, then make sure.
+set "HOLDER="
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr /r /c:":%PORT% *[^ ]* *LISTENING" 2^>nul') do (
+    if not "%%a"=="0" set "HOLDER=%%a"
 )
-:: Kill lingering app.py processes matching current folder path
-for /f "tokens=2 delims=," %%p in ('wmic process where "name='python.exe' or name='pythonw.exe'" get commandline^,processid /format:csv ^| findstr /i "app.py" 2^>nul') do (
-    wmic process where processid=%%p get commandline | findstr /i "%SCRIPT_DIR:\=\\%" >nul && (
-        taskkill /f /pid %%p >nul 2>&1
-    )
+if not defined HOLDER (
+    echo   nothing running on port %PORT%
+    goto :eof
+)
+curl -s -X POST --max-time 2 "http://127.0.0.1:%PORT%/api/shutdown" >nul 2>&1
+timeout /t 1 /nobreak >nul 2>&1
+:: only ever kill our own interpreter - something else on the port is not ours
+tasklist /fi "pid eq %HOLDER%" 2>nul | findstr /i "python" >nul
+if errorlevel 1 (
+    echo   stopped pid %HOLDER%
+) else (
+    echo   killing pid %HOLDER%
+    taskkill /f /pid %HOLDER% >nul 2>&1
 )
 goto :eof
