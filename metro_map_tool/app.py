@@ -140,8 +140,10 @@ def body() -> dict:
 # designer restarts could plausibly spend, and raw.githubusercontent has no
 # such budget. Nothing about the map, the machine or the user is sent.
 
+# the same file this build reads for its own version, on main — so publishing a
+# release is one edit, and the check cannot disagree with what was shipped
 LATEST_URL = ("https://raw.githubusercontent.com/"
-              "ERP-LAB-5/metro-map-tool/main/VERSION")
+              "ERP-LAB-5/metro-map-tool/main/metro_map_tool/VERSION")
 UPDATE_CHECK = True                 # --no-update-check turns it off
 CHECK_EVERY = 6 * 60 * 60           # seconds; the answer changes rarely
 _latest: Dict[str, object] = {"version": None, "at": 0.0, "error": None}
