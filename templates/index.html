@@ -32,6 +32,10 @@
   <label class="toggle" title="draw every stop shared by two or more lines as a white ring">
     <input type="checkbox" id="auto-ix" checked> interchanges
   </label>
+
+  <label class="toggle" title="a roadmap gives the x axis a calendar">
+    mode <select id="mode-select"></select>
+  </label>
 </header>
 
 <main>
@@ -40,6 +44,7 @@
       <button class="tab is-on" data-tab="stations">Stations</button>
       <button class="tab" data-tab="lines">Lines</button>
       <button class="tab" data-tab="zones">Zones</button>
+      <button class="tab" data-tab="timeline" hidden>Timeline</button>
       <button class="tab" data-tab="style">Style</button>
     </nav>
 
@@ -71,6 +76,12 @@
       <p class="note">A tinted band behind the stations you put in it — “Upgrade”, “Preferred”, and so on.</p>
       <ul id="zone-list" class="list"></ul>
       <div id="zone-editor" class="editor"></div>
+    </section>
+
+    <section class="pane" data-pane="timeline">
+      <div class="pane-head"><h2>Timeline</h2></div>
+      <p class="note">In roadmap mode the x axis is a calendar. A whole grid x is a period boundary; a station at 2.5 sits mid-period.</p>
+      <div id="timeline-editor" class="editor"></div>
     </section>
 
     <section class="pane" data-pane="style">

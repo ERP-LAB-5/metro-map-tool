@@ -36,6 +36,7 @@ async function api(method, path, payload) {
 
 const S = {
   name: null,                              // saved map name, null while untitled
+  folder: null,                            // which folder it came from, null while untitled
   spec: { stations: {}, lines: [], zones: [] },
   style: { cell: 120, stroke: 10, corner: 22, bundle_gap: 13, label_size: 16 },
   autoIx: true,
@@ -57,18 +58,74 @@ let LABEL_SIDES = [];
 let LINE_STATUSES = [{ value: "live", label: "In service" }];
 let LABEL_ANGLES = [0, 45, 90];
 let PALETTE = [];
+let MODES = [{ value: "metro", label: "Metro map" }, { value: "roadmap", label: "Roadmap" }];
+let INTERVALS = ["day", "week", "month", "quarter", "year"];
+let FOLDERS = [{ value: "mymaps", label: "My maps" }, { value: "shared", label: "Shared" }];
+let DEFAULT_FOLDER = "mymaps";
 let lastSVG = "";
+let TIMELINE = null;                         // ruler the server resolved, or null
 
 const GUIDE_MAP = "how-this-tool-works";     // the map that explains the tool
 const LAST_MAP_KEY = "metro-map:last";
 
 /** Remember the map this browser had open. Storage can be blocked; never throw. */
-function rememberMap(name) {
-  try { localStorage.setItem(LAST_MAP_KEY, name); } catch (_) { /* no storage */ }
+function rememberMap(name, folder) {
+  try { localStorage.setItem(LAST_MAP_KEY, `${folder || DEFAULT_FOLDER}/${name}`); }
+  catch (_) { /* no storage */ }
 }
 
 function rememberedMap() {
-  try { return localStorage.getItem(LAST_MAP_KEY); } catch (_) { return null; }
+  try {
+    const raw = localStorage.getItem(LAST_MAP_KEY);
+    if (!raw) return null;
+    const cut = raw.indexOf("/");
+    // pre-v2 entries are a bare name; let the folder search find them
+    return cut < 0 ? { name: raw, folder: null }
+                   : { folder: raw.slice(0, cut), name: raw.slice(cut + 1) };
+  } catch (_) { return null; }
+}
+
+/* ------------------------------------------------------------ roadmap -- */
+
+function specMode() { return S.spec.mode || "metro"; }
+function isRoadmap() { return specMode() === "roadmap"; }
+
+/** A sensible first timeline: this year and the next, by quarter. */
+function defaultTimeline() {
+  const year = new Date().getFullYear();
+  return { start: `${year}-01-01`, end: `${year + 2}-01-01`, interval: "quarter" };
+}
+
+function setMode(value) {
+  applyChange(() => {
+    if (value === "metro") {
+      delete S.spec.mode;                  // metro is the default, kept implicit
+    } else {
+      S.spec.mode = value;
+      // keep whatever dates were there before, so flipping back and forth is free
+      if (!S.spec.timeline) S.spec.timeline = defaultTimeline();
+    }
+  });
+  syncMode();
+}
+
+/** Show the Timeline tab only where it means something. */
+function syncMode() {
+  const select = $("#mode-select");
+  if (select) select.value = specMode();
+  const tab = document.querySelector('.tab[data-tab="timeline"]');
+  if (!tab) return;
+  tab.hidden = !isRoadmap();
+  if (tab.hidden && tab.classList.contains("is-on")) {
+    document.querySelector('.tab[data-tab="stations"]').click();
+  }
+}
+
+/** The timeline column a grid position falls in, or null off a roadmap. */
+function columnAt(gx) {
+  const cols = (TIMELINE && TIMELINE.columns_at) || [];
+  const k = Math.floor(gx);
+  return k >= 0 && k < cols.length ? cols[k] : null;
 }
 
 function snapshot() {
@@ -163,9 +220,13 @@ async function doRender() {
     });
   } catch (err) {
     showProblems(err.errors);
+    TIMELINE = null;
+    renderTimeline();
     return;
   }
   showProblems([], data.warnings);
+  TIMELINE = data.timeline || null;
+  renderTimeline();
   if (data.empty) { canvas.innerHTML = ""; return; }
 
   // The server may have re-flagged interchanges; mirror that back locally so
@@ -425,6 +486,10 @@ function setHint() {
     text = `Filling “${S.spec.zones[S.sel.id].name}” — click stations on the canvas to add or remove them`;
   } else if (tab === "zones") {
     text = "Pick a zone to choose which stations sit in it";
+  } else if (tab === "timeline") {
+    text = TIMELINE
+      ? `${TIMELINE.columns} ${TIMELINE.interval} columns — a whole grid x is a period boundary`
+      : "Set a start, an end and an interval";
   } else {
     text = "Style is saved with the map";
   }
@@ -437,6 +502,7 @@ function refreshPanels() {
   renderStations();
   renderLines();
   renderZones();
+  renderTimeline();
   renderStyle();
   syncToolbar();
 }
@@ -502,6 +568,9 @@ function renderStationEditor() {
       <label class="field"><span>Grid x</span><input type="number" id="f-gx" step="${S.snap}" value="${st.gx}"></label>
       <label class="field"><span>Grid y</span><input type="number" id="f-gy" step="${S.snap}" value="${st.gy}"></label>
     </div>
+    ${isRoadmap() ? `<label class="field"><span>Date — <b id="f-when">${esc(whenLabel(st.gx))}</b></span>
+      <input type="date" id="f-date" value="${esc(dateForGX(st.gx))}"
+             title="jump this station to the column holding a date"></label>` : ""}
     <div class="pair">
       <label class="field"><span>Label side</span><select id="f-side">
         ${sides.map((s) => `<option value="${esc(s)}" ${(st.label_at || "auto") === s ? "selected" : ""}>${esc(s)}</option>`).join("")}
@@ -510,7 +579,10 @@ function renderStationEditor() {
         ${LABEL_ANGLES.map((a) => `<option value="${a}" ${(st.label_angle || 0) === a ? "selected" : ""}>${a}°</option>`).join("")}
       </select></label>
     </div>
-    <div><button id="f-del" class="danger">Delete station</button></div>
+    <div class="row-btns">
+      <button id="f-insert">Insert space…</button>
+      <button id="f-del" class="danger">Delete station</button>
+    </div>
   </div>`;
 
   const live = (el, fn) => {
@@ -530,8 +602,19 @@ function renderStationEditor() {
     live(input, () => {
       const v = Number(input.value);
       if (Number.isFinite(v)) st[axis] = v;
+      const when = $("#f-when");
+      if (when && axis === "gx") when.textContent = whenLabel(st.gx);
     });
     input.addEventListener("change", refreshPanels);
+  }
+
+  const when = $("#f-date");
+  if (when) {
+    when.addEventListener("change", (ev) => {
+      const gx = gxForDate(ev.target.value);
+      if (gx === null) { ev.target.value = dateForGX(st.gx); return; }
+      applyChange(() => { st.gx = gx; });
+    });
   }
 
   $("#f-side").addEventListener("change", (ev) => applyChange(() => {
@@ -544,7 +627,32 @@ function renderStationEditor() {
     if (a) st.label_angle = a; else delete st.label_angle;   // 0 is the default
   }));
   $("#f-id").addEventListener("change", (ev) => renameStation(sid, ev.target.value.trim()));
+  $("#f-insert").addEventListener("click", () => insertSpaceDialog(sid));
   $("#f-del").addEventListener("click", () => deleteStation(sid));
+}
+
+/** How a grid x reads as a date, for the station editor. */
+function whenLabel(gx) {
+  const col = columnAt(gx);
+  if (!col) return "off the timeline";
+  const part = gx - Math.floor(gx);
+  return part ? `inside ${col.full}` : `start of ${col.full}`;
+}
+
+function dateForGX(gx) {
+  const col = columnAt(gx);
+  return col ? col.date : "";
+}
+
+/** The column holding a date, as a whole grid x — null when it is off the ruler. */
+function gxForDate(iso) {
+  const cols = (TIMELINE && TIMELINE.columns_at) || [];
+  if (!iso || !cols.length || iso < cols[0].date) return null;
+  let found = null;
+  for (const col of cols) {              // ISO dates compare correctly as strings
+    if (col.date <= iso) found = col.gx; else break;
+  }
+  return found;
 }
 
 function renameStation(oldId, newId) {
@@ -862,6 +970,57 @@ function addZone() {
   if (name) { name.focus(); name.select(); }
 }
 
+/* ------------------------------------------------------------ timeline -- */
+
+function renderTimeline() {
+  const box = $("#timeline-editor");
+  if (!box) return;
+  if (!isRoadmap()) { box.innerHTML = ""; box.dataset.built = ""; return; }
+  const tl = S.spec.timeline || (S.spec.timeline = defaultTimeline());
+
+  // rebuilt only when the values changed under it — otherwise a date input
+  // would lose focus on every keystroke that triggers a re-render
+  const stamp = `${tl.start}|${tl.end}|${tl.interval}`;
+  if (box.dataset.built === stamp) { renderTimelineReadout(); return; }
+
+  box.innerHTML = `<div class="card">
+    <div class="pair">
+      <label class="field"><span>Start</span>
+        <input type="date" id="t-start" value="${esc(tl.start)}"></label>
+      <label class="field"><span>End</span>
+        <input type="date" id="t-end" value="${esc(tl.end)}"></label>
+    </div>
+    <label class="field"><span>One column is</span><select id="t-interval">
+      ${INTERVALS.map((iv) =>
+        `<option value="${esc(iv)}" ${tl.interval === iv ? "selected" : ""}>${esc(iv)}</option>`).join("")}
+    </select></label>
+    <p class="note" id="t-readout"></p>
+  </div>`;
+  box.dataset.built = stamp;
+
+  // A start date is snapped back to the period holding it, so 14 Feb with a
+  // monthly interval becomes 1 Feb — write the snapped value back so the field
+  // shows what the ruler actually starts on.
+  const write = (key, value) => applyChange(() => {
+    S.spec.timeline = { ...S.spec.timeline, [key]: value };
+  });
+  $("#t-start").addEventListener("change", (ev) => write("start", ev.target.value));
+  $("#t-end").addEventListener("change", (ev) => write("end", ev.target.value));
+  $("#t-interval").addEventListener("change", (ev) => write("interval", ev.target.value));
+  renderTimelineReadout();
+}
+
+function renderTimelineReadout() {
+  const out = $("#t-readout");
+  if (!out) return;
+  if (!TIMELINE) { out.textContent = "Not drawing yet — check the dates above."; return; }
+  const first = TIMELINE.columns_at[0];
+  const last = TIMELINE.columns_at[TIMELINE.columns_at.length - 1];
+  out.textContent = `${TIMELINE.columns} columns, ${first.full} to ${last.full}`
+    + ` · ruler starts ${TIMELINE.start}, closes ${TIMELINE.end}`;
+  setHint();
+}
+
 /* --------------------------------------------------------------- style -- */
 
 const STYLE_FIELDS = [
@@ -934,12 +1093,20 @@ async function openDialog() {
   try { maps = await api("GET", "/api/maps"); }
   catch (err) { showProblems(err.errors); return; }
 
-  const rows = maps.length ? maps.map((m) => `
-    <div class="row" data-open="${esc(m.name)}">
-      <span class="grow"><span class="lbl">${esc(m.name)}</span>
-        <span class="meta">${m.error ? esc(m.error) : `${m.stations} stations · ${m.lines} lines`}</span></span>
-      <button type="button" class="ghost danger" data-del="${esc(m.name)}" title="delete">×</button>
-    </div>`).join("") : `<p class="note">No maps saved yet.</p>`;
+  // grouped by folder, so it is obvious which maps belong to the repo
+  const groups = FOLDERS.map(({ value, label }) => {
+    const mine = maps.filter((m) => m.folder === value);
+    if (!mine.length) return "";
+    return `<h3 class="group">${esc(label)}</h3>` + mine.map((m) => `
+      <div class="row" data-open="${esc(m.name)}" data-folder="${esc(m.folder)}">
+        <span class="grow"><span class="lbl">${esc(m.name)}</span>
+          <span class="meta">${m.error ? esc(m.error)
+            : `${m.stations} stations · ${m.lines} lines${m.mode === "roadmap" ? " · roadmap" : ""}`}</span></span>
+        <button type="button" class="ghost danger" data-del="${esc(m.name)}"
+                data-del-folder="${esc(m.folder)}" title="delete">×</button>
+      </div>`).join("");
+  }).join("");
+  const rows = groups || `<p class="note">No maps saved yet.</p>`;
 
   dialog("Open a map", `<div class="pick-list">${rows}</div>
     <div class="actions"><button value="cancel">Cancel</button></div>`, (form, dlg) => {
@@ -947,30 +1114,90 @@ async function openDialog() {
       row.addEventListener("click", (ev) => {
         if (ev.target.dataset.del !== undefined) return;
         dlg.close();
-        loadMap(row.dataset.open);
+        loadMap(row.dataset.open, { folder: row.dataset.folder });
       }));
     form.querySelectorAll("[data-del]").forEach((btn) =>
       btn.addEventListener("click", async (ev) => {
         ev.stopPropagation();
         const name = btn.dataset.del;
-        if (!confirm(`Delete “${name}” from the maps folder?`)) return;
-        try { await api("DELETE", `/api/maps/${encodeURIComponent(name)}`); }
-        catch (err) { showProblems(err.errors); return; }
+        const folder = btn.dataset.delFolder;
+        const where = (FOLDERS.find((f) => f.value === folder) || {}).label || folder;
+        if (!confirm(`Delete “${name}” from ${where}?`)) return;
+        try {
+          await api("DELETE",
+            `/api/maps/${encodeURIComponent(name)}?folder=${encodeURIComponent(folder)}`);
+        } catch (err) { showProblems(err.errors); return; }
         dlg.close();
-        if (S.name === name) { S.name = null; markDirty(); syncToolbar(); }
+        if (S.name === name && S.folder === folder) {
+          S.name = null; S.folder = null; markDirty(); syncToolbar();
+        }
         openDialog();
       }));
   });
 }
 
+/** Open (or close) a column and a row at a station, shifting what follows. */
+function insertSpaceDialog(sid) {
+  const anchor = S.spec.stations[sid];
+  if (!anchor) return;
+  dialog(`Insert space at “${anchor.label}”`, `
+    <p class="note">Everything past this station moves. Negative values close a
+      gap instead of opening one.</p>
+    <div class="pair">
+      <label class="field"><span>Shift right by (grid x)</span>
+        <input type="number" id="i-dx" step="${S.snap}" value="1"></label>
+      <label class="field"><span>Shift down by (grid y)</span>
+        <input type="number" id="i-dy" step="${S.snap}" value="0"></label>
+    </div>
+    <label class="toggle"><input type="checkbox" id="i-self"> move “${esc(anchor.label)}” too</label>
+    <div class="actions"><button value="cancel">Cancel</button>
+      <button type="button" class="primary" id="i-ok">Insert</button></div>`, (form, dlg) => {
+    const go = () => {
+      const dx = Number(form.querySelector("#i-dx").value) || 0;
+      const dy = Number(form.querySelector("#i-dy").value) || 0;
+      dlg.close();
+      insertSpace(sid, dx, dy, form.querySelector("#i-self").checked);
+    };
+    form.querySelector("#i-ok").addEventListener("click", go);
+    form.querySelectorAll("input[type=number]").forEach((input) =>
+      input.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") { ev.preventDefault(); go(); }
+      }));
+    form.querySelector("#i-dx").select();
+  });
+}
+
+function insertSpace(sid, dx, dy, withAnchor) {
+  const anchor = S.spec.stations[sid];
+  if (!anchor || (!dx && !dy)) return;
+  // read the anchor's position before the loop — it may be one of the movers
+  const ax = anchor.gx, ay = anchor.gy;
+  const past = (v, at) => (withAnchor ? v >= at - 1e-9 : v > at + 1e-9);
+  applyChange(() => {
+    for (const st of Object.values(S.spec.stations)) {
+      if (dx && past(st.gx, ax)) st.gx = snapTo(st.gx + dx);
+      if (dy && past(st.gy, ay)) st.gy = snapTo(st.gy + dy);
+    }
+  });
+}
+
 function saveAsDialog() {
+  const into = S.folder || DEFAULT_FOLDER;
   dialog("Save map as", `
     <label class="field"><span>Name (letters, digits, space, - and _)</span>
       <input type="text" id="d-name" value="${esc(S.name || "untitled")}" autofocus></label>
+    <label class="field"><span>Into</span><select id="d-folder">
+      ${FOLDERS.map((f) =>
+        `<option value="${esc(f.value)}" ${f.value === into ? "selected" : ""}>${esc(f.label)}</option>`).join("")}
+    </select></label>
+    <p class="note">Shared maps belong to the repo; My maps is ignored by git.</p>
     <div class="actions"><button value="cancel">Cancel</button>
       <button type="button" class="primary" id="d-ok">Save</button></div>`, (form, dlg) => {
     const input = form.querySelector("#d-name");
-    const go = () => { dlg.close(); saveMap(input.value.trim()); };
+    const go = () => {
+      dlg.close();
+      saveMap(input.value.trim(), form.querySelector("#d-folder").value);
+    };
     form.querySelector("#d-ok").addEventListener("click", go);
     input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); go(); } });
     input.select();
@@ -981,8 +1208,10 @@ function saveAsDialog() {
 function newMap() {
   if (!confirmDiscard()) return;
   S.name = null;
+  S.folder = null;
   S.version = null;
   S.ignoreVersion = null;
+  TIMELINE = null;
   hideLive();
   S.spec = normalise({});
   S.style = { ...DEFAULT_STYLE };
@@ -993,7 +1222,9 @@ function newMap() {
   S.zoom = 1;
   S.pan = { x: 0, y: 0 };
   $("#style-editor").dataset.built = "";
+  $("#timeline-editor").dataset.built = "";
   markDirty();
+  syncMode();
   refreshPanels();
   scheduleRender();
   currentTab() === "stations" || document.querySelector('.tab[data-tab="stations"]').click();
@@ -1006,12 +1237,14 @@ function confirmDiscard() {
   return !S.dirty || confirm("This map has unsaved changes. Discard them?");
 }
 
-async function loadMap(name, { force = false } = {}) {
+async function loadMap(name, { force = false, folder = null } = {}) {
   if (!force && !confirmDiscard()) return;
+  const where = folder ? `?folder=${encodeURIComponent(folder)}` : "";
   let data;
-  try { data = await api("GET", `/api/maps/${encodeURIComponent(name)}`); }
+  try { data = await api("GET", `/api/maps/${encodeURIComponent(name)}${where}`); }
   catch (err) { showProblems(err.errors); return; }
   S.name = data.name;
+  S.folder = data.folder || DEFAULT_FOLDER;
   S.version = data.version || null;
   S.ignoreVersion = null;
   S.spec = normalise(data.spec);
@@ -1019,31 +1252,39 @@ async function loadMap(name, { force = false } = {}) {
   S.snap = Number((data.spec.editor || {}).snap) || 1;
   S.sel = { kind: null, id: null };
   S.undo.length = 0; S.redo.length = 0;
-  rememberMap(S.name);
+  $("#timeline-editor").dataset.built = "";
+  rememberMap(S.name, S.folder);
   markClean();
   hideLive();
+  syncMode();
   refreshPanels();
   scheduleRender();
   setTimeout(fitToView, 250);
   startWatching();
 }
 
-async function saveMap(name) {
+async function saveMap(name, folder) {
   name = name || S.name;
   if (!name) { saveAsDialog(); return; }
+  // no folder given means "back where it came from", so editing a shared map
+  // updates it rather than quietly forking a copy into mymaps
+  folder = folder || S.folder || DEFAULT_FOLDER;
   const spec = clone(S.spec);
   spec.style = { ...S.style };
   spec.editor = { snap: S.snap };
-  const body = { spec, auto_interchange: S.autoIx };
-  if (name === S.name && S.version) body.base_version = S.version;   // same map
+  const body = { spec, auto_interchange: S.autoIx, folder };
+  const sameMap = name === S.name && folder === S.folder;
+  if (sameMap && S.version) body.base_version = S.version;
   try {
     const data = await api("PUT", `/api/maps/${encodeURIComponent(name)}`, body);
     S.name = data.name;
+    S.folder = data.folder || folder;
     S.version = data.version || null;
     S.ignoreVersion = null;
     S.spec = normalise(data.spec);
     delete S.spec.style;               // the editor keeps style and snap outside the spec
     delete S.spec.editor;
+    rememberMap(S.name, S.folder);
     markClean();
     showProblems([]);
     refreshPanels();
@@ -1053,12 +1294,16 @@ async function saveMap(name) {
       // someone saved in between; let the human decide, never merge silently
       showLive(`“${name}” was saved by someone else while you were editing.`, [
         { label: "Load theirs (lose mine)",
-          fn: async () => { S.dirty = false; await loadMap(name, { force: true }); } },
+          fn: async () => {
+            S.dirty = false;
+            await loadMap(name, { force: true, folder });
+          } },
         { label: "Overwrite theirs", cls: "primary",
           fn: async () => {
             S.version = (err.data && err.data.version) || null;   // adopt, then win
+            S.folder = folder;                     // so the retry counts as the same map
             hideLive();
-            await saveMap(name);
+            await saveMap(name, folder);
           } },
       ]);
       return;
@@ -1098,7 +1343,8 @@ function stopServer() {
       document.body.innerHTML =
         `<div class="stopped"><h1>Designer stopped</h1>
          <p>The local server has shut down. Run <code>./run.sh</code>
-         (or <code>run.ps1</code> on Windows) to start it again.</p></div>`;
+         (or <code>run.cmd</code> / <code>run.ps1</code> on Windows) to start it
+         again.</p></div>`;
     });
 }
 
@@ -1121,18 +1367,21 @@ async function checkForExternalSave() {
   let maps;
   try { maps = await api("GET", "/api/maps"); }
   catch (_) { return; }                    // server stopped or restarting; try later
-  const mine = maps.find((m) => m.name === S.name);
+  const mine = maps.find((m) => m.name === S.name && m.folder === S.folder);
   if (!mine || !mine.version) return;
   if (mine.version === S.version || mine.version === S.ignoreVersion) return;
 
   if (!S.dirty) {
-    await loadMap(S.name, { force: true });
+    await loadMap(S.name, { force: true, folder: S.folder });
     flashLive(`“${S.name}” was updated elsewhere — reloaded.`);
     return;
   }
   showLive(`“${S.name}” changed on disk while you have unsaved edits.`, [
     { label: "Load theirs", cls: "primary",
-      fn: async () => { S.dirty = false; await loadMap(S.name, { force: true }); } },
+      fn: async () => {
+        S.dirty = false;
+        await loadMap(S.name, { force: true, folder: S.folder });
+      } },
     { label: "Keep mine", fn: () => { S.ignoreVersion = mine.version; hideLive(); } },
   ]);
 }
@@ -1168,6 +1417,7 @@ function undo() {
   S.redo.push(snapshot());
   restore(S.undo.pop());
   markDirty();
+  syncMode();                    // mode and timeline ride on the spec
   refreshPanels();
   scheduleRender();
 }
@@ -1177,6 +1427,7 @@ function redo() {
   S.undo.push(snapshot());
   restore(S.redo.pop());
   markDirty();
+  syncMode();
   refreshPanels();
   scheduleRender();
 }
@@ -1229,15 +1480,24 @@ async function boot() {
     LABEL_SIDES = defaults.label_sides;
     LINE_STATUSES = defaults.line_statuses || LINE_STATUSES;
     LABEL_ANGLES = defaults.label_angles || LABEL_ANGLES;
+    MODES = defaults.modes || MODES;
+    INTERVALS = defaults.intervals || INTERVALS;
+    FOLDERS = defaults.folders || FOLDERS;
+    DEFAULT_FOLDER = defaults.default_folder || DEFAULT_FOLDER;
     PALETTE = palette;
     S.style = { ...defaults.style };
   } catch (err) {
     showProblems(err.errors || ["could not reach the server"]);
   }
 
+  $("#mode-select").innerHTML = MODES.map((m) =>
+    `<option value="${esc(m.value)}">${esc(m.label)}</option>`).join("");
+  $("#mode-select").addEventListener("change", (ev) => setMode(ev.target.value));
+
   initTabs();
   initCanvas();
   initKeys();
+  syncMode();
 
   $("#btn-add-station").addEventListener("click", addStation);
   $("#btn-add-line").addEventListener("click", addLine);
@@ -1277,10 +1537,11 @@ async function boot() {
     const maps = await api("GET", "/api/maps");
     if (maps.length) {
       const last = rememberedMap();
-      const pick = maps.find((m) => m.name === last)
+      const pick = (last && maps.find((m) => m.name === last.name
+                     && (!last.folder || m.folder === last.folder)))
         || maps.find((m) => m.name === GUIDE_MAP)
         || maps.slice().sort((a, b) => b.mtime - a.mtime)[0];
-      await loadMap(pick.name);
+      await loadMap(pick.name, { folder: pick.folder });
       return;
     }
   } catch (_) { /* fall through to an empty workspace */ }

@@ -18,12 +18,15 @@ capped with a dead-end bar.
 git clone https://github.com/ERP-LAB-5/metro-map-tool.git && cd metro-map-tool
 ./run.sh                 # creates .venv on first run, then serves 127.0.0.1:8765
 ./run.sh --stop          # shut it down
-.\run.ps1                # Windows: same thing  (.\run.ps1 -Stop to stop)
+run.cmd                  # Windows: same thing  (run.cmd -Stop to stop)
+.\run.ps1                # Windows, if PowerShell scripts are allowed
 ```
 
-Both scripts replace an instance already holding the port rather than failing on
-it, so re-running one is how you restart. The red **Stop** button in the toolbar
-shuts the server down from the browser.
+`run.cmd` is a plain batch file for machines where PowerShell execution is
+blocked; `run.ps1` does the same job where it is allowed. All three replace an
+instance already holding the port rather than failing on it, so re-running one
+is how you restart. The red **Stop** button in the toolbar shuts the server down
+from the browser.
 
 It opens on **how-this-tool-works**, a map of the tool itself — setup, startup,
 then the two ways of designing (the browser and the MCP tools) forking apart and
@@ -50,13 +53,49 @@ meeting again at the saved file. After that it reopens whatever you had last.
 - **Labels** place themselves on the first free side of a station; override the
   side per station, and tilt the text 0°, 45° or 90° when a column is tight —
   a tilted label reads outward from its stop.
+- **Insert space** (in the station editor) opens or closes a column and a row at
+  a station: everything past it shifts by the grid x and y you give, in one undo
+  step. Negative values close a gap. A checkbox moves the anchor station too, for
+  when you mean "insert a column *here*" rather than "make room after this".
 - **Style** (cell size, route width, corner radius, track spacing, label size,
   zone padding) is saved with the map.
-- Maps live in `maps/*.json` — Open, Save, Save as, Export SVG in the top bar.
-  Ctrl+Z / Ctrl+Shift+Z undo and redo; Ctrl+S saves.
+- Maps live in two folders — `mymaps/` for your own work, which git ignores, and
+  `shared-maps/` for the maps that ship with the repo. Open groups them under
+  *My maps* and *Shared*; **Save** writes back to the folder a map came from, so
+  editing a shared map updates it instead of quietly forking a copy, and *Save
+  as* lets you pick. Open, Save, Save as and Export SVG are in the top bar;
+  Ctrl+Z / Ctrl+Shift+Z undo and redo, Ctrl+S saves.
 
 Any stop shared by two or more lines is drawn as a white interchange ring while
 the *interchanges* toggle is on.
+
+## Roadmap mode
+
+Switch **mode** in the top bar from *Metro map* to *Roadmap* and the x axis
+becomes a calendar. The **Timeline** tab sets a start date, an end date and what
+one column is worth — a day, week, month, quarter or year — and the map is drawn
+over a Gantt-style ruler: a light grey line on every period boundary, the period
+name centred in the band between two lines, and the coarser period (the year, or
+the month for weeks and days) named in a row above.
+
+Grid x is still how you place a station, and it now means something: **column *k*
+covers grid x from *k* to *k*+1**, so a whole number is the *start* of a period
+and `2.5` sits mid-period. The station editor names the date under the grid
+fields and offers a date picker that jumps the station to the column holding it.
+
+```json
+{"mode": "roadmap",
+ "timeline": {"start": "2026-01-01", "end": "2027-07-01", "interval": "quarter"}}
+```
+
+A start date is snapped back to the period holding it, so 14 February with a
+monthly interval starts the ruler on 1 February. The ruler spans the whole
+declared range whether or not a station reaches the far end, and column names
+thin out rather than overlap when a column is narrow. Everything else — lines,
+zones, service states, interchanges — works exactly as in metro mode, and the
+dates are kept if you switch back, so flipping modes costs nothing.
+
+`shared-maps/roadmap-example.json` is a worked example.
 
 ## The command line
 
@@ -64,8 +103,9 @@ The same specs render headlessly, so a map designed in the browser drops
 straight into a build or a docs pipeline:
 
 ```bash
-python3 metro_map.py maps/how-this-tool-works.json -o guide.svg
-python3 metro_map.py maps/how-this-tool-works.json --cell 140 -o big.svg
+python3 metro_map.py shared-maps/how-this-tool-works.json -o guide.svg
+python3 metro_map.py shared-maps/roadmap-example.json -o roadmap.svg
+python3 metro_map.py shared-maps/how-this-tool-works.json --cell 140 -o big.svg
 cat spec.json | python3 metro_map.py - > map.svg
 ```
 
@@ -87,7 +127,12 @@ Flask.
 ```
 
 Tools: `list_maps`, `read_map`, `save_map`, `delete_map`, `render_map`,
-`validate_map`, `spec_reference`, `designer_url`, `stop_designer`.
+`validate_map`, `resolve_timeline`, `spec_reference`, `designer_url`,
+`stop_designer`. The map tools take a `folder` of `mymaps` or `shared`; a save
+with no folder updates the map where it already lives and puts a new one in
+`mymaps`, so an agent cannot fork a shared map by accident. `resolve_timeline`
+turns a roadmap's dates into the columns it will draw, so a milestone can be
+placed on the right grid x without redoing the calendar arithmetic.
 
 Agent and human work through one server and one maps directory, and the browser
 watches the open map, so **an agent's save reaches the canvas within a couple of
@@ -107,6 +152,7 @@ ln -s "$PWD/.claude/skills/metro-map" ~/.claude/skills/metro-map
 
 ```json
 {
+  "mode": "metro",
   "stations": {
     "s4": {"label": "S/4HANA Private", "gx": 8, "gy": 3,
            "interchange": true, "label_at": "above-right"}
@@ -124,6 +170,8 @@ ln -s "$PWD/.claude/skills/metro-map" ~/.claude/skills/metro-map
 }
 ```
 
+`mode` is `metro` (the default, and left out) or `roadmap`; a roadmap adds a
+`timeline` of `{start, end, interval}` and its grid x becomes a calendar.
 `gx`/`gy` are grid cells, not pixels, and need not be whole numbers — `9.5`
 sits half a cell along.
 `status` is one of `live` (the default, and left out), `out-of-service`,

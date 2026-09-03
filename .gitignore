@@ -220,3 +220,7 @@ __marimo__/
 # project
 .venv/
 .idea/
+
+# personal maps — the folder is tracked, its contents are not
+mymaps/*
+!mymaps/.gitkeep

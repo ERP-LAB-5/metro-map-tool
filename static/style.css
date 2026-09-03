@@ -81,6 +81,11 @@ button.danger { color: var(--danger); }
 button.ghost { background: transparent; border-color: transparent; padding: 2px 6px; }
 
 .toggle { display: flex; align-items: center; gap: 5px; color: var(--muted); }
+.toggle select { font: inherit; color: var(--ink); background: var(--paper);
+                 border: 1px solid var(--edge); border-radius: 5px; padding: 3px 5px; }
+
+/* a tab hidden by the mode switch must not keep its slot in the strip */
+.tab[hidden] { display: none; }
 
 /* -------------------------------------------------------------- layout -- */
 
@@ -272,6 +277,14 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
 #dialog-form .actions { display: flex; justify-content: flex-end; gap: 8px; }
 #dialog-form .pick-list { display: flex; flex-direction: column; gap: 4px; max-height: 50vh; overflow-y: auto; }
 #dialog-form .pick-list .row .meta { font-size: 11px; color: var(--muted); }
+#dialog-form .group {
+  margin: 8px 0 2px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--muted);
+}
+#dialog-form .group:first-child { margin-top: 0; }
 
 .problems.soft {
   border-top-color: var(--edge);
@@ -312,3 +325,8 @@ button.stop:hover { filter: brightness(1.1); border-color: var(--danger); }
 }
 .live .grow { flex: 1 1 auto; }
 .live button { padding: 3px 10px; }
+
+/* ------------------------------------------------ station editor buttons -- */
+
+.row-btns { display: flex; gap: 8px; }
+.row-btns button { flex: 1; }

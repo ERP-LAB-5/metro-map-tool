@@ -15,8 +15,8 @@ The designer is started automatically if it is not already answering. Register
 it with an agent as a stdio server, for example in .mcp.json:
 
     {"mcpServers": {"metro-map": {
-        "command": "/path/to/diagrams/.venv/bin/python",
-        "args": ["/path/to/diagrams/mcp_server.py"]}}}
+        "command": "/path/to/metro-map-tool/.venv/bin/python",
+        "args": ["/path/to/metro-map-tool/mcp_server.py"]}}}
 
 Nothing may be written to stdout: that is the MCP transport. Log to stderr.
 """
@@ -48,7 +48,10 @@ server = MCPServer(
         "them, zones banding groups of stations — and render them to SVG. "
         "Work in this order: place stations first, then route lines through "
         "them, then band zones. read_map/save_map move whole specs; call "
-        "validate_map before saving anything you assembled by hand."
+        "validate_map before saving anything you assembled by hand. "
+        "Maps live in two folders: 'mymaps' (the user's own, where saves go by "
+        "default) and 'shared' (what the repo ships). Set mode to 'roadmap' "
+        "with a timeline block to turn the x axis into a calendar."
     ),
 )
 
@@ -110,45 +113,62 @@ def ensure_designer() -> None:
 
 # ----------------------------------------------------------------- tools ----
 
+def qualify(name: str, folder: str) -> str:
+    """A map URL, with the folder as a query when the caller pinned one."""
+    path = f"/api/maps/{urllib.parse.quote(name)}"
+    return f"{path}?folder={urllib.parse.quote(folder)}" if folder else path
+
+
 @server.tool()
 def list_maps() -> list[dict]:
-    """Every saved map, with its station, line and zone counts."""
+    """Every saved map, with its folder, mode and station/line/zone counts."""
     ensure_designer()
     return call("GET", "/api/maps")
 
 
 @server.tool()
-def read_map(name: str) -> dict:
-    """Read one saved map's spec: stations, lines, zones, style."""
+def read_map(name: str, folder: str = "") -> dict:
+    """Read one saved map's spec: stations, lines, zones, style.
+
+    folder is 'mymaps' or 'shared'; left empty, mymaps is searched first.
+    """
     ensure_designer()
-    return call("GET", f"/api/maps/{urllib.parse.quote(name)}")["spec"]
+    return call("GET", qualify(name, folder))["spec"]
 
 
 @server.tool()
-def save_map(name: str, spec: dict, auto_interchange: bool = True) -> dict:
-    """Write a spec to <name>.json, replacing it if it exists.
+def save_map(name: str, spec: dict, auto_interchange: bool = True,
+             folder: str = "") -> dict:
+    """Write a spec to <folder>/<name>.json, replacing it if it exists.
+
+    folder is 'mymaps' (git-ignored, the user's own work) or 'shared' (maps that
+    belong to the repo). Left empty it updates the map where it already lives,
+    and a name that exists in neither folder is created in mymaps — so pass a
+    folder only to move a map or to put a new one somewhere other than mymaps.
 
     The spec is validated first and rejected with a list of problems if it will
     not draw. With auto_interchange on, any stop two or more lines share is
     flagged as an interchange. Returns the spec as saved, plus any warnings.
     """
     ensure_designer()
-    out = call("PUT", f"/api/maps/{urllib.parse.quote(name)}",
-               {"spec": spec, "auto_interchange": auto_interchange})
-    return {"name": out["name"], "saved": True,
+    payload = {"spec": spec, "auto_interchange": auto_interchange}
+    if folder:
+        payload["folder"] = folder
+    out = call("PUT", f"/api/maps/{urllib.parse.quote(name)}", payload)
+    return {"name": out["name"], "folder": out.get("folder"), "saved": True,
             "warnings": out.get("warnings", []), "spec": out["spec"]}
 
 
 @server.tool()
-def delete_map(name: str) -> dict:
+def delete_map(name: str, folder: str = "") -> dict:
     """Delete a saved map."""
     ensure_designer()
-    return call("DELETE", f"/api/maps/{urllib.parse.quote(name)}")
+    return call("DELETE", qualify(name, folder))
 
 
 @server.tool()
 def render_map(name: str = "", spec: Optional[dict] = None,
-               out_path: str = "") -> dict:
+               out_path: str = "", folder: str = "") -> dict:
     """Render a saved map (by name) or a spec you pass, to SVG.
 
     Give out_path to write the SVG to a file and get the path back instead of
@@ -158,7 +178,7 @@ def render_map(name: str = "", spec: Optional[dict] = None,
     if not spec:
         if not name:
             raise ValueError("pass either name or spec")
-        spec = read_map(name)
+        spec = read_map(name, folder)
     out = call("POST", "/api/render", {"spec": spec})
     svg = out.get("svg", "")
     result: dict[str, Any] = {"warnings": out.get("warnings", []),
@@ -196,10 +216,30 @@ def spec_reference() -> dict:
     return {"label_sides": defaults["label_sides"],
             "label_angles": defaults["label_angles"],
             "line_statuses": defaults["line_statuses"],
+            "modes": defaults["modes"],
+            "intervals": defaults["intervals"],
+            "folders": defaults["folders"],
             "palette": call("GET", "/api/palette"),
             "style_defaults": defaults["style"],
             "grid": "gx/gy are grid cells and may be fractional (0.5 puts two "
-                    "stations half a cell apart); segments are drawn octilinear"}
+                    "stations half a cell apart); segments are drawn octilinear",
+            "roadmap": 'set "mode": "roadmap" and a "timeline" of '
+                       '{start, end, interval} to make gx a calendar: column k '
+                       "covers gx in [k, k+1), so a whole gx is a period "
+                       "boundary. resolve_timeline turns dates into gx"}
+
+
+@server.tool()
+def resolve_timeline(timeline: dict) -> dict:
+    """Turn a roadmap timeline block into the columns it will draw.
+
+    Returns the snapped start (a timeline starts at the beginning of the period
+    holding its start date), the closing boundary, the column count, and the gx
+    and name of every column — so a milestone can be placed on the right date
+    without guessing at the arithmetic.
+    """
+    ensure_designer()
+    return call("POST", "/api/timeline", {"timeline": timeline})
 
 
 @server.tool()

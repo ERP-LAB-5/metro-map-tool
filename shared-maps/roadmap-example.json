@@ -1,0 +1,150 @@
+{
+  "editor": {
+    "snap": 0.5
+  },
+  "lines": [
+    {
+      "color": "#0098d4",
+      "name": "Core programme",
+      "stations": [
+        "kickoff",
+        "discovery",
+        "blueprint",
+        "build",
+        "golive"
+      ]
+    },
+    {
+      "color": "#007d32",
+      "name": "Rollout",
+      "stations": [
+        "blueprint",
+        "pilot",
+        "rollout",
+        "golive"
+      ],
+      "status": "planned"
+    },
+    {
+      "color": "#ee7c0e",
+      "name": "Data",
+      "stations": [
+        "blueprint",
+        "migrate",
+        "cutover",
+        "golive"
+      ]
+    },
+    {
+      "color": "#e1251b",
+      "name": "Decommission",
+      "stations": [
+        "cutover",
+        "decom"
+      ],
+      "status": "under-construction"
+    }
+  ],
+  "mode": "roadmap",
+  "stations": {
+    "blueprint": {
+      "gx": 2,
+      "gy": 2,
+      "interchange": true,
+      "label": "Blueprint",
+      "label_at": "above"
+    },
+    "build": {
+      "gx": 4,
+      "gy": 2,
+      "label": "Build done",
+      "label_at": "above"
+    },
+    "cutover": {
+      "gx": 5,
+      "gy": 3,
+      "interchange": true,
+      "label": "Cutover",
+      "label_at": "below"
+    },
+    "decom": {
+      "gx": 6,
+      "gy": 4,
+      "label": "Legacy off",
+      "label_at": "below"
+    },
+    "discovery": {
+      "gx": 1,
+      "gy": 2,
+      "label": "Discovery",
+      "label_at": "above"
+    },
+    "golive": {
+      "gx": 6,
+      "gy": 2,
+      "interchange": true,
+      "label": "Go live",
+      "label_at": "above"
+    },
+    "kickoff": {
+      "gx": 0,
+      "gy": 2,
+      "label": "Kick-off",
+      "label_at": "above"
+    },
+    "migrate": {
+      "gx": 3,
+      "gy": 3,
+      "label": "Migration",
+      "label_at": "below"
+    },
+    "pilot": {
+      "gx": 3,
+      "gy": 1,
+      "label": "Pilot site",
+      "label_at": "above"
+    },
+    "rollout": {
+      "gx": 5,
+      "gy": 1,
+      "label": "Wave 1",
+      "label_at": "above"
+    }
+  },
+  "style": {
+    "bundle_gap": 13,
+    "cell": 150,
+    "corner": 22,
+    "label_size": 16,
+    "stroke": 10,
+    "zone_pad": 34
+  },
+  "timeline": {
+    "end": "2027-07-01",
+    "interval": "quarter",
+    "start": "2026-01-01"
+  },
+  "zones": [
+    {
+      "color": "#7b3fb5",
+      "name": "Design",
+      "stations": [
+        "kickoff",
+        "discovery",
+        "blueprint"
+      ]
+    },
+    {
+      "color": "#00a4a7",
+      "name": "Delivery",
+      "stations": [
+        "pilot",
+        "build",
+        "rollout",
+        "migrate",
+        "cutover",
+        "golive"
+      ]
+    }
+  ]
+}

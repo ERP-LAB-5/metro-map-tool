@@ -1,6 +1,6 @@
 ---
 name: metro-map
-description: Draw transit-map style diagrams — stations on a grid, coloured lines routed through them, zones banding groups of stations — and render them to a standalone light/dark SVG. Use for landscape, migration, architecture, pipeline or roadmap diagrams whenever the shape is "things connected by named paths": SAP landscapes (ECC → RISE → BTP), data flows, deployment topologies, phase plans. Covers the JSON spec, the design order (stations, then lines, then zones), line service states (out of service with dead ends, under construction, planned), label placement and rotation, the metro-map MCP tools, and the browser designer that ships with it. Triggers on "metro map", "transit map", "landscape diagram", "draw the landscape", "diagram the migration", "tube map", or an ask to edit an existing maps/*.json.
+description: Draw transit-map style diagrams — stations on a grid, coloured lines routed through them, zones banding groups of stations — and render them to a standalone light/dark SVG. Two modes: a metro map on an abstract grid, or a roadmap whose x axis is a dated Gantt-style calendar. Use for landscape, migration, architecture, pipeline, phase-plan or roadmap diagrams whenever the shape is "things connected by named paths": SAP landscapes (ECC → RISE → BTP), data flows, deployment topologies, delivery timelines. Covers the JSON spec, the design order (stations, then lines, then zones), roadmap timelines, line service states (out of service with dead ends, under construction, planned), label placement and rotation, the metro-map MCP tools, and the browser designer that ships with it. Triggers on "metro map", "transit map", "roadmap", "landscape diagram", "draw the landscape", "diagram the migration", "timeline diagram", "tube map", or an ask to edit an existing mymaps/*.json or shared-maps/*.json.
 ---
 
 # Metro map
@@ -9,6 +9,10 @@ A diagram is one JSON spec: **stations** on a grid, **lines** routed through
 them, **zones** banding groups of them. `metro_map.py` renders it to a
 standalone SVG — octilinear (0° / 45° / 90°) segments, parallel tracks where
 lines share a corridor, automatic label placement, light and dark grounds.
+
+Two modes. **metro** (the default) is an abstract grid where gx only means
+"further right". **roadmap** gives gx a calendar and draws a Gantt-style ruler
+over the diagram. Everything else is identical between them.
 
 Two front ends over the same files: a browser designer (`app.py`, drag stations
 on a live canvas) and the `metro-map` MCP tools. Both go through one server, so
@@ -28,6 +32,8 @@ canvas within a couple of seconds.
 
 ```json
 {
+  "mode": "roadmap",
+  "timeline": {"start": "2026-01-01", "end": "2027-07-01", "interval": "quarter"},
   "stations": {
     "s4": {"label": "S/4HANA Private", "gx": 8, "gy": 3,
            "interchange": true,
@@ -50,6 +56,8 @@ canvas within a couple of seconds.
 
 | Field | Notes |
 |---|---|
+| `mode` | `metro` (default, leave it out) or `roadmap`. |
+| `timeline` | Roadmap only: `{start, end, interval}` with ISO dates and an interval of `day`, `week`, `month`, `quarter` or `year`. |
 | `gx` / `gy` | Grid cells, **not pixels**, and may be fractional — `0.5` steps put two stations half a cell apart. Keep whole numbers unless the layout needs the room. |
 | `interchange` | White ring instead of a coloured tick. Leave it out and let `auto_interchange` (on by default) set it. |
 | `label_at` | `above`, `below`, `left`, `right`, `above-left`, `above-right`, `below-left`, `below-right`. Omit it and the renderer picks the first side no track leaves on — usually right. Only override when a label collides. |
@@ -70,24 +78,52 @@ drawn. Zones may overlap; they are painted in list order, behind everything.
 **Line order matters.** Lines sharing a corridor are spread into parallel
 tracks in list order, so the first line sits innermost.
 
+## Roadmap mode
+
+Set `"mode": "roadmap"` and a `timeline`, and the x axis becomes a calendar:
+**column *k* covers gx from *k* to *k*+1**, so a whole gx is the *start* of a
+period and `2.5` sits mid-period. A light grey line falls on every boundary, the
+period name sits centred in the band between two lines, and the coarser period
+(the year, or the month for weeks and days) is named in a row above.
+
+- A start date is **snapped back** to the period holding it: 14 Feb with a
+  monthly interval starts the ruler on 1 Feb. The ruler spans the whole declared
+  range whether or not a station reaches the far end.
+- Call `resolve_timeline` before placing anything. It returns the snapped start,
+  the column count, and the gx, date and name of every column — place a
+  milestone by looking up its date there rather than counting periods yourself.
+- A station whose gx falls outside `0..columns` is warned about: it draws beside
+  the ruler rather than on it.
+- Keep gy for what the metro mode uses it for — parallel workstreams, one row
+  each. Time is the x axis and nothing else.
+- Switching a map to `metro` keeps the `timeline` block but stops drawing it,
+  so a mode flip is free.
+
 ## Working through MCP
 
 The `metro-map` server (`.mcp.json` in the repo) starts the designer on demand.
 
 | Tool | Use it for |
 |---|---|
-| `list_maps` | what already exists |
-| `read_map(name)` | the whole spec, to edit |
-| `save_map(name, spec)` | write it back — validates first, refuses a spec that will not draw |
+| `list_maps` | what already exists, with each map's folder and mode |
+| `read_map(name, folder="")` | the whole spec, to edit; empty folder searches mymaps then shared |
+| `save_map(name, spec, folder="")` | write it back — validates first, refuses a spec that will not draw; an empty folder updates the map where it already lives |
 | `validate_map(spec)` | check before saving; returns `errors` (fatal) and `warnings` (a line with one stop, an empty zone, a station on no line) |
 | `render_map(name, out_path=…)` | write the SVG to a file; pass `out_path` rather than pulling markup through the transcript |
-| `spec_reference` | palette, label sides and angles, line states, style defaults |
+| `resolve_timeline(timeline)` | a roadmap's columns: snapped start, count, and the gx, date and name of each — use it to place milestones on dates |
+| `spec_reference` | palette, label sides and angles, line states, modes, intervals, style defaults |
 | `designer_url` | hand the human a link to take over in the browser |
 | `stop_designer` | shut the local server down |
 
 Read → modify → `validate_map` → `save_map`. Never hand-write a spec and save it
 unvalidated: an unknown station id in a route is the usual mistake, and
 validation names it.
+
+**Two folders.** `mymaps` is the user's own work and git-ignored; `shared` is
+what the repo ships. `list_maps` says which folder each map is in. Saving with
+no folder updates the map where it already lives, and creates a new one in
+`mymaps` — which is what you want almost every time. Name a folder only to move
+a map, or to put a new one in `shared` because it belongs to the repo.
 
 **Read immediately before you write.** Someone may have the same map open in the
 browser; `read_map` → edit → `save_map` keeps that window short. Saving a spec
@@ -99,9 +135,11 @@ you read minutes ago silently drops whatever they did in between.
 cd metro-map-tool          # or wherever you cloned it
 ./run.sh                    # designer on 127.0.0.1:8765 (restarts if already up)
 ./run.sh --stop             # or the red Stop button in the toolbar
-.\run.ps1                   # same on Windows;  .\run.ps1 -Stop
+run.cmd                     # Windows;  run.cmd -Stop   (no PowerShell needed)
+.\run.ps1                   # Windows, where PowerShell scripts are allowed
 
-python3 metro_map.py maps/how-this-tool-works.json -o guide.svg
+python3 metro_map.py shared-maps/how-this-tool-works.json -o guide.svg
+python3 metro_map.py shared-maps/roadmap-example.json -o roadmap.svg
 python3 metro_map.py spec.json --cell 140 -o big.svg     # flags beat spec.style
 ```
 
@@ -116,5 +154,9 @@ A spec that will not draw is reported line by line and exits 2.
   and `label_angle` only when a column is genuinely too narrow.
 - **A branch that is being retired is its own line**, not a status on a shared
   one — that is what makes the dead-end bar land in the right place.
+- **Making room is arithmetic, not a redraw.** To open a column, add the shift
+  to the gx of every station past that point (and gy for a row) — do not move
+  stations one at a time. The designer has an *Insert space* button that does
+  exactly this in one undo step.
 - **Check the render, do not assume it.** Reading gx/gy back catches a wrong
   grid position; for anything subtler, render to a file and look at it.

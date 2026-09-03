@@ -15,7 +15,10 @@ Input JSON
   },
   "lines": [ {"name": str, "color": "#rrggbb", "stations": ["<id>", ...],
               "status": "live"|"out-of-service"|"under-construction"|"planned"?} ],
-  "zones": [ {"name": str, "color": "#rrggbb", "stations": ["<id>", ...]} ]?
+  "zones": [ {"name": str, "color": "#rrggbb", "stations": ["<id>", ...]} ]?,
+  "mode": "metro"|"roadmap"?,                    # metro is the default
+  "timeline": {"start": "yyyy-mm-dd", "end": "yyyy-mm-dd",
+               "interval": "day"|"week"|"month"|"quarter"|"year"}?   # roadmap only
 }
 
 Geometry rules
@@ -42,6 +45,12 @@ Geometry rules
 7. A zone is a tinted, dashed band behind the network, sized to hold its
    stations and their labels plus --zone-pad, and named above its top-left
    corner. Zones are drawn in list order; an empty one is skipped.
+8. In "roadmap" mode the x axis is a calendar. Column k covers gx in [k, k+1),
+   so a light grey boundary line falls on every whole gx and the period's name
+   is centred in the band between two lines, the way a Gantt chart reads. The
+   ruler spans the whole declared start..end, whether or not a station reaches
+   the far end, and column names thin out rather than overlap when a column is
+   narrow. A timeline left on a metro map is kept but not drawn.
 
 An optional "style" object (cell, stroke, corner, bundle_gap, label_size) may sit
 beside them; the web designer writes it, and command-line flags override it.
@@ -67,6 +76,7 @@ import math
 import re
 import sys
 from dataclasses import dataclass, replace
+from datetime import date, timedelta
 from typing import Dict, List, Optional, Sequence, Tuple
 
 Point = Tuple[float, float]
@@ -93,6 +103,9 @@ class Style:
     zone_label_size: float = 13.0
     status_fade: float = 0.5     # how far an out-of-service route falls back
     buffer_len: float = 1.15     # dead-end bar half-length, in stroke widths
+    tl_row_h: float = 22.0       # height of one roadmap header row
+    tl_label_size: float = 12.0  # period name under the header
+    tl_major_size: float = 13.0  # the coarser period above it
     font: str = '"Hanken Grotesk","Helvetica Neue",Helvetica,Arial,sans-serif'
 
 
@@ -356,6 +369,203 @@ def label_geometry(side: str, center: Point, r: float, style: Style,
     return (x, y), ("end" if d[0] < 0 else "start")
 
 
+# ------------------------------------------------------------ timeline ----
+#
+# In roadmap mode the x axis is a calendar. Column k spans gx in [k, k+1), so a
+# boundary line falls on every whole gx and the period's name is centred in the
+# band between two lines — the way a Gantt chart reads. Everything here is
+# stdlib date arithmetic; there is no dateutil to lean on.
+
+INTERVALS = ("day", "week", "month", "quarter", "year")
+MAX_COLUMNS = 400          # a day interval over ten years is not a diagram
+
+# Spelled out rather than taken from strftime: %b follows the machine's locale,
+# and a map must render the same on every machine that opens it.
+MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def parse_date(value: object) -> date:
+    """An ISO yyyy-mm-dd date, or ValueError naming what was wrong with it."""
+    if not isinstance(value, str):
+        raise ValueError("must be a date as yyyy-mm-dd")
+    try:
+        return date.fromisoformat(value.strip())
+    except ValueError:
+        raise ValueError(f"'{value}' is not a date as yyyy-mm-dd") from None
+
+
+def add_months(d: date, n: int) -> date:
+    """Shift by whole months, clamping the day into the month it lands in."""
+    total = d.year * 12 + (d.month - 1) + n
+    year, month = divmod(total, 12)
+    month += 1
+    last = (date(year + month // 12, month % 12 + 1, 1) - timedelta(days=1)).day
+    return date(year, month, min(d.day, last))
+
+
+def period_start(d: date, interval: str) -> date:
+    """Snap a date back to the first day of the period holding it."""
+    if interval == "day":
+        return d
+    if interval == "week":
+        return d - timedelta(days=d.weekday())          # back to Monday
+    if interval == "month":
+        return date(d.year, d.month, 1)
+    if interval == "quarter":
+        return date(d.year, (d.month - 1) // 3 * 3 + 1, 1)
+    return date(d.year, 1, 1)                            # year
+
+
+def step(d: date, interval: str, n: int = 1) -> date:
+    """Advance n whole periods from a period start."""
+    if interval == "day":
+        return d + timedelta(days=n)
+    if interval == "week":
+        return d + timedelta(weeks=n)
+    if interval == "month":
+        return add_months(d, n)
+    if interval == "quarter":
+        return add_months(d, n * 3)
+    return date(d.year + n, d.month, d.day)              # year
+
+
+def minor_label(d: date, interval: str) -> str:
+    """The name of one column."""
+    if interval == "day":
+        return f"{d.day} {MONTHS[d.month - 1]}"
+    if interval == "week":
+        return f"W{d.isocalendar()[1]:02d}"
+    if interval == "month":
+        return MONTHS[d.month - 1]
+    if interval == "quarter":
+        return f"Q{(d.month - 1) // 3 + 1}"
+    return str(d.year)
+
+
+def major_label(d: date, interval: str) -> str:
+    """The coarser period a column belongs to; empty when there is none."""
+    if interval in ("day", "week"):
+        return f"{MONTHS[d.month - 1]} {d.year}"
+    if interval in ("month", "quarter"):
+        return str(d.year)
+    return ""                                            # year needs no parent
+
+
+@dataclass
+class Timeline:
+    start: date              # snapped back to the period holding spec start
+    end: date                # the boundary closing the last column
+    interval: str
+    columns: int
+
+    def boundary(self, k: int) -> date:
+        """The date column k opens on; k == columns is the closing boundary."""
+        return step(self.start, self.interval, k)
+
+
+def build_timeline(tl: object) -> Timeline:
+    """A Timeline from a spec's timeline block, or ValueError saying why not."""
+    if not isinstance(tl, dict):
+        raise ValueError("timeline must be an object")
+    interval = tl.get("interval") or "month"
+    if interval not in INTERVALS:
+        raise ValueError("timeline.interval must be one of " + ", ".join(INTERVALS))
+    start = period_start(parse_date(tl.get("start")), interval)
+    finish = parse_date(tl.get("end"))
+    if finish <= start:
+        raise ValueError("timeline.end must fall after timeline.start")
+    columns = 1
+    while step(start, interval, columns) < finish:
+        columns += 1
+        if columns > MAX_COLUMNS:
+            raise ValueError(
+                f"timeline covers more than {MAX_COLUMNS} {interval} columns — "
+                "use a coarser interval or a shorter span")
+    return Timeline(start, step(start, interval, columns), interval, columns)
+
+
+def spec_timeline(spec: dict) -> Optional[Timeline]:
+    """The timeline a spec draws with, or None when it is not a roadmap.
+
+    A timeline left on a metro map is kept but ignored, so switching modes back
+    and forth in the designer never throws the dates away.
+    """
+    if (spec.get("mode") or "metro") != "roadmap":
+        return None
+    try:
+        return build_timeline(spec.get("timeline"))
+    except ValueError:
+        return None            # validate_spec reports it; render must not blow up
+
+
+def timeline_svg(tl: Timeline, style: Style, top: float, bottom: float
+                 ) -> Tuple[str, float]:
+    """The ruler group, plus the header height it claims above `top`.
+
+    Boundaries run the full height so the header cells line up with the columns
+    below them. Labels thin out rather than overlap when a column is narrow.
+    """
+    s, cell = style, style.cell
+    rows = 2 if major_label(tl.start, tl.interval) else 1
+    header = s.tl_row_h * rows
+    head_top = top - header
+    minor_top = head_top + s.tl_row_h * (rows - 1)
+
+    def fits(text: str, width: float, size: float) -> bool:
+        return len(text) * size * 0.58 + 8 <= width
+
+    parts: List[str] = []
+
+    # alternating tint, so the eye can carry a row across the diagram
+    for k in range(tl.columns):
+        if k % 2:
+            parts.append(f'    <rect class="tl-band" x="{k * cell:.1f}" y="{top:.1f}" '
+                         f'width="{cell:.1f}" height="{bottom - top:.1f}"/>')
+
+    # every boundary gets a line; the header sits on a rule of its own
+    for k in range(tl.columns + 1):
+        x = k * cell
+        parts.append(f'    <line class="tl-line" x1="{x:.1f}" y1="{head_top:.1f}" '
+                     f'x2="{x:.1f}" y2="{bottom:.1f}"/>')
+    parts.append(f'    <line class="tl-line tl-rule" x1="0" y1="{top:.1f}" '
+                 f'x2="{tl.columns * cell:.1f}" y2="{top:.1f}"/>')
+
+    # coarser period above, drawn once over the run of columns that share it
+    if rows == 2:
+        k = 0
+        while k < tl.columns:
+            name = major_label(tl.boundary(k), tl.interval)
+            j = k
+            while j < tl.columns and major_label(tl.boundary(j), tl.interval) == name:
+                j += 1
+            width = (j - k) * cell
+            if k:
+                parts.append(f'    <line class="tl-line tl-major-rule" '
+                             f'x1="{k * cell:.1f}" y1="{head_top:.1f}" '
+                             f'x2="{k * cell:.1f}" y2="{bottom:.1f}"/>')
+            if fits(name, width, s.tl_major_size):
+                parts.append(
+                    f'    <text class="tl-major" x="{(k + (j - k) / 2) * cell:.1f}" '
+                    f'y="{head_top + s.tl_row_h * 0.7:.1f}">{esc(name)}</text>')
+            k = j
+
+    # column names, thinned to whatever the column width will carry
+    names = [minor_label(tl.boundary(k), tl.interval) for k in range(tl.columns)]
+    widest = max((len(n) for n in names), default=0) * s.tl_label_size * 0.58 + 8
+    every = max(1, math.ceil(widest / cell)) if cell > 0 else 1
+    for k, name in enumerate(names):
+        if k % every:
+            continue
+        parts.append(
+            f'    <text class="tl-minor" x="{(k + 0.5) * cell:.1f}" '
+            f'y="{minor_top + s.tl_row_h * 0.7:.1f}">{esc(name)}'
+            f'<title>{tl.boundary(k).isoformat()} → '
+            f'{(tl.boundary(k + 1) - timedelta(days=1)).isoformat()}</title></text>')
+
+    return "\n".join(parts), header
+
+
 # ----------------------------------------------------------------- svg ----
 
 def label_extent(at: Point, anchor: str, width: float, angle: float,
@@ -525,10 +735,36 @@ def render(spec: dict, style: Style) -> str:
         )
         grow(zx0, ty - s.zone_label_size, zx1, zy1)
 
-    x0 = min(b[0] for b in bounds) - s.margin
-    y0 = min(b[1] for b in bounds) - s.margin
-    x1 = max(b[2] for b in bounds) + s.margin
-    y1 = max(b[3] for b in bounds) + s.margin
+    # the drawing's own extent, before the roadmap ruler claims room around it
+    cx0 = min(b[0] for b in bounds)
+    cy0 = min(b[1] for b in bounds)
+    cx1 = max(b[2] for b in bounds)
+    cy1 = max(b[3] for b in bounds)
+
+    # the ruler spans its whole declared range, whether or not a station reaches
+    # the far end, and its header is stacked above everything else
+    timeline_group = timeline_css = ""
+    tl = spec_timeline(spec)
+    if tl:
+        timeline_css = f"""    .tl-line {{ stroke: var(--ink); stroke-width: 1; opacity: .16; }}
+    .tl-major-rule, .tl-rule {{ opacity: .30; }}
+    .tl-band {{ fill: var(--ink); opacity: .025; }}
+    .tl-minor {{ font-family: {s.font}; font-size: {s.tl_label_size}px; fill: var(--ink);
+                opacity: .55; text-anchor: middle; }}
+    .tl-major {{ font-family: {s.font}; font-size: {s.tl_major_size}px; font-weight: 700;
+                letter-spacing: .06em; fill: var(--ink); opacity: .8; text-anchor: middle; }}
+"""
+        cx0 = min(cx0, 0.0)
+        cx1 = max(cx1, tl.columns * s.cell)
+        top, bottom = cy0 - s.margin / 2, cy1 + s.margin / 2
+        body, header = timeline_svg(tl, s, top, bottom)
+        cy0, cy1 = top - header, bottom
+        timeline_group = f"""  <g id="timeline">
+{body}
+  </g>
+"""
+
+    x0, y0, x1, y1 = cx0 - s.margin, cy0 - s.margin, cx1 + s.margin, cy1 + s.margin
 
     dark = "\n".join(
         [f"      .l{i} {{ stroke: {lighten(ln['color'])}; }}" for i, ln in enumerate(m.lines)]
@@ -562,7 +798,7 @@ def render(spec: dict, style: Style) -> str:
                  stroke-width: 2; stroke-dasharray: 7 6; opacity: .9; }}
     .zone-label {{ font-family: {s.font}; font-size: {s.zone_label_size}px; font-weight: 700;
                   letter-spacing: .09em; text-transform: uppercase; fill: var(--zc); }}
-    .stop {{ fill: var(--paper); stroke-width: {s.stop_ring}; }}
+{timeline_css}    .stop {{ fill: var(--paper); stroke-width: {s.stop_ring}; }}
     .interchange {{ fill: var(--paper); stroke: var(--ink); stroke-width: {s.stop_ring}; }}
     .label {{ font-family: {s.font}; font-size: {s.label_size}px; font-weight: 600; fill: var(--ink); }}
     @media (prefers-color-scheme: dark) {{
@@ -570,7 +806,7 @@ def render(spec: dict, style: Style) -> str:
 {dark}
     }}
   </style>
-{zone_group}  <g id="routes">
+{timeline_group}{zone_group}  <g id="routes">
 {chr(10).join(routes)}
   </g>
 {dead_group}  <g id="stations">
@@ -586,6 +822,10 @@ def render(spec: dict, style: Style) -> str:
 # ----------------------------------------------------------- spec tools ----
 
 HEX_RE = re.compile(r"#[0-9a-fA-F]{6}$")
+
+# metro is the abstract grid the tool started as; roadmap gives the x axis a
+# calendar. Anything else about a spec means the same in both.
+MODES = ("metro", "roadmap")
 
 # A line is in service unless it says otherwise. Only "out-of-service" ends in a
 # dead end: the other two are lines the network does not reach *yet*.
@@ -612,6 +852,15 @@ def validate_spec(spec: object) -> List[str]:
     errors: List[str] = []
     if not isinstance(spec, dict):
         return ["spec must be a JSON object"]
+
+    mode = spec.get("mode") or "metro"
+    if mode not in MODES:
+        errors.append("spec.mode must be one of " + ", ".join(MODES))
+    elif mode == "roadmap":
+        try:
+            build_timeline(spec.get("timeline"))
+        except ValueError as exc:
+            errors.append(f"roadmap timeline: {exc}")
 
     stations = spec.get("stations")
     if not isinstance(stations, dict):
@@ -708,6 +957,14 @@ def spec_warnings(spec: dict) -> List[str]:
     for sid in spec.get("stations", {}):
         if sid not in used:
             out.append(f"station '{sid}': on no line — drawn without a route")
+    tl = spec_timeline(spec)
+    if tl:
+        for sid, st in spec.get("stations", {}).items():
+            gx = st.get("gx")
+            if isinstance(gx, (int, float)) and not isinstance(gx, bool) \
+                    and not 0 <= gx <= tl.columns:
+                out.append(f"station '{sid}': gx {gx:g} is off the timeline "
+                           f"(0 to {tl.columns})")
     return out
 
 
@@ -718,7 +975,8 @@ def style_from(source: object, base: Optional[Style] = None) -> Style:
         for field in ("cell", "stroke", "corner", "bundle_gap", "stop_r",
                       "stop_ring", "inter_r", "label_size", "label_gap", "margin",
                       "zone_pad", "zone_radius", "zone_fill", "zone_label_size",
-                      "status_fade", "buffer_len"):
+                      "status_fade", "buffer_len",
+                      "tl_row_h", "tl_label_size", "tl_major_size"):
             v = source.get(field)
             if isinstance(v, (int, float)) and not isinstance(v, bool):
                 setattr(style, field, float(v))

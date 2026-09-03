@@ -4,11 +4,17 @@ app.py — browser front end for metro_map.py.
 
 Serves a design workspace: place stations on a grid by dragging them on a live
 canvas, then build lines by picking from the stations already placed. Maps are
-plain metro_map specs, loaded from and saved to a directory of JSON files
-(default ./maps), so anything designed here still renders from the command line.
+plain metro_map specs, loaded from and saved to JSON files, so anything designed
+here still renders from the command line.
+
+They live in two folders: ./mymaps for your own work, which the repo ignores,
+and ./shared-maps for the maps that ship with the tool. A map is addressed by
+name plus folder; an unqualified read looks in mymaps first, so a personal copy
+shadows a shared one of the same name, and a save goes back to the folder the
+map came from.
 
     python3 app.py                       # http://127.0.0.1:8765
-    python3 app.py --port 9000 --maps-dir ~/maps
+    python3 app.py --port 9000 --maps-dir ~/maps --shared-maps-dir ./shared-maps
 
 The rendering, geometry and validation all live in metro_map; this module only
 moves specs between the browser and disk.
@@ -24,7 +30,9 @@ import os
 import re
 import tempfile
 import threading
+from datetime import timedelta
 from pathlib import Path
+from typing import Dict, Optional, Tuple
 
 from flask import Flask, Response, abort, jsonify, render_template, request
 
@@ -34,20 +42,46 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024      # a spec is a few KB
 app.config["JSON_SORT_KEYS"] = False
 
-MAPS_DIR = Path("maps").resolve()
+# Two folders, one namespace. mymaps is yours and git-ignored; shared is what
+# the repo ships. Search order matters: an unqualified name finds mymaps first.
+FOLDERS: Dict[str, Path] = {"mymaps": Path("mymaps").resolve(),
+                            "shared": Path("shared-maps").resolve()}
+DEFAULT_FOLDER = "mymaps"
 NAME_RE = re.compile(r"[A-Za-z0-9 _-]{1,64}$")
 
 
 # ----------------------------------------------------------------- paths ----
 
-def map_path(name: str) -> Path:
-    """Resolve a map name to a file inside MAPS_DIR, or refuse it."""
+def base_dir(folder: str) -> Path:
+    if folder not in FOLDERS:
+        abort(400, f"unknown folder '{folder}' — one of " + ", ".join(FOLDERS))
+    return FOLDERS[folder]
+
+
+def map_path(name: str, folder: str = DEFAULT_FOLDER) -> Path:
+    """Resolve a map name to a file inside one folder, or refuse it."""
+    base = base_dir(folder)
     if not NAME_RE.match(name or ""):
         abort(400, "map name may only contain letters, digits, space, - and _")
-    path = (MAPS_DIR / f"{name}.json").resolve()
-    if path.parent != MAPS_DIR:            # belt and braces after the name check
+    path = (base / f"{name}.json").resolve()
+    if path.parent != base:                # belt and braces after the name check
         abort(400, "map name escapes the maps directory")
     return path
+
+
+def find_map(name: str, folder: Optional[str] = None) -> Tuple[Path, str]:
+    """The file a name refers to, and the folder it was found in.
+
+    With no folder given, mymaps wins over shared. When it exists in neither,
+    the answer is where it *would* go, so the caller can 404 with a real path.
+    """
+    if folder:
+        return map_path(name, folder), folder
+    for candidate in FOLDERS:
+        path = map_path(name, candidate)
+        if path.exists():
+            return path, candidate
+    return map_path(name, DEFAULT_FOLDER), DEFAULT_FOLDER
 
 
 def spec_version(path: Path) -> str:
@@ -73,8 +107,8 @@ def read_spec(path: Path) -> dict:
 
 def write_spec(path: Path, spec: dict) -> None:
     """Atomic write, so a crash mid-save never truncates an existing map."""
-    MAPS_DIR.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=MAPS_DIR, prefix=".tmp-", suffix=".json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-", suffix=".json")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(spec, fh, ensure_ascii=False, indent=2)
@@ -103,29 +137,31 @@ def index() -> str:
 
 @app.get("/api/maps")
 def list_maps():
-    MAPS_DIR.mkdir(parents=True, exist_ok=True)
     out = []
-    for path in sorted(MAPS_DIR.glob("*.json")):
-        entry = {"name": path.stem, "mtime": path.stat().st_mtime,
-                 "version": spec_version(path)}
-        try:
-            spec = read_spec(path)
-            entry["stations"] = len(spec["stations"])
-            entry["lines"] = len(spec["lines"])
-            entry["zones"] = len(spec["zones"])
-        except (OSError, ValueError):
-            entry["error"] = "not readable as a spec"
-        out.append(entry)
+    for folder, base in FOLDERS.items():        # mymaps first, then shared
+        base.mkdir(parents=True, exist_ok=True)
+        for path in sorted(base.glob("*.json")):
+            entry = {"name": path.stem, "folder": folder,
+                     "mtime": path.stat().st_mtime, "version": spec_version(path)}
+            try:
+                spec = read_spec(path)
+                entry["stations"] = len(spec["stations"])
+                entry["lines"] = len(spec["lines"])
+                entry["zones"] = len(spec["zones"])
+                entry["mode"] = spec.get("mode") or "metro"
+            except (OSError, ValueError):
+                entry["error"] = "not readable as a spec"
+            out.append(entry)
     return jsonify(out)
 
 
 @app.get("/api/maps/<name>")
 def get_map(name: str):
-    path = map_path(name)
+    path, folder = find_map(name, request.args.get("folder"))
     if not path.exists():
         abort(404, f"no map called '{name}'")
     try:
-        return jsonify({"name": name, "spec": read_spec(path),
+        return jsonify({"name": name, "folder": folder, "spec": read_spec(path),
                         "version": spec_version(path)})
     except (OSError, ValueError) as exc:
         abort(400, f"could not read '{name}': {exc}")
@@ -133,8 +169,13 @@ def get_map(name: str):
 
 @app.put("/api/maps/<name>")
 def put_map(name: str):
-    path = map_path(name)
     data = body()
+    # A save says where it goes. A save that does not — an older client, or a
+    # script — lands where the map already lives, and only a genuinely new map
+    # defaults to mymaps: overwriting a shared map is what the caller meant,
+    # where quietly forking a mymaps copy that then shadows it is not.
+    folder = data.get("folder") or find_map(name)[1]
+    path = map_path(name, folder)
     spec = data.get("spec")
     errors = mm.validate_spec(spec)
     if errors:
@@ -150,7 +191,8 @@ def put_map(name: str):
                 "conflict": True,
                 "errors": [f"'{name}' changed since you loaded it — "
                            "another editor or an agent saved it"],
-                "name": name, "spec": read_spec(path), "version": current,
+                "name": name, "folder": folder,
+                "spec": read_spec(path), "version": current,
             }), 409
 
     if data.get("auto_interchange", True):
@@ -159,21 +201,21 @@ def put_map(name: str):
         write_spec(path, spec)
     except OSError as exc:
         abort(500, f"could not write '{name}': {exc}")
-    return jsonify({"name": name, "spec": spec, "saved": True,
+    return jsonify({"name": name, "folder": folder, "spec": spec, "saved": True,
                     "version": spec_version(path),
                     "warnings": mm.spec_warnings(spec)})
 
 
 @app.delete("/api/maps/<name>")
 def delete_map(name: str):
-    path = map_path(name)
+    path, folder = find_map(name, request.args.get("folder"))
     if not path.exists():
         abort(404, f"no map called '{name}'")
     try:
         path.unlink()
     except OSError as exc:
         abort(500, f"could not delete '{name}': {exc}")
-    return jsonify({"name": name, "deleted": True})
+    return jsonify({"name": name, "folder": folder, "deleted": True})
 
 
 @app.post("/api/render")
@@ -191,14 +233,52 @@ def render_map():
         svg = mm.render(spec, style)
     except (KeyError, ValueError, ZeroDivisionError) as exc:
         return jsonify({"errors": [f"render failed: {exc}"]}), 400
-    return jsonify({"svg": svg, "interchanges_changed": changed,
-                    "warnings": mm.spec_warnings(spec),
-                    "stations": spec["stations"]})
+    out = {"svg": svg, "interchanges_changed": changed,
+           "warnings": mm.spec_warnings(spec), "stations": spec["stations"]}
+    # the resolved ruler, so the browser can name dates without redoing the maths
+    tl = mm.spec_timeline(spec)
+    if tl:
+        out["timeline"] = timeline_payload(tl)
+    return jsonify(out)
+
+
+def timeline_payload(tl: mm.Timeline) -> dict:
+    """A resolved ruler as the browser and the agents want it.
+
+    Every column is named and dated here rather than in the client, so the date
+    arithmetic lives in one language.
+    """
+    columns = []
+    for k in range(tl.columns):
+        starts = tl.boundary(k)
+        minor = mm.minor_label(starts, tl.interval)
+        major = mm.major_label(starts, tl.interval)
+        columns.append({"gx": k, "date": starts.isoformat(), "label": minor,
+                        "full": f"{minor} {major}".strip(),
+                        "ends": (tl.boundary(k + 1) - timedelta(days=1)).isoformat()})
+    return {"columns": tl.columns, "interval": tl.interval,
+            "start": tl.start.isoformat(), "end": tl.end.isoformat(),
+            "columns_at": columns}
+
+
+@app.post("/api/timeline")
+def timeline_info():
+    """Resolve a timeline block on its own, without a spec around it.
+
+    The Timeline panel and the resolve_timeline MCP tool both need the snapped
+    range and the column names before there is anything worth rendering.
+    """
+    data = body()
+    try:
+        tl = mm.build_timeline(data.get("timeline"))
+    except ValueError as exc:
+        return jsonify({"errors": [str(exc)]}), 400
+    return jsonify(timeline_payload(tl))
 
 
 @app.get("/api/maps/<name>/svg")
 def download_svg(name: str):
-    path = map_path(name)
+    path, _ = find_map(name, request.args.get("folder"))
     if not path.exists():
         abort(404, f"no map called '{name}'")
     spec = read_spec(path)
@@ -215,6 +295,9 @@ def palette():
     return jsonify([{"name": n, "color": c} for n, c in mm.PALETTE])
 
 
+MODE_TITLES = {"metro": "Metro map", "roadmap": "Roadmap"}
+FOLDER_TITLES = {"mymaps": "My maps", "shared": "Shared"}
+
 STATUS_TITLES = {
     "live": "In service",
     "out-of-service": "Out of service — dead end",
@@ -229,7 +312,13 @@ def defaults():
                     "label_sides": list(mm.COMPASS),
                     "line_statuses": [{"value": k, "label": STATUS_TITLES.get(k, k)}
                                       for k in mm.STATUS_CLASS],
-                    "label_angles": list(mm.LABEL_ANGLES)})
+                    "label_angles": list(mm.LABEL_ANGLES),
+                    "modes": [{"value": k, "label": MODE_TITLES.get(k, k)}
+                              for k in mm.MODES],
+                    "intervals": list(mm.INTERVALS),
+                    "folders": [{"value": k, "label": FOLDER_TITLES.get(k, k)}
+                                for k in FOLDERS],
+                    "default_folder": DEFAULT_FOLDER})
 
 
 @app.post("/api/shutdown")
@@ -261,17 +350,21 @@ def as_json(exc):
 # ------------------------------------------------------------------ main ----
 
 def main() -> int:
-    global MAPS_DIR
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8765)
-    ap.add_argument("--maps-dir", default="maps")
+    ap.add_argument("--maps-dir", default="mymaps",
+                    help="your own maps (default: mymaps)")
+    ap.add_argument("--shared-maps-dir", default="shared-maps",
+                    help="maps that ship with the tool (default: shared-maps)")
     ap.add_argument("--debug", action="store_true")
     args = ap.parse_args()
 
-    MAPS_DIR = Path(args.maps_dir).expanduser().resolve()
-    MAPS_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"  maps directory: {MAPS_DIR}")
+    FOLDERS["mymaps"] = Path(args.maps_dir).expanduser().resolve()
+    FOLDERS["shared"] = Path(args.shared_maps_dir).expanduser().resolve()
+    for folder, base in FOLDERS.items():
+        base.mkdir(parents=True, exist_ok=True)
+        print(f"  {folder:<7} maps: {base}")
     print(f"  designer:       http://{args.host}:{args.port}")
     app.run(host=args.host, port=args.port, debug=args.debug)
     return 0
