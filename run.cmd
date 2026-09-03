@@ -19,8 +19,14 @@ set "NO_BROWSER=0"
 :: Parse arguments
 :parse_args
 if "%~1"=="" goto run_script
-if /i "%~1"=="-Port" (set "PORT=%~2" & shift & shift & goto parse_args)
-if /i "%~1"=="-Bind" (set "BIND=%~2" & shift & shift & goto parse_args)
+if /i "%~1"=="-Port" (
+    if "%~2"=="" (echo   ! -Port needs a number & exit /b 2)
+    set "PORT=%~2" & shift & shift & goto parse_args
+)
+if /i "%~1"=="-Bind" (
+    if "%~2"=="" (echo   ! -Bind needs an address & exit /b 2)
+    set "BIND=%~2" & shift & shift & goto parse_args
+)
 if /i "%~1"=="-Stop" (set "STOP_ONLY=1" & shift & goto parse_args)
 if /i "%~1"=="-NoBrowser" (set "NO_BROWSER=1" & shift & goto parse_args)
 shift
@@ -30,9 +36,10 @@ goto parse_args
 set "SCRIPT_DIR=%~dp0"
 cd /d "%SCRIPT_DIR%"
 
+:: :stop_designer returns 1 when the port belongs to something that is not ours
 if "%STOP_ONLY%"=="1" (
     call :stop_designer
-    echo   stopped
+    if errorlevel 1 exit /b 1
     exit /b 0
 )
 
@@ -53,10 +60,16 @@ if not exist "%PY_VENV%" (
     )
     "%PY_VENV%" -m pip install --quiet --upgrade pip
     "%PY_VENV%" -m pip install --quiet -r requirements.txt
+    if errorlevel 1 (
+        echo   ! could not install requirements.txt - check your network or proxy
+        echo   ! then delete .venv and run this again
+        exit /b 1
+    )
 )
 
-:: Restart Logic
+:: Restart Logic - do not start on top of a port we could not free
 call :stop_designer
+if errorlevel 1 exit /b 1
 echo   starting designer on http://%BIND%:%PORT%
 :: its own minimised window, so the server outlives this script when run.cmd
 :: was double-clicked and its console closes
@@ -95,12 +108,21 @@ if not defined HOLDER (
 )
 curl -s -X POST --max-time 2 "http://127.0.0.1:%PORT%/api/shutdown" >nul 2>&1
 timeout /t 1 /nobreak >nul 2>&1
-:: only ever kill our own interpreter - something else on the port is not ours
-tasklist /fi "pid eq %HOLDER%" 2>nul | findstr /i "python" >nul
+
+:: Did it take the hint and go? Ask whether the pid exists at all before asking
+:: what it is, or "already gone" and "not ours" both look like the same answer.
+tasklist /fi "pid eq %HOLDER%" 2>nul | findstr /i "%HOLDER%" >nul
 if errorlevel 1 (
     echo   stopped pid %HOLDER%
-) else (
-    echo   killing pid %HOLDER%
-    taskkill /f /pid %HOLDER% >nul 2>&1
+    goto :eof
 )
+:: still there - only ever kill our own interpreter
+tasklist /fi "pid eq %HOLDER%" 2>nul | findstr /i "python" >nul
+if errorlevel 1 (
+    echo   ! port %PORT% is held by pid %HOLDER%, which is not one of ours
+    echo   ! close it, or start somewhere else:  run.cmd -Port 9000
+    exit /b 1
+)
+echo   killing pid %HOLDER%
+taskkill /f /pid %HOLDER% >nul 2>&1
 goto :eof
