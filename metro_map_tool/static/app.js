@@ -1375,6 +1375,122 @@ function toggleJoinMember(index, sid) {
   });
 }
 
+/* A milestone that lands on several lines at once is one capsule but many
+   stops — one per line, because each line has to stop there for its route to be
+   right. Placing six of those by hand and joining them is the tedious half of
+   the tube-map look, so this does the whole thing in one action. */
+
+/** The row a line runs on near a given x — the gy of its closest stop. */
+function laneOf(line, gx) {
+  const stops = (line.stations || []).map((s) => S.spec.stations[s]).filter(Boolean);
+  if (!stops.length) return 0;
+  return stops.reduce((best, st) =>
+    Math.abs(st.gx - gx) < Math.abs(best.gx - gx) ? st : best, stops[0]).gy;
+}
+
+/** Put a stop into a route where its x belongs, keeping the line left to right. */
+function insertByGx(line, sid, gx) {
+  const route = line.stations || (line.stations = []);
+  let at = route.findIndex((s) => {
+    const st = S.spec.stations[s];
+    return st && st.gx > gx;
+  });
+  if (at < 0) at = route.length;
+  route.splice(at, 0, sid);
+  // notes are addressed by hop index, and a stop inserted before them moves
+  // every later hop along by one; without this they would quietly retarget
+  for (const note of line.notes || []) {
+    if (note && typeof note.at === "number" && note.at >= at) note.at += 1;
+  }
+  return at;
+}
+
+function freeId(base) {
+  const root = (base || "s").toLowerCase().replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "").slice(0, 24) || "stop";
+  if (!S.spec.stations[root]) return root;
+  let n = 2;
+  while (S.spec.stations[`${root}-${n}`]) n += 1;
+  return `${root}-${n}`;
+}
+
+function milestoneDialog() {
+  const usable = S.spec.lines
+    .map((ln, i) => ({ ln, i }))
+    .filter(({ ln }) => (ln.stations || []).length);
+  if (!usable.length) {
+    showProblems(["No line has any stops yet — route at least one line first, "
+      + "so a milestone knows which row each line runs on."]);
+    return;
+  }
+  const suggested = Math.max(...Object.values(S.spec.stations).map((s) => s.gx), -1) + 1;
+
+  dialog("Milestone across lines", `
+    <p class="note">One stop on each line you pick, all at the same grid x, joined
+      into a single capsule. The label goes on the join, so it is written once.</p>
+    <label class="field"><span>Label</span>
+      <input type="text" id="m-label" value="Milestone" autofocus></label>
+    <div class="pair">
+      <label class="field"><span>Grid x</span>
+        <input type="number" id="m-gx" step="${S.snap}" value="${suggested}"></label>
+      <label class="field"><span>Label angle</span><select id="m-angle">
+        ${LABEL_ANGLES.map((a) => `<option value="${a}" ${a === 45 ? "selected" : ""}>${a}°</option>`).join("")}
+      </select></label>
+    </div>
+    ${isRoadmap() ? `<label class="field"><span>Or pick a date</span>
+      <input type="date" id="m-date"></label>` : ""}
+    <h3>Lines it lands on</h3>
+    <div class="hops" id="m-lines">
+      ${usable.map(({ ln, i }) => `
+        <label class="toggle"><input type="checkbox" data-line="${i}" checked>
+          <span class="swatch" style="background:${esc(ln.color)}"></span>
+          ${esc(ln.name)}</label>`).join("")}
+    </div>
+    <div class="actions"><button value="cancel">Cancel</button>
+      <button type="button" class="primary" id="m-ok">Add milestone</button></div>`,
+  (form, dlg) => {
+    const dateField = form.querySelector("#m-date");
+    if (dateField) {
+      dateField.addEventListener("change", (ev) => {
+        const gx = gxForDate(ev.target.value);
+        if (gx === null) { ev.target.value = ""; return; }
+        form.querySelector("#m-gx").value = gx;
+      });
+    }
+    form.querySelector("#m-ok").addEventListener("click", () => {
+      const label = form.querySelector("#m-label").value.trim() || "Milestone";
+      const gx = Number(form.querySelector("#m-gx").value);
+      const angle = Number(form.querySelector("#m-angle").value);
+      const picked = [...form.querySelectorAll("[data-line]:checked")]
+        .map((b) => Number(b.dataset.line));
+      dlg.close();
+      if (!Number.isFinite(gx) || !picked.length) {
+        showProblems(["A milestone needs a grid x and at least one line."]);
+        return;
+      }
+      addMilestone(label, gx, angle, picked);
+    });
+  });
+}
+
+function addMilestone(label, gx, angle, lineIndexes) {
+  applyChange(() => {
+    const members = [];
+    for (const li of lineIndexes) {
+      const line = S.spec.lines[li];
+      if (!line) continue;
+      const sid = freeId(`${label}-${line.name}`);
+      S.spec.stations[sid] = { label: `${label} · ${line.name}`,
+                               gx, gy: laneOf(line, gx) };
+      insertByGx(line, sid, gx);
+      members.push(sid);
+    }
+    S.spec.interchanges.push({ label, stations: members,
+                               label_at: "above", label_angle: angle || undefined });
+    S.sel = { kind: "join", id: S.spec.interchanges.length - 1 };
+  });
+}
+
 function addJoin() {
   const i = S.spec.interchanges.length;
   applyChange(() => {
@@ -2255,6 +2371,7 @@ async function boot() {
   $("#btn-add-zone").addEventListener("click", addZone);
   $("#btn-add-scenario").addEventListener("click", addScenario);
   $("#btn-add-join").addEventListener("click", addJoin);
+  $("#btn-milestone").addEventListener("click", milestoneDialog);
   $("#btn-ride-play").addEventListener("click", toggleRides);
   $("#btn-ride-restart").addEventListener("click", restartRides);
   $("#btn-new").addEventListener("click", newMap);

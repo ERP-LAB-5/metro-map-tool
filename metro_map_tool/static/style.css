@@ -451,3 +451,7 @@ body.side-hidden .side { display: none; }
   :root:not([data-theme="light"]) #btn-restart,
   :root:not([data-theme="light"]) button.warn-btn { color: #f6a821; border-color: #8a5a1c; }
 }
+
+/* the line picker in the milestone dialog */
+#m-lines .toggle { gap: 7px; color: var(--ink); }
+#m-lines .swatch { flex: 0 0 auto; }

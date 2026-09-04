@@ -112,6 +112,9 @@ where it crosses something.
 "label_angle"?}`. Each draws **one capsule covering the stops listed**, replacing
 their individual markers — the tube-map way of showing a correspondance.
 
+In the designer, **+ Milestone…** on the Joins tab builds one in a single step:
+it makes a stop per chosen line at the same x, routes each one, and joins them.
+
 Reach for it when one event lands on several parallel lines at once: a milestone
 across six team lanes is six stops (each line needs its own, or the line does not
 stop there) joined into one capsule. Give the *join* the label and the member

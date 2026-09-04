@@ -1,6 +1,6 @@
 # metro-map-tool
 
-**v2.17.1** · GPL-3.0 · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
+**v2.18.0** · GPL-3.0 · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
 
 Transit-map diagrams for landscapes, pipelines and migrations: a JSON spec of
 **stations** on a grid, **lines** routed through them and **zones** banding
@@ -73,6 +73,11 @@ meeting again at the saved file. After that it reopens whatever you had last.
   timeline, so a system that was already running and has one milestone on it
   draws as a full-width line through that stop. Without a timeline the leftmost
   and rightmost stations stand in for the edges.
+- **+ Milestone…** (Joins tab) does the tedious half in one action: pick a
+  label, an x (or a date), and which lines it lands on, and it drops one stop on
+  each of those lines at that x, routes them in the right order, and joins them
+  into a single capsule. The label goes on the join, so it is written once
+  rather than once per lane.
 - **Joins** (Joins tab) draw a *stretched interchange*: one capsule covering
   several stops, the way a tube map marks a correspondance. Use it for a
   milestone that lands on several parallel lines at once — the capsule stretches
@@ -148,8 +153,8 @@ If it saves you an afternoon, [buy me a coffee](https://www.buymeacoffee.com/dla
 with Windows 10 and later, and with every Linux and macOS:
 
 ```bash
-curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.17.1.tar.gz | tar xz
-cd metro-map-tool-2.17.1
+curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.18.0.tar.gz | tar xz
+cd metro-map-tool-2.18.0
 ./run.sh                 # or run.cmd on Windows
 ```
 
@@ -157,7 +162,7 @@ cd metro-map-tool-2.17.1
 commands on your PATH in their own virtual environment:
 
 ```bash
-pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.17.1
+pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.18.0
 metro-map-designer                    # the browser designer
 metro-map spec.json -o map.svg        # the renderer
 metro-map-mcp                         # the MCP server, for agents
@@ -179,7 +184,7 @@ into the new version only if the install actually succeeded.
 
 ```bash
 # name the new tag — the dependable form
-pip install --upgrade git+https://github.com/ERP-LAB-5/metro-map-tool@v2.17.1
+pip install --upgrade git+https://github.com/ERP-LAB-5/metro-map-tool@v2.18.0
 
 # or drop the tag to track the default branch and always get the newest
 pip install --upgrade git+https://github.com/ERP-LAB-5/metro-map-tool
@@ -193,7 +198,7 @@ With pipx, `pipx upgrade` re-runs whatever spec you first installed and has the
 same pinned-tag problem, so name the tag and force it:
 
 ```bash
-pipx install --force git+https://github.com/ERP-LAB-5/metro-map-tool@v2.17.1
+pipx install --force git+https://github.com/ERP-LAB-5/metro-map-tool@v2.18.0
 ```
 
 **After any update**, if you use the agent skill, refresh your copy — it is a
