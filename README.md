@@ -1,6 +1,6 @@
 # metro-map-tool
 
-**v2.12.0** · MIT · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
+**v2.13.0** · GPL-3.0 · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
 
 Transit-map diagrams for landscapes, pipelines and migrations: a JSON spec of
 **stations** on a grid, **lines** routed through them and **zones** banding
@@ -131,7 +131,15 @@ the *interchanges* toggle is on.
 
 ## Licence and credits
 
-MIT. © 2026 D-LAB-5 — *Twin. Experiment. Automate.*
+GPL-3.0-or-later. © 2026 D-LAB-5 — *Twin. Experiment. Automate.*
+
+You may use, study, change and share it; if you distribute a changed version,
+it has to carry the same freedoms and ship its source. See [LICENSE](LICENSE).
+
+**Releases up to and including v2.12.0 were published under the MIT licence and
+remain available on those terms** — a licence already given cannot be withdrawn.
+The change applies from v2.13.0 onward.
+
 If it saves you an afternoon, [buy me a coffee](https://www.buymeacoffee.com/dlab5).
 
 ## Installing without a clone
@@ -140,8 +148,8 @@ If it saves you an afternoon, [buy me a coffee](https://www.buymeacoffee.com/dla
 with Windows 10 and later, and with every Linux and macOS:
 
 ```bash
-curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.12.0.tar.gz | tar xz
-cd metro-map-tool-2.12.0
+curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.13.0.tar.gz | tar xz
+cd metro-map-tool-2.13.0
 ./run.sh                 # or run.cmd on Windows
 ```
 
@@ -149,7 +157,7 @@ cd metro-map-tool-2.12.0
 commands on your PATH in their own virtual environment:
 
 ```bash
-pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.12.0
+pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.13.0
 metro-map-designer                    # the browser designer
 metro-map spec.json -o map.svg        # the renderer
 metro-map-mcp                         # the MCP server, for agents

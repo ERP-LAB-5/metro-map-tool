@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 D-LAB-5
 """metro-map-tool — transit-map diagrams rendered to a standalone SVG.
 
 The package holds the renderer (metro_map), the browser designer (app) and the

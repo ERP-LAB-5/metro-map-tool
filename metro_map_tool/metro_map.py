@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 D-LAB-5
 """
 metro_map.py — render a transit-map spec to a standalone SVG.
 

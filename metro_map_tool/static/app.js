@@ -1,4 +1,7 @@
-/* Metro map designer.
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 D-LAB-5
+ *
+ * Metro map designer.
  *
  * The browser owns the spec and the interaction; the server owns the geometry.
  * Every change funnels through applyChange() -> scheduleRender(), which POSTs
@@ -1750,7 +1753,7 @@ async function aboutDialog() {
         <dt>Latest</dt><dd id="a-latest">checking…</dd>
         <dt>Repository</dt>
         <dd><a href="${repo}" target="_blank" rel="noopener noreferrer">${repo.replace("https://", "")}</a></dd>
-        <dt>Licence</dt><dd>MIT</dd>
+        <dt>Licence</dt><dd><a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener noreferrer">GPL-3.0-or-later</a></dd>
       </dl>
       <p class="note" id="a-note"></p>
       <pre class="about-log" id="a-log" hidden></pre>
