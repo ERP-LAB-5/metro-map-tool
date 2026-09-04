@@ -169,5 +169,20 @@
         "golive"
       ]
     }
+  ],
+  "scenarios": [
+    {
+      "name": "The migration journey",
+      "color": "#7b3fb5",
+      "duration": 10,
+      "stations": [
+        "kickoff",
+        "discovery",
+        "blueprint",
+        "migrate",
+        "cutover",
+        "golive"
+      ]
+    }
   ]
 }

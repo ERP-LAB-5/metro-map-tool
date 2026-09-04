@@ -55,6 +55,7 @@
       <button class="tab is-on" data-tab="stations">Stations</button>
       <button class="tab" data-tab="lines">Lines</button>
       <button class="tab" data-tab="zones">Zones</button>
+      <button class="tab" data-tab="scenarios">Rides</button>
       <button class="tab" data-tab="timeline" hidden>Timeline</button>
       <button class="tab" data-tab="style">Style</button>
     </nav>
@@ -84,6 +85,15 @@
       </div>
       <p class="note">A tinted band behind the stations you put in it — “Upgrade”, “Preferred”, and so on.</p>
       <ul id="zone-list" class="list"></ul>
+    </section>
+
+    <section class="pane" data-pane="scenarios">
+      <div class="pane-head">
+        <h2>Rides</h2>
+        <button id="btn-add-scenario" class="primary">+ Add</button>
+      </div>
+      <p class="note">A traveller's route from start to end. It rides the drawn track and changes line wherever the journey does, so every pair of stops needs a line between them.</p>
+      <ul id="scenario-list" class="list"></ul>
     </section>
 
     <section class="pane" data-pane="timeline">

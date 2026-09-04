@@ -388,8 +388,9 @@ def palette():
 
 
 MODE_TITLES = {"metro": "Metro map", "roadmap": "Roadmap"}
-DEAD_END_TITLES = {"none": "none", "buffer": "end of the line",
-                   "fire": "burning platform"}
+DEAD_END_TITLES = {"none": "none", "buffer": "end of the line — stops here",
+                   "smoke": "smoke — watch out",
+                   "fire": "burning platform — get off"}
 FOLDER_TITLES = {"mymaps": "My maps", "shared": "Shared"}
 
 STATUS_TITLES = {

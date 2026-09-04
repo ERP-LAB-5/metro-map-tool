@@ -12,7 +12,7 @@ Input JSON
                         |"above-left"|"above-right"
                         |"below-left"|"below-right",   # optional override
              "label_angle": 0|45|90,                   # counter-clockwise tilt
-             "dead_end": "buffer"|"fire"}               # terminus, or burning platform
+             "dead_end": "buffer"|"smoke"|"fire"}      # stops here / watch out / get off
   },
   "lines": [ {"name": str, "color": "#rrggbb", "stations": ["<id>", ...],
               "status": "live"|"out-of-service"|"under-construction"|"planned"?} ],
@@ -20,7 +20,9 @@ Input JSON
   "mode": "metro"|"roadmap"?,                    # metro is the default
   "timeline": {"start": "yyyy-mm-dd", "end": "yyyy-mm-dd",
                "interval": "day"|"week"|"month"|"quarter"|"year"}?,  # roadmap only
-  "legend": "hide"|"top"|"left"|"bottom"|"right"?   # bottom is the default
+  "legend": "hide"|"top"|"left"|"bottom"|"right"?,  # bottom is the default
+  "scenarios": [ {"name": str, "stations": ["<id>", ...],
+                  "color": "#rrggbb"?, "duration": <seconds>?} ]?
 }
 
 A line may also carry "notes": [{"at": <hop index>, "text": str, "flip": bool?}],
@@ -44,9 +46,12 @@ Geometry rules
    "label_at" overrides this per station.
    "label_angle" tilts the text; a tilted label is anchored at the marker edge
    and reads outward, so it never sweeps back across its own station.
-6a. A stop with "dead_end" is capped: "buffer" is the terminus bar, "fire" is
-   that bar with flames off it — the burning platform. The marker is oriented by
-   the track arriving at the stop, so it works at any angle.
+6a. A stop with "dead_end" is capped by the terminus bar, at one of three
+   volumes: "buffer" simply stops, "smoke" adds drifting puffs — watch out — and
+   "fire" adds flames, the burning platform you should get off. The bar is
+   oriented by the track arriving at the stop, so it works at any angle; the
+   smoke and fire always rise up the page, because that is what makes them read
+   as smoke and fire rather than as a jet.
 6. A line is in service unless "status" says otherwise: out-of-service is dashed
    and faded and gets a buffer-stop bar wherever it ends on a stop no line in
    service reaches — the dead end; under-construction is a long dash; planned is
@@ -63,7 +68,12 @@ Geometry rules
 9. The legend names every line beside a swatch drawn in its own colour and dash
    pattern, laid outside everything else — outside the roadmap header too. On a
    horizontal edge the entries wrap into rows rather than running off the side.
-10. A note rides the middle of one hop, measured along the track after bundling
+10. A scenario is a traveller's route: an ordered list of stops, animated as a
+   dot riding the drawn track from the first to the last. Consecutive stops must
+   be joined by some line, in either direction; the journey changes line
+   wherever it needs to. The motion is written into the SVG and honours the
+   reader's reduced-motion setting.
+11. A note rides the middle of one hop, measured along the track after bundling
    so it follows its own line out of a shared corridor, and is rotated to the
    track. The rotation is kept within (-90, 90], so a note never reads upside
    down and a vertical one reads top to bottom.
@@ -195,6 +205,27 @@ def drop_collinear(pts: Sequence[Point]) -> List[Point]:
     return out
 
 
+def join_legs(legs: Sequence[Tuple[Point, Point]]) -> List[Point]:
+    """Points through a run of offset legs, re-joined at their intersections.
+
+    Two legs that have been pushed apart into parallel tracks no longer meet;
+    extending each to where they cross closes the corner rather than leaving a
+    step in it. Parallel legs never cross, so those fall back to the midpoint.
+    """
+    if not legs:
+        return []
+    pts = [legs[0][0]]
+    for a, b in zip(legs, legs[1:]):
+        x = intersect(a[0], sub(a[1], a[0]), b[0], sub(b[1], b[0]))
+        pts.append(x or scale(add(a[1], b[0]), 0.5))
+    pts.append(legs[-1][1])
+    out: List[Point] = [pts[0]]
+    for p in pts[1:]:
+        if dist(p, out[-1]) > 0.5:
+            out.append(p)
+    return drop_collinear(out)
+
+
 def rounded_path(pts: Sequence[Point], radius: float) -> str:
     """SVG path data through pts with rounded corners."""
     f = lambda p: f"{p[0]:.2f} {p[1]:.2f}"
@@ -300,17 +331,47 @@ class Map:
     def polyline(self, line_index: int) -> List[Point]:
         """Offset legs of one line, re-joined at their intersections."""
         segs = [s for s in self.segments if s["line"] == line_index]
-        legs = [(add(s["p"], s["shift"]), add(s["q"], s["shift"])) for s in segs]
-        pts = [legs[0][0]]
-        for a, b in zip(legs, legs[1:]):
-            x = intersect(a[0], sub(a[1], a[0]), b[0], sub(b[1], b[0]))
-            pts.append(x or scale(add(a[1], b[0]), 0.5))
-        pts.append(legs[-1][1])
-        out: List[Point] = [pts[0]]
-        for p in pts[1:]:
-            if dist(p, out[-1]) > 0.5:
-                out.append(p)
-        return drop_collinear(out)
+        return join_legs([(add(s["p"], s["shift"]), add(s["q"], s["shift"]))
+                          for s in segs])
+
+    def hop_legs(self, a: str, b: str) -> Optional[List[Tuple[Point, Point]]]:
+        """The offset legs of a single hop between two stops, running a to b.
+
+        Any line that runs the pair directly will do, in either direction — a
+        traveller does not care which line's timetable it is, only that there is
+        track. Returns None when nothing connects them, which is a scenario
+        asking to walk across open ground.
+        """
+        for li, line in enumerate(self.lines):
+            ids = line["stations"]
+            for k in range(len(ids) - 1):
+                pair = (ids[k], ids[k + 1])
+                if pair not in ((a, b), (b, a)):
+                    continue
+                segs = [g for g in self.segments
+                        if g["line"] == li and g["hop"] == k]
+                legs = [(add(g["p"], g["shift"]), add(g["q"], g["shift"]))
+                        for g in segs]
+                if pair == (a, b):
+                    return legs
+                return [(q, p) for p, q in reversed(legs)]
+        return None
+
+    def journey(self, stations: Sequence[str]) -> Optional[List[Point]]:
+        """The path a traveller takes through a list of stops, or None.
+
+        Built from the same offset legs the lines are drawn from, so the
+        traveller sits on the track rather than near it — including the jog
+        across to the other rail when the journey changes line at an
+        interchange.
+        """
+        legs: List[Tuple[Point, Point]] = []
+        for a, b in zip(stations, stations[1:]):
+            hop = self.hop_legs(a, b)
+            if hop is None:
+                return None
+            legs.extend(hop)
+        return join_legs(legs) if legs else None
 
     # -- stations ----------------------------------------------------------
 
@@ -641,10 +702,13 @@ def timeline_svg(tl: Timeline, style: Style, top: float, bottom: float
 # designer's side panel, and a reader had to infer what a colour meant from the
 # stations it happened to touch.
 
-# A stop can be marked as the end of the road. "buffer" is the ordinary
-# terminus bar an out-of-service line already gets; "fire" is that same bar with
-# flames off it — the burning platform, for the branch that ends badly.
-DEAD_ENDS = ("none", "buffer", "fire")
+# A stop can be marked as the end of the road, at three volumes. All three share
+# the terminus bar, so they read as one family — the same end, more or less
+# urgent — rather than as three unrelated symbols.
+#   buffer  the line simply stops here. A planned retirement.
+#   smoke   watch out: this is going wrong, though not yet today's problem.
+#   fire    the burning platform. Get off this train.
+DEAD_ENDS = ("none", "buffer", "smoke", "fire")
 
 LEGEND_AT = ("hide", "top", "left", "bottom", "right")
 DEFAULT_LEGEND = "bottom"
@@ -801,6 +865,28 @@ def flames(centre: Point, style: Style) -> Tuple[str, float]:
     return outer + inner, h
 
 
+def smoke(centre: Point, style: Style) -> Tuple[str, float]:
+    """A plume drifting up off a terminus bar, and how far above it it reaches.
+
+    Rises up the page for the same reason the fire does. The puffs live in one
+    group carrying a single opacity rather than being faded individually: at
+    individual opacities their overlaps darken and the plume reads as a handful
+    of separate dots instead of one cloud.
+
+    Softer and quieter than the fire by design — smoke is the warning before the
+    crisis, and must not compete with a burning platform on the same map.
+    """
+    h = style.stroke * 3.2 * style.flame_scale
+    w = style.stroke * style.buffer_len * 1.15 * style.flame_scale
+    puffs = [(0.10, 0.00, 0.52), (0.30, -0.22, 0.60), (0.50, 0.20, 0.64),
+             (0.72, -0.16, 0.66), (0.92, 0.16, 0.58)]
+    body = "".join(
+        f'<circle cx="{centre[0] + across * w:.1f}" '
+        f'cy="{centre[1] - up * h:.1f}" r="{r * w:.1f}"/>'
+        for up, across, r in puffs)
+    return f'<g class="plume">{body}</g>', h
+
+
 def label_extent(at: Point, anchor: str, width: float, angle: float,
                  style: Style) -> Tuple[float, float, float, float]:
     """Box a label covers, rotated or not, for bounds and zone sizing."""
@@ -878,12 +964,13 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
     dead_ends = []
     marked: Dict[str, Tuple[str, str]] = {}          # station -> (style, why)
 
+    why_text = {"buffer": "the end of the line",
+                "smoke": "watch out — this is going wrong",
+                "fire": "burning platform — get off this train"}
     for sid, st in m.stations.items():
         kind = st.get("dead_end")
-        if kind in ("buffer", "fire"):
-            marked[sid] = (kind, f'{st["label"]} — '
-                           + ("the end of the road" if kind == "buffer"
-                              else "burning platform"))
+        if kind in why_text:
+            marked[sid] = (kind, f'{st["label"]} — {why_text[kind]}')
 
     for i, line in enumerate(m.lines):
         ids = line["stations"]
@@ -904,7 +991,12 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
         centre = add(add(here, seg["shift"]),
                      scale(d, m.marker_radius(sid) + s.stroke * 0.55))
         bar, a, b = buffer_bar(centre, d, s)
-        body, reach = (flames(centre, s) if kind == "fire" else ("", 0.0))
+        if kind == "fire":
+            body, reach = flames(centre, s)
+        elif kind == "smoke":
+            body, reach = smoke(centre, s)
+        else:
+            body, reach = "", 0.0
         dead_ends.append(
             f'    <g class="dead-end {kind}"><title>{esc(why)}</title>'
             f'{bar}{body}</g>')
@@ -912,6 +1004,28 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
                    s.stroke * s.buffer_len * 1.15 * s.flame_scale)
         grow(min(a[0], b[0]) - half, min(a[1], b[1]) - reach,
              max(a[0], b[0]) + half, max(a[1], b[1]) + half)
+
+    # scenarios — a traveller riding a route from start to end, changing line
+    # wherever the journey does
+    travellers, scenario_css = [], []
+    for si, sc in enumerate(spec.get("scenarios", []) or []):
+        if not isinstance(sc, dict):
+            continue
+        stops = sc.get("stations") or []
+        path = m.journey(stops) if len(stops) >= 2 else None
+        if not path:
+            continue
+        d = rounded_path(path, s.corner)
+        secs = sc.get("duration")
+        secs = float(secs) if isinstance(secs, (int, float)) and 0 < secs <= 600 else 8.0
+        colour = sc.get("color") if isinstance(sc.get("color"), str) else "#101820"
+        scenario_css.append(
+            f'    .t{si} {{ offset-path: path("{d}"); '
+            f'animation-duration: {secs:g}s; fill: {colour}; }}')
+        travellers.append(
+            f'    <circle class="traveller t{si}" cx="0" cy="0" '
+            f'r="{s.stop_r * 1.15:.1f}"><title>{esc(sc.get("name") or "scenario")}'
+            f'</title></circle>')
 
     # notes riding the track between two stations — "6 weeks", "nightly batch"
     notes = []
@@ -1072,6 +1186,27 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
   </g>
 """
 
+    traveller_group = traveller_css = ""
+    if travellers:
+        # Motion lives in the file, so a map that is sent to someone animates
+        # for them too. offset-path rather than SMIL: it is the one that a
+        # viewer's reduced-motion setting can switch off, and a viewer that
+        # ignores it is left with the dot parked at the start of the route.
+        traveller_css = f"""    .traveller {{ stroke: var(--paper); stroke-width: 2.5;
+                 offset-rotate: 0deg; offset-distance: 0%;
+                 animation-name: ride; animation-timing-function: linear;
+                 animation-iteration-count: infinite; }}
+    @keyframes ride {{ from {{ offset-distance: 0%; }} to {{ offset-distance: 100%; }} }}
+    @media (prefers-reduced-motion: reduce) {{
+      .traveller {{ animation: none; }}
+    }}
+{chr(10).join(scenario_css)}
+"""
+        traveller_group = f"""  <g id="scenarios">
+{chr(10).join(travellers)}
+  </g>
+"""
+
     note_group = note_css = ""
     if notes:
         note_css = f"""    .note {{ font-family: {s.font}; font-size: {s.note_size}px; font-weight: 600;
@@ -1131,6 +1266,7 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
     .dead-end.fire .buffer {{ stroke: #7a2d0e; opacity: .9; }}
     .flame-outer {{ fill: #e1251b; }}
     .flame-inner {{ fill: #f6a821; }}
+    .plume {{ fill: var(--ink); opacity: .34; }}
     .muted {{ opacity: {s.status_fade + 0.15:.2f}; }}
     .zone-band {{ fill: var(--zc); fill-opacity: {s.zone_fill}; stroke: var(--zc);
                  stroke-width: 2; stroke-dasharray: 7 6; opacity: .9; }}
@@ -1139,7 +1275,7 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
 {timeline_css}    .stop {{ fill: var(--paper); stroke-width: {s.stop_ring}; }}
     .interchange {{ fill: var(--paper); stroke: var(--ink); stroke-width: {s.stop_ring}; }}
     .label {{ font-family: {s.font}; font-size: {s.label_size}px; font-weight: 600; fill: var(--ink); }}
-{note_css}{legend_css}{theme_block}  </style>
+{note_css}{traveller_css}{legend_css}{theme_block}  </style>
 {timeline_group}{zone_group}  <g id="routes">
 {chr(10).join(routes)}
   </g>
@@ -1149,7 +1285,7 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
   <g id="labels">
 {chr(10).join(labels)}
   </g>
-{legend_group}</svg>
+{traveller_group}{legend_group}</svg>
 """
 
 
@@ -1257,6 +1393,33 @@ def validate_spec(spec: object) -> List[str]:
                                      or isinstance(snap, bool) or snap <= 0):
                 errors.append("spec.editor.snap must be a positive number")
 
+    scenarios = spec.get("scenarios", []) or []
+    if not isinstance(scenarios, list):
+        errors.append("spec.scenarios must be a list")
+        scenarios = []
+    for i, sc in enumerate(scenarios, 1):
+        where = f"scenario {i}"
+        if not isinstance(sc, dict):
+            errors.append(f"{where}: must be an object")
+            continue
+        where = f"scenario {i} ('{sc.get('name', '')}')"
+        if not isinstance(sc.get("name"), str) or not sc["name"].strip():
+            errors.append(f"{where}: needs a non-empty name")
+        if sc.get("color") is not None and (not isinstance(sc["color"], str)
+                                            or not HEX_RE.match(sc["color"])):
+            errors.append(f"{where}: colour must be #rrggbb")
+        secs = sc.get("duration")
+        if secs is not None and (not isinstance(secs, (int, float))
+                                 or isinstance(secs, bool) or not 0 < secs <= 600):
+            errors.append(f"{where}: duration must be seconds between 0 and 600")
+        route = sc.get("stations")
+        if not isinstance(route, list):
+            errors.append(f"{where}: stations must be a list of ids")
+            continue
+        for sid in route:
+            if sid not in stations:
+                errors.append(f"{where}: unknown station '{sid}'")
+
     lines = spec.get("lines")
     if not isinstance(lines, list):
         return errors + ["spec.lines must be a list"]
@@ -1324,10 +1487,27 @@ def spec_warnings(spec: dict) -> List[str]:
     on_a_line = {sid for ln in spec.get("lines", [])
                  for sid in (ln.get("stations") or [])}
     for sid, st in spec.get("stations", {}).items():
-        if isinstance(st, dict) and st.get("dead_end") in ("buffer", "fire") \
+        if isinstance(st, dict) and st.get("dead_end") in DEAD_ENDS[1:] \
                 and sid not in on_a_line:
             out.append(f"station '{sid}': marked as a dead end but on no line — "
                        "the marker needs a track to sit across")
+
+    for i, sc in enumerate(spec.get("scenarios", []) or [], 1):
+        if not isinstance(sc, dict):
+            continue
+        route = sc.get("stations") or []
+        name = sc.get("name", "")
+        if len(route) < 2:
+            out.append(f"scenario {i} ('{name}'): needs at least two stops — not drawn")
+            continue
+        pairs = {(ln["stations"][k], ln["stations"][k + 1])
+                 for ln in spec.get("lines", []) if isinstance(ln.get("stations"), list)
+                 for k in range(len(ln["stations"]) - 1)}
+        for a, b in zip(route, route[1:]):
+            if (a, b) not in pairs and (b, a) not in pairs:
+                out.append(f"scenario {i} ('{name}'): no line runs between "
+                           f"'{a}' and '{b}' — the journey is not drawn")
+                break
 
     tl = spec_timeline(spec)
     if tl:

@@ -37,7 +37,7 @@ async function api(method, path, payload) {
 const S = {
   name: null,                              // saved map name, null while untitled
   folder: null,                            // which folder it came from, null while untitled
-  spec: { stations: {}, lines: [], zones: [] },
+  spec: { stations: {}, lines: [], zones: [], scenarios: [] },
   style: { cell: 120, stroke: 10, corner: 22, bundle_gap: 13, label_size: 16 },
   autoIx: true,
   theme: "auto",                           // designer chrome and preview only
@@ -195,6 +195,7 @@ function normalise(spec) {
   spec.stations = spec.stations || {};
   spec.lines = spec.lines || [];
   spec.zones = spec.zones || [];
+  spec.scenarios = spec.scenarios || [];
   // a hand-written or agent-written roadmap may arrive with no dates at all —
   // a GET does not validate, only a PUT does. Repair it on the way in, where
   // the map is being replaced wholesale anyway, not mid-render.
@@ -507,6 +508,14 @@ function onStationClick(id) {
     toggleZoneMember(S.sel.id, id);
     return;
   }
+  if (tab === "scenarios" && S.sel.kind === "scenario" && S.spec.scenarios[S.sel.id]) {
+    applyChange(() => {
+      const sc = S.spec.scenarios[S.sel.id];
+      sc.stations = sc.stations || [];
+      sc.stations.push(id);
+    });
+    return;
+  }
   select("station", id);
 }
 
@@ -558,6 +567,10 @@ function setHint() {
     text = `Filling “${S.spec.zones[S.sel.id].name}” — click stations on the canvas to add or remove them`;
   } else if (tab === "zones") {
     text = "Pick a zone to choose which stations sit in it";
+  } else if (tab === "scenarios" && S.sel.kind === "scenario" && S.spec.scenarios[S.sel.id]) {
+    text = `Routing “${S.spec.scenarios[S.sel.id].name}” — click stations on the canvas in the order the traveller visits them`;
+  } else if (tab === "scenarios") {
+    text = "Pick a ride to route it, or add one";
   } else if (tab === "timeline") {
     text = TIMELINE
       ? `${TIMELINE.columns} ${TIMELINE.interval} columns — a whole grid x is a period boundary`
@@ -574,6 +587,7 @@ function refreshPanels() {
   renderStations();
   renderLines();
   renderZones();
+  renderScenarios();
   renderTimeline();
   renderStyle();
   syncToolbar();
@@ -1191,6 +1205,122 @@ function renderTimelineReadout() {
   setHint();
 }
 
+/* --------------------------------------------------------------- rides -- */
+
+function renderScenarios() {
+  const list = $("#scenario-list");
+  if (!list) return;
+  if (!S.spec.scenarios.length) {
+    list.innerHTML = `<li class="note">No rides yet — press “+ Add”, then click stations on the canvas in the order the traveller visits them.</li>`;
+  } else {
+    list.innerHTML = S.spec.scenarios.map((sc, i) => {
+      const open = S.sel.kind === "scenario" && S.sel.id === i;
+      const n = (sc.stations || []).length;
+      return `<li class="row ${open ? "is-on" : ""}" data-scenario="${i}">
+        <span class="swatch" style="background:${esc(sc.color || "#101820")}"></span>
+        <span class="grow">
+          <span class="lbl">${esc(sc.name)}</span>
+          <span class="at">${n ? `${n} stop${n === 1 ? "" : "s"} · ${sc.duration || 8}s` : "no route yet"}</span>
+        </span>
+        <span class="caret">${open ? "▾" : "▸"}</span>
+      </li>` + (open ? `<li class="edit-host"><div id="scenario-editor" class="editor"></div></li>` : "");
+    }).join("");
+    list.querySelectorAll("[data-scenario]").forEach((row) =>
+      row.addEventListener("click", () => select("scenario", Number(row.dataset.scenario))));
+  }
+  renderScenarioEditor();
+}
+
+function renderScenarioEditor() {
+  const box = $("#scenario-editor");
+  if (!box) return;
+  if (S.sel.kind !== "scenario" || !S.spec.scenarios[S.sel.id]) { box.innerHTML = ""; return; }
+  const i = S.sel.id;
+  const sc = S.spec.scenarios[i];
+  const route = sc.stations || [];
+  const ids = Object.keys(S.spec.stations).sort((a, b) => {
+    const A = S.spec.stations[a], B = S.spec.stations[b];
+    return A.gy - B.gy || A.gx - B.gx;
+  });
+
+  box.innerHTML = `<div class="card">
+    <h3>Ride</h3>
+    <label class="field"><span>Name</span><input type="text" id="r-name" value="${esc(sc.name)}"></label>
+    <div class="field"><span>Colour</span>
+      <div class="swatches">${PALETTE.map((pl) =>
+        `<button type="button" data-color="${esc(pl.color)}" title="${esc(pl.name)}"
+           style="background:${esc(pl.color)}" class="${(sc.color || "").toLowerCase() === pl.color.toLowerCase() ? "is-on" : ""}"></button>`).join("")}
+      </div>
+    </div>
+    <label class="field"><span>Seconds end to end — <b id="r-secs">${sc.duration || 8}</b></span>
+      <input type="range" id="r-dur" min="2" max="40" step="1" value="${sc.duration || 8}"></label>
+
+    <h3>Route — ${route.length} stop${route.length === 1 ? "" : "s"}</h3>
+    ${route.length < 2 ? `<p class="warn">A ride needs at least two stops.</p>` : ""}
+    <div class="route" id="r-route">
+      ${route.map((sid, k) => `
+        <div class="stop-row" data-pos="${k}">
+          <span class="n">${k + 1}</span>
+          <span class="grow">${esc(stopName(sid))}</span>
+          <button class="ghost" data-drop="${k}" title="remove from the route">×</button>
+        </div>`).join("") || `<p class="note">Empty — click stations on the canvas in order.</p>`}
+    </div>
+
+    <h3>Available stations</h3>
+    <div class="pick" id="r-pick">
+      ${ids.length ? ids.map((sid) =>
+        `<button type="button" data-add="${esc(sid)}">${esc(S.spec.stations[sid].label)}</button>`).join("")
+        : `<p class="note">No stations yet.</p>`}
+    </div>
+
+    <div><button id="r-del" class="danger">Delete ride</button></div>
+  </div>`;
+
+  const name = $("#r-name");
+  name.addEventListener("focus", pushUndo);
+  name.addEventListener("input", () => { sc.name = name.value; markDirty(); scheduleRender(); });
+  name.addEventListener("change", refreshPanels);
+
+  const dur = $("#r-dur");
+  dur.addEventListener("pointerdown", pushUndo);
+  dur.addEventListener("input", () => {
+    sc.duration = Number(dur.value);
+    $("#r-secs").textContent = dur.value;
+    markDirty();
+    scheduleRender();
+  });
+
+  box.querySelectorAll("[data-color]").forEach((btn) =>
+    btn.addEventListener("click", () => applyChange(() => { sc.color = btn.dataset.color; })));
+  box.querySelectorAll("[data-add]").forEach((btn) =>
+    btn.addEventListener("click", () => applyChange(() => {
+      sc.stations = sc.stations || [];
+      sc.stations.push(btn.dataset.add);
+    })));
+  box.querySelectorAll("[data-drop]").forEach((btn) =>
+    btn.addEventListener("click", () => applyChange(() =>
+      sc.stations.splice(Number(btn.dataset.drop), 1))));
+  $("#r-del").addEventListener("click", () => applyChange(() => {
+    S.spec.scenarios.splice(i, 1);
+    S.sel = { kind: null, id: null };
+  }));
+  setHint();
+}
+
+function addScenario() {
+  const i = S.spec.scenarios.length;
+  const used = new Set(S.spec.scenarios.map((x) => x.color));
+  const pick = PALETTE.find((pl) => !used.has(pl.color)) || PALETTE[i % PALETTE.length]
+    || { color: "#7b3fb5" };
+  applyChange(() => {
+    S.spec.scenarios.push({ name: `Ride ${i + 1}`, color: pick.color,
+                            duration: 8, stations: [] });
+    S.sel = { kind: "scenario", id: i };
+  });
+  const name = $("#r-name");
+  if (name) { name.focus(); name.select(); }
+}
+
 /* --------------------------------------------------------------- style -- */
 
 const STYLE_FIELDS = [
@@ -1781,6 +1911,7 @@ async function boot() {
   $("#btn-add-station").addEventListener("click", addStation);
   $("#btn-add-line").addEventListener("click", addLine);
   $("#btn-add-zone").addEventListener("click", addZone);
+  $("#btn-add-scenario").addEventListener("click", addScenario);
   $("#btn-new").addEventListener("click", newMap);
   $("#btn-open").addEventListener("click", openDialog);
   $("#btn-save").addEventListener("click", () => saveMap());

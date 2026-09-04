@@ -64,7 +64,7 @@ canvas within a couple of seconds.
 |---|---|
 | `mode` | `metro` (default, leave it out) or `roadmap`. |
 | `legend` | `bottom` (the default), `top`, `left`, `right` or `hide`. Names every line beside a swatch in its own colour and dash pattern. Leave it out unless the map wants it elsewhere or off. |
-| `dead_end` | On a station: `buffer` caps it with a terminus bar, `fire` adds flames to that bar — the burning platform, for a branch that ends badly. The stop must be on a line, because the marker is laid across the track arriving at it. An out-of-service line still earns a plain bar automatically wherever it runs out. |
+| `dead_end` | On a station, three volumes of the same terminus bar: `buffer` simply stops there (a planned retirement), `smoke` adds drifting puffs (watch out), `fire` adds flames (the burning platform — get off). The stop must be on a line, because the marker is laid across the track arriving at it. An out-of-service line still earns a plain bar automatically wherever it runs out. |
 | `notes` | On a **line**, not a station: `[{"at": <hop>, "text": str, "flip": bool?}]`. `at` is the hop index — `0` is the gap between `stations[0]` and `stations[1]`, so the last legal value is `len(stations) - 2`. |
 | `timeline` | Roadmap only: `{start, end, interval}` with ISO dates and an interval of `day`, `week`, `month`, `quarter` or `year`. |
 | `gx` / `gy` | Grid cells, **not pixels**, and may be fractional — `0.5` steps put two stations half a cell apart. Keep whole numbers unless the layout needs the room. |
@@ -103,6 +103,23 @@ where it crosses something.
 - **Keep them to two or three words.** A note is a caption on a line, not a
   paragraph; long ones overrun the hop and collide with the stations at each end.
 - `flip: true` moves a note to the other side of its track.
+
+## Rides — an animated traveller
+
+A `scenarios` entry is a traveller's route: `{"name", "stations": [...],
+"color"?, "duration"?}`. It is drawn as a dot riding the **existing** track from
+the first stop to the last, changing line wherever the journey does, and the
+animation is written into the SVG so an exported file moves too.
+
+- **Every consecutive pair of stops must be joined by a line**, in either
+  direction. A pair with no track between them is warned about and the whole
+  ride is skipped — a traveller cannot walk across open ground.
+- It is an ordered list of *stops*, not of lines. Name the stations the traveller
+  passes through and the renderer works out which track carries each hop.
+- `duration` is seconds end to end, 8 by default. Longer for a route with many
+  stops, or the dot moves too fast to follow.
+- One or two rides on a map. Three dots moving at once is a screensaver, not an
+  explanation.
 
 ## Roadmap mode
 
