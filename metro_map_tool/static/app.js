@@ -1940,56 +1940,58 @@ function guardUnload(ev) {
   if (S.dirty) { ev.preventDefault(); ev.returnValue = ""; }
 }
 
-/* Stopping is the one action here that destroys work: the map lives in this
-   browser until it is written to disk, and the server going away takes it with
-   it. So the unsaved case offers to save rather than only warning — a confirm()
-   can say "lose them or cancel" and nothing else, which is why this is a
-   dialog. */
+/* Stopping and restarting both take the server away, and the map lives in this
+   browser until it is written to disk. So both ask, and both offer to save
+   rather than only warning — a confirm() can say "lose them or cancel" and
+   nothing else, which is why these are dialogs. */
 
-function stopServer() {
+/** Ask before an action that would take unsaved work with it. */
+function confirmLeaving(verb, go) {
+  const Verb = verb[0].toUpperCase() + verb.slice(1);
   if (!S.dirty) {
-    dialog("Stop the designer?", `
-      <p class="note">This shuts down the local server. Everything you have saved
-        stays in your maps folder.</p>
+    dialog(`${Verb} the designer?`, `
+      <p class="note">${verb === "restart"
+        ? "The server starts again on the same port and the page reloads."
+        : "This shuts down the local server."} Everything you have saved stays
+        in your maps folder.</p>
       <div class="actions">
         <button value="cancel">Cancel</button>
-        <button type="button" class="danger" id="s-stop">Stop</button>
+        <button type="button" class="${verb === "restart" ? "primary" : "danger"}" id="q-go">${Verb}</button>
       </div>`, (form, dlg) =>
-      form.querySelector("#s-stop").addEventListener("click", () => {
-        dlg.close();
-        shutDownServer();
-      }));
+      form.querySelector("#q-go").addEventListener("click", () => { dlg.close(); go(); }));
     return;
   }
 
   const named = !!S.name;
-  dialog("Stop the designer?", `
+  dialog(`${Verb} the designer?`, `
     <p class="note"><b>“${esc(S.name || "untitled")}” has unsaved changes.</b>
-      They are only in this browser — stopping the server loses them for good.</p>
+      They are only in this browser — ${verb === "restart"
+        ? "restarting reloads the page and loses them"
+        : "stopping the server loses them for good"}.</p>
     <div class="actions">
       <button value="cancel">Cancel</button>
-      <button type="button" class="danger" id="s-discard">Stop without saving</button>
-      <button type="button" class="primary" id="s-save">${named ? "Save and stop" : "Name it and save…"}</button>
+      <button type="button" class="danger" id="q-discard">${Verb} without saving</button>
+      <button type="button" class="primary" id="q-save">${named ? `Save and ${verb}` : "Name it and save…"}</button>
     </div>`, (form, dlg) => {
-    form.querySelector("#s-discard").addEventListener("click", () => {
-      dlg.close();
-      shutDownServer();
-    });
-    form.querySelector("#s-save").addEventListener("click", async () => {
+    form.querySelector("#q-discard").addEventListener("click", () => { dlg.close(); go(); });
+    form.querySelector("#q-save").addEventListener("click", async () => {
       dlg.close();
       await saveMap();
       // saveMap leaves us dirty when it could not finish: a name still to give,
-      // a validation error, or someone else's save in the way. Never stop then.
+      // a validation error, or someone else's save in the way. Never go then.
       if (S.dirty) {
         showProblems([named
-          ? "Not stopped — the save did not go through. Deal with that, then press Stop again."
-          : "Not stopped — give the map a name and save it, then press Stop again."]);
+          ? `Did not ${verb} — the save did not go through. Deal with that, then try again.`
+          : `Did not ${verb} — give the map a name and save it, then try again.`]);
         return;
       }
-      shutDownServer();
+      go();
     });
   });
 }
+
+function stopServer() { confirmLeaving("stop", shutDownServer); }
+function restartServer() { confirmLeaving("restart", restartTheServer); }
 
 function shutDownServer() {
   // the server answers, then exits — a failed fetch here is the expected ending
@@ -2004,6 +2006,33 @@ function shutDownServer() {
          (or <code>run.cmd</code> / <code>run.ps1</code> on Windows) to start it
          again.</p></div>`;
     });
+}
+
+/** Ask the server to replace itself, then reload once it answers again. */
+async function restartTheServer() {
+  window.removeEventListener("beforeunload", guardUnload);
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  document.body.innerHTML =
+    `<div class="stopped"><h1>Restarting…</h1>
+     <p id="restart-note">Waiting for the designer to come back.</p></div>`;
+  fetch("/api/restart", { method: "POST", headers: { "Content-Type": "application/json" } })
+    .catch(() => {});   // the server may die mid-answer, which is the point
+
+  // it has to go away and come back; polling from the start could catch the old
+  // one still answering, so wait past the moment it replaces itself
+  await new Promise((r) => setTimeout(r, 900));
+  for (let tries = 0; tries < 40; tries += 1) {
+    try {
+      const res = await fetch("/api/maps", { cache: "no-store" });
+      if (res.ok) { location.reload(); return; }
+    } catch (_) { /* still down */ }
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  const note = document.getElementById("restart-note");
+  if (note) {
+    note.textContent = "It did not come back. Start it again with ./run.sh "
+      + "(or run.cmd on Windows).";
+  }
 }
 
 /* ----------------------------------------------------------------- live -- */
@@ -2186,6 +2215,7 @@ async function boot() {
   $("#btn-saveas").addEventListener("click", saveAsDialog);
   $("#btn-export").addEventListener("click", exportSVG);
   $("#btn-stop").addEventListener("click", stopServer);
+  $("#btn-restart").addEventListener("click", restartServer);
   $("#btn-about").addEventListener("click", aboutDialog);
   $("#btn-side").addEventListener("click", () => applySide(!S.sideHidden));
   $("#btn-undo").addEventListener("click", undo);

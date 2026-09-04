@@ -1787,9 +1787,13 @@ def spec_warnings(spec: dict) -> List[str]:
     out: List[str] = []
     for i, ln in enumerate(spec.get("lines", []), 1):
         route = ln.get("stations") or []
-        if len(route) < 2:
-            out.append(f"line {i} ('{ln.get('name', '')}'): "
-                       f"{'no stops yet' if not route else 'only one stop'} — not drawn")
+        # one stop is enough to draw when the line runs on to the edge of the
+        # map; it is only undrawable when there is nothing to reach towards
+        if not route:
+            out.append(f"line {i} ('{ln.get('name', '')}'): no stops yet — not drawn")
+        elif len(route) < 2 and (ln.get("continues") or "none") == "none":
+            out.append(f"line {i} ('{ln.get('name', '')}'): only one stop — not "
+                       "drawn. Set it to run on past the map to draw it anyway")
     for i, zn in enumerate(spec.get("zones", []) or [], 1):
         if not (zn.get("stations") or []):
             out.append(f"zone {i} ('{zn.get('name', '')}'): no stations in it — not drawn")

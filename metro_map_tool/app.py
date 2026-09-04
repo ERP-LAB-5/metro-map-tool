@@ -29,6 +29,7 @@ import ipaddress
 import json
 import os
 import re
+import sys
 import tempfile
 import threading
 import time
@@ -432,23 +433,57 @@ def defaults():
                     "default_folder": DEFAULT_FOLDER})
 
 
-@app.post("/api/shutdown")
-def shutdown():
-    """Stop the designer — the red button in the toolbar, and `mcp stop`.
+def only_local(what: str) -> None:
+    """Local tool, local kill switch.
 
-    Local tool, local kill switch: only a loopback client may do it, and only
-    over POST, so a page in another tab cannot navigate the server to death.
+    Only a loopback client may stop or restart the designer, and only over POST,
+    so a page in another tab cannot navigate the server to death.
     """
     try:
         caller = ipaddress.ip_address(request.remote_addr or "")
     except ValueError:
-        abort(403, "shutdown is only available to a local client")
+        abort(403, f"{what} is only available to a local client")
     if not caller.is_loopback:
-        abort(403, "shutdown is only available to a local client")
+        abort(403, f"{what} is only available to a local client")
 
+
+@app.post("/api/shutdown")
+def shutdown():
+    """Stop the designer — the red button in the toolbar, and `mcp stop`."""
+    only_local("shutdown")
     # answer first, exit a beat later; werkzeug has no in-request shutdown hook
     threading.Timer(0.4, lambda: os._exit(0)).start()
     return jsonify({"stopping": True})
+
+
+def _reexec() -> None:
+    """Replace this process with a fresh one, same arguments, same directory.
+
+    execv rather than spawn-and-exit: the new server inherits the working
+    directory, which is what mymaps is resolved against, and there is no window
+    where two of them are alive fighting for the port.
+
+    The listening socket has to be closed by hand first. Python marks its own
+    descriptors non-inheritable, but werkzeug's does survive the exec here, and
+    the replacement image then cannot bind: "Address already in use" on the port
+    it just vacated. Everything above stdio goes, since the process is being
+    replaced and the response was flushed a beat ago; stdout and stderr stay so
+    the new server can still log.
+    """
+    try:
+        os.closerange(3, 1024)
+    except OSError:                      # nothing to close, or not permitted
+        pass
+    os.execv(sys.executable,
+             [sys.executable, "-m", "metro_map_tool.app", *sys.argv[1:]])
+
+
+@app.post("/api/restart")
+def restart():
+    """Start the designer again on the same port, picking up changed code."""
+    only_local("restart")
+    threading.Timer(0.4, _reexec).start()
+    return jsonify({"restarting": True})
 
 
 @app.errorhandler(400)
