@@ -1,6 +1,6 @@
 # metro-map-tool
 
-**v2.16.1** · GPL-3.0 · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
+**v2.17.0** · GPL-3.0 · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
 
 Transit-map diagrams for landscapes, pipelines and migrations: a JSON spec of
 **stations** on a grid, **lines** routed through them and **zones** banding
@@ -148,8 +148,8 @@ If it saves you an afternoon, [buy me a coffee](https://www.buymeacoffee.com/dla
 with Windows 10 and later, and with every Linux and macOS:
 
 ```bash
-curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.16.1.tar.gz | tar xz
-cd metro-map-tool-2.16.1
+curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.17.0.tar.gz | tar xz
+cd metro-map-tool-2.17.0
 ./run.sh                 # or run.cmd on Windows
 ```
 
@@ -157,7 +157,7 @@ cd metro-map-tool-2.16.1
 commands on your PATH in their own virtual environment:
 
 ```bash
-pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.16.1
+pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.17.0
 metro-map-designer                    # the browser designer
 metro-map spec.json -o map.svg        # the renderer
 metro-map-mcp                         # the MCP server, for agents
@@ -177,8 +177,45 @@ A commit graph is already a metro map: lanes are grid y, commits are stations, a
 branch is a line through the commits on it, and a merge is a stop two lines
 share — so it becomes an interchange ring on its own. No mode and no extra
 fields; [the skill](metro_map_tool/skill/SKILL.md) has the mapping and the
-judgement calls, so an agent carrying it can draw a repository's history on
-request.
+judgement calls, so an agent carrying it can draw one on request.
+
+`--from-git` does it without an agent — from a path, or a URL it clones:
+
+```bash
+metro-map --from-git .                              -o history.svg
+metro-map --from-git https://github.com/o/r         -o history.svg
+metro-map --from-git . --branches main,stage,beta   -o history.svg
+metro-map --from-git . --subjects --commits 40      -o history.svg
+```
+
+A branch is a lane, a commit is a station, and a merge is a stop two lanes share
+— so forks and rejoins draw themselves. Commits are placed in **topological**
+order, not by date: dates come from whoever's machine made the commit, run
+backwards across a rebase and tie when a script commits twice in a second, while
+topological order is the one thing that guarantees a commit sits to the right of
+what it was built on.
+
+### The model comes first
+
+A branch model can be drawn before there is a repository to look at.
+[`branch-model.json`](metro_map_tool/shared-maps/branch-model.json) is one:
+prod, preprod, beta, alpha and bug-fix as lanes, with the shape work takes
+through them. Each line says which git branch it stands for:
+
+```json
+{"name": "preprod", "branch": "stage", "color": "#9b0058", "stations": [...]}
+```
+
+Point `--model` at it and the real commits fill that shape in, keeping the lane
+order, names, colours, legend and style you chose:
+
+```bash
+metro-map --from-git . --model branch-model.json --write-spec synced.json -o synced.svg
+```
+
+The map is the intent; the repository is only the evidence. Notes are dropped on
+a sync — they are addressed by hop index, and after the commits change those
+indices point somewhere else entirely.
 
 ## Roadmap mode
 

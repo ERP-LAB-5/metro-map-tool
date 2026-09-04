@@ -1,0 +1,119 @@
+{
+  "legend": "bottom",
+  "style": {
+    "cell": 120,
+    "stroke": 9,
+    "label_size": 13
+  },
+  "stations": {
+    "exp": {
+      "label": "Experiment",
+      "gx": 0,
+      "gy": 3,
+      "label_at": "below"
+    },
+    "fc": {
+      "label": "Feature complete",
+      "gx": 2,
+      "gy": 2,
+      "label_at": "below"
+    },
+    "rc": {
+      "label": "Release candidate",
+      "gx": 4,
+      "gy": 1,
+      "label_at": "below"
+    },
+    "soak": {
+      "label": "Soak",
+      "gx": 5.5,
+      "gy": 1,
+      "label_at": "below"
+    },
+    "cut": {
+      "label": "Release cut",
+      "gx": 7.5,
+      "gy": 0,
+      "label_at": "above",
+      "interchange": true
+    },
+    "fix": {
+      "label": "Hotfix",
+      "gx": 9,
+      "gy": 4,
+      "label_at": "below"
+    },
+    "live": {
+      "label": "Live",
+      "gx": 10.5,
+      "gy": 0,
+      "label_at": "above",
+      "interchange": true
+    }
+  },
+  "lines": [
+    {
+      "name": "prod",
+      "branch": "main",
+      "color": "#0098d4",
+      "continues": "both",
+      "stations": [
+        "cut",
+        "live"
+      ],
+      "notes": [
+        {
+          "at": 0,
+          "text": "tagged"
+        }
+      ]
+    },
+    {
+      "name": "preprod",
+      "branch": "stage",
+      "color": "#9b0058",
+      "continues": "start",
+      "stations": [
+        "rc",
+        "soak",
+        "cut"
+      ]
+    },
+    {
+      "name": "beta",
+      "branch": "beta",
+      "color": "#ee7c0e",
+      "continues": "start",
+      "stations": [
+        "fc",
+        "rc"
+      ]
+    },
+    {
+      "name": "alpha",
+      "branch": "alpha",
+      "color": "#007d32",
+      "continues": "start",
+      "stations": [
+        "exp",
+        "fc"
+      ]
+    },
+    {
+      "name": "bug-fix",
+      "branch": "bug-fix",
+      "color": "#e1251b",
+      "stations": [
+        "cut",
+        "fix",
+        "live"
+      ],
+      "notes": [
+        {
+          "at": 0,
+          "text": "straight off prod"
+        }
+      ]
+    }
+  ]
+}

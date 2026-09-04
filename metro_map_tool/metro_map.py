@@ -110,6 +110,7 @@ import json
 import math
 import re
 import sys
+from pathlib import Path
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -1973,6 +1974,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         description="Render a transit-map spec to SVG. "
                     "Design one in the browser with: metro-map-designer")
     ap.add_argument("spec", nargs="?", help="JSON spec file, or - for stdin")
+    ap.add_argument("--from-git", metavar="REPO",
+                    help="build the spec from a repository's history: a path, "
+                         "or a URL to clone")
+    ap.add_argument("--model", metavar="FILE",
+                    help="a branch model whose lanes, names and colours are "
+                         "kept while --from-git fills in the commits")
+    ap.add_argument("--branches", metavar="A,B,C",
+                    help="which branches to draw, in order (default: the "
+                         "default branch, then the rest)")
+    ap.add_argument("--commits", type=int, default=200, metavar="N",
+                    help="most commits to take from any one branch")
+    ap.add_argument("--subjects", action="store_true",
+                    help="label every commit with its subject, not just tags")
+    ap.add_argument("--write-spec", metavar="FILE",
+                    help="also save the generated spec, to edit and re-sync later")
     ap.add_argument("-o", "--out", default="-", help="output SVG file (default: stdout)")
     ap.add_argument("--cell", type=float, help="pixels per grid cell")
     ap.add_argument("--stroke", type=float, help="route width")
@@ -1987,14 +2003,33 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="flag every stop shared by two or more lines as an interchange")
     args = ap.parse_args(argv)
 
-    if not args.spec:
+    if args.from_git:
+        from .from_git import GitError, from_git
+        try:
+            spec, notes = from_git(
+                args.from_git, args.model,
+                [b.strip() for b in args.branches.split(",")] if args.branches else None,
+                args.commits, args.subjects)
+        except GitError as exc:
+            print(f"  ! {exc}", file=sys.stderr)
+            return 2
+        for note in notes:
+            print(f"  · {note}", file=sys.stderr)
+        if args.write_spec:
+            Path(args.write_spec).write_text(
+                json.dumps(spec, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8")
+            print(f"  wrote {args.write_spec}", file=sys.stderr)
+    elif not args.spec:
         ap.print_help()
         print("\n  no spec given — start the web designer with:  metro-map-designer",
               file=sys.stderr)
         return 2
+    else:
+        raw = (sys.stdin.read() if args.spec == "-"
+               else open(args.spec, encoding="utf-8").read())
+        spec = json.loads(raw)
 
-    raw = sys.stdin.read() if args.spec == "-" else open(args.spec, encoding="utf-8").read()
-    spec = json.loads(raw)
     spec.setdefault("stations", {})
     spec.setdefault("lines", [])
     for note in migrate(spec):
