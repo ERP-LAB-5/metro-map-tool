@@ -1,6 +1,6 @@
 # metro-map-tool
 
-**v2.6.1** · MIT · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
+**v2.6.2** · MIT · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
 
 Transit-map diagrams for landscapes, pipelines and migrations: a JSON spec of
 **stations** on a grid, **lines** routed through them and **zones** banding
@@ -114,8 +114,8 @@ the *interchanges* toggle is on.
 with Windows 10 and later, and with every Linux and macOS:
 
 ```bash
-curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.6.1.tar.gz | tar xz
-cd metro-map-tool-2.6.1
+curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.6.2.tar.gz | tar xz
+cd metro-map-tool-2.6.2
 ./run.sh                 # or run.cmd on Windows
 ```
 
@@ -123,7 +123,7 @@ cd metro-map-tool-2.6.1
 commands on your PATH in their own virtual environment:
 
 ```bash
-pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.6.1
+pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.6.2
 metro-map-designer                    # the browser designer
 metro-map spec.json -o map.svg        # the renderer
 metro-map-mcp                         # the MCP server, for agents

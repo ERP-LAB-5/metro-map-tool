@@ -884,7 +884,10 @@ def smoke(centre: Point, style: Style) -> Tuple[str, float]:
         f'<circle cx="{centre[0] + across * w:.1f}" '
         f'cy="{centre[1] - up * h:.1f}" r="{r * w:.1f}"/>'
         for up, across, r in puffs)
-    return f'<g class="plume">{body}</g>', h
+    # The same puffs twice: a near-opaque backing in the paper colour, then the
+    # grey on top. A single translucent plume sits in front of the track and
+    # still reads as behind it, because the line shows straight through.
+    return (f'<g class="plume-back">{body}</g><g class="plume">{body}</g>', h)
 
 
 def label_extent(at: Point, anchor: str, width: float, angle: float,
@@ -1268,7 +1271,8 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
     .dead-end.fire .buffer {{ stroke: #7a2d0e; opacity: .9; }}
     .flame-outer {{ fill: #e1251b; }}
     .flame-inner {{ fill: #f6a821; }}
-    .plume {{ fill: var(--ink); opacity: .34; }}
+    .plume-back {{ fill: var(--paper); opacity: .92; }}
+    .plume {{ fill: var(--ink); opacity: .42; }}
     .muted {{ opacity: {s.status_fade + 0.15:.2f}; }}
     .zone-band {{ fill: var(--zc); fill-opacity: {s.zone_fill}; stroke: var(--zc);
                  stroke-width: 2; stroke-dasharray: 7 6; opacity: .9; }}
