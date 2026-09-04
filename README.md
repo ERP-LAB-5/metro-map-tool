@@ -1,6 +1,6 @@
 # metro-map-tool
 
-**v2.13.0** · GPL-3.0 · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
+**v2.14.0** · GPL-3.0 · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
 
 Transit-map diagrams for landscapes, pipelines and migrations: a JSON spec of
 **stations** on a grid, **lines** routed through them and **zones** banding
@@ -148,8 +148,8 @@ If it saves you an afternoon, [buy me a coffee](https://www.buymeacoffee.com/dla
 with Windows 10 and later, and with every Linux and macOS:
 
 ```bash
-curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.13.0.tar.gz | tar xz
-cd metro-map-tool-2.13.0
+curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.14.0.tar.gz | tar xz
+cd metro-map-tool-2.14.0
 ./run.sh                 # or run.cmd on Windows
 ```
 
@@ -157,7 +157,7 @@ cd metro-map-tool-2.13.0
 commands on your PATH in their own virtual environment:
 
 ```bash
-pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.13.0
+pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.14.0
 metro-map-designer                    # the browser designer
 metro-map spec.json -o map.svg        # the renderer
 metro-map-mcp                         # the MCP server, for agents
@@ -285,6 +285,10 @@ ln -s "$PWD/.claude/skills/metro-map" ~/.claude/skills/metro-map
 }
 ```
 
+`format` is the shape of the spec, stamped on save. Leave it alone: a map
+claiming a format newer than your copy understands is refused with a message
+rather than half-drawn, and one without it simply predates the stamp and is read
+as it always was.
 `mode` is `metro` (the default, and left out) or `roadmap`; a roadmap adds a
 `timeline` of `{start, end, interval}` and its grid x becomes a calendar.
 `dead_end` on a station is `buffer` (a terminus bar), `smoke` (watch out) or

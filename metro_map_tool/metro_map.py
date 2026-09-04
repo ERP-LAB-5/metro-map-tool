@@ -23,6 +23,7 @@ Input JSON
   "mode": "metro"|"roadmap"?,                    # metro is the default
   "timeline": {"start": "yyyy-mm-dd", "end": "yyyy-mm-dd",
                "interval": "day"|"week"|"month"|"quarter"|"year"}?,  # roadmap only
+  "format": <int>?,                              # the spec shape; stamped on save
   "legend": "hide"|"top"|"left"|"bottom"|"right"?,  # bottom is the default
   "scenarios": [ {"name": str, "stations": ["<id>", ...],
                   "color": "#rrggbb"?, "duration": <seconds>?} ]?,
@@ -1561,6 +1562,38 @@ HEX_RE = re.compile(r"#[0-9a-fA-F]{6}$")
 # calendar. Anything else about a spec means the same in both.
 MODES = ("metro", "roadmap")
 
+# The shape of a saved map. Stamped on every save so that a file can be told
+# apart later; a file without it predates the stamp, which is unambiguous only
+# because the stamping started before any migration was needed. Raise this when
+# a change cannot be read by the old code, and add the step to migrate().
+SPEC_FORMAT = 1
+
+
+def spec_format(spec: dict) -> int:
+    """The format a spec declares. 0 means it predates the stamp."""
+    v = spec.get("format")
+    return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else 0
+
+
+def migrate(spec: dict) -> List[str]:
+    """Bring a spec up to the current shape, in place, and say what changed.
+
+    There is nothing to do yet: every field added so far reads through a default,
+    so an older map already means what it always meant. This exists so the first
+    change that *is* breaking has an obvious place to go, and so the stamp is
+    being written now rather than after the files that need it exist.
+
+    A spec from a newer format is left alone — validate_spec refuses it, and
+    guessing at a shape this code has never seen would be worse than saying so.
+    """
+    notes: List[str] = []
+    if spec_format(spec) > SPEC_FORMAT:
+        return notes
+    # future migrations go here, in order, each guarded by the format it lifts:
+    #   if spec_format(spec) < 2: ...  ; spec["format"] = 2
+    spec["format"] = SPEC_FORMAT
+    return notes
+
 # A line is in service unless it says otherwise. Only "out-of-service" ends in a
 # dead end: the other two are lines the network does not reach *yet*.
 STATUS_CLASS = {
@@ -1586,6 +1619,14 @@ def validate_spec(spec: object) -> List[str]:
     errors: List[str] = []
     if not isinstance(spec, dict):
         return ["spec must be a JSON object"]
+
+    fmt = spec.get("format")
+    if fmt is not None and (not isinstance(fmt, int) or isinstance(fmt, bool) or fmt < 1):
+        errors.append("spec.format must be a whole number of 1 or more")
+    elif spec_format(spec) > SPEC_FORMAT:
+        errors.append(
+            f"this map is format {spec_format(spec)}, but this copy of the tool "
+            f"reads up to {SPEC_FORMAT} — update the tool to open it")
 
     at = spec.get("legend")
     if at is not None and at not in LEGEND_AT:
@@ -1956,6 +1997,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     spec = json.loads(raw)
     spec.setdefault("stations", {})
     spec.setdefault("lines", [])
+    for note in migrate(spec):
+        print(f"  · {note}", file=sys.stderr)
 
     errors = validate_spec(spec)
     if errors:

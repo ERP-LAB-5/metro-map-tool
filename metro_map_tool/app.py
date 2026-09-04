@@ -112,7 +112,8 @@ def read_spec(path: Path) -> dict:
     spec.setdefault("stations", {})
     spec.setdefault("lines", [])
     spec.setdefault("zones", [])
-    return spec
+    mm.migrate(spec)          # older shapes come forward; a newer one is left
+    return spec               # alone for validate_spec to refuse by name
 
 
 def write_spec(path: Path, spec: dict) -> None:
@@ -291,6 +292,9 @@ def put_map(name: str):
 
     if data.get("auto_interchange", True):
         mm.auto_interchanges(spec)
+    # stamp on the way out, so anything that saves through this server — the
+    # designer, the MCP tools, a script — leaves a file that can be told apart
+    spec["format"] = mm.SPEC_FORMAT
     try:
         write_spec(path, spec)
     except OSError as exc:
@@ -429,6 +433,7 @@ def defaults():
                     "dead_ends": [{"value": k, "label": DEAD_END_TITLES.get(k, k)}
                                   for k in mm.DEAD_ENDS],
                     "themes": list(mm.THEMES),
+                    "spec_format": mm.SPEC_FORMAT,
                     "axes": ["top", "bottom"],
                     "continues": [{"value": k, "label": CONTINUES_TITLES.get(k, k)}
                                   for k in mm.CONTINUES],

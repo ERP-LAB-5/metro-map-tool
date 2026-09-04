@@ -62,6 +62,7 @@ canvas within a couple of seconds.
 
 | Field | Notes |
 |---|---|
+| `format` | The spec's shape, stamped by the server on save. **Never write or change it by hand.** A map claiming a format newer than the tool reads is refused; a map without one predates the stamp and is read as it always was. |
 | `mode` | `metro` (default, leave it out) or `roadmap`. |
 | `legend` | `bottom` (the default), `top`, `left`, `right` or `hide`. Names every line beside a swatch in its own colour and dash pattern. Leave it out unless the map wants it elsewhere or off. |
 | `dead_end` | On a station, three volumes of the same terminus bar: `buffer` simply stops there (a planned retirement), `smoke` adds drifting puffs (watch out), `fire` adds flames (the burning platform — get off). The stop must be on a line, because the marker is laid across the track arriving at it. An out-of-service line still earns a plain bar automatically wherever it runs out. |

@@ -225,6 +225,7 @@ def spec_reference() -> dict:
             "intervals": defaults["intervals"],
             "folders": defaults["folders"],
             "legend_positions": defaults["legend_positions"],
+            "spec_format": defaults["spec_format"],
             "dead_ends": defaults["dead_ends"],
             "palette": call("GET", "/api/palette"),
             "style_defaults": defaults["style"],
@@ -237,6 +238,10 @@ def spec_reference() -> dict:
             "legend": '"legend" names the lines on the drawing: hide, top, '
                       "left, bottom or right. It defaults to bottom, so leave "
                       'it out unless the map wants it elsewhere or off',
+            "format": "specs are stamped with the shape they were written in. "
+                      "Leave it alone: the server stamps it on save, and a spec "
+                      "claiming a format newer than the tool understands is "
+                      "refused rather than half-drawn",
             "continues": 'a line may carry "continues": "start", "end" or '
                          '"both" — an arrowhead just past that terminal stop, '
                          "saying the line runs on beyond what the map shows. "
