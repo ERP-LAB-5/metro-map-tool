@@ -308,12 +308,45 @@ class Map:
         }
         self.segments: List[dict] = []
         self.stop_seg: Dict[Tuple[int, str], dict] = {}   # (line index, station) -> touching segment
+        self.edges = self._edges(spec)
         self._build_segments()
         assign_offsets(self.segments, style.bundle_gap)
+
+    def _edges(self, spec: dict) -> Optional[Tuple[float, float]]:
+        """How far left and right a line that carries on should run to.
+
+        On a roadmap that is the span of the ruler, which is what "before the
+        chart starts" and "after it ends" actually mean. Without one there is no
+        calendar to run to, so the drawing's own width stands in: the leftmost
+        and rightmost stations placed.
+        """
+        tl = spec_timeline(spec)
+        if tl:
+            return (0.0, tl.columns * self.style.cell)
+        if not self.pos:
+            return None
+        xs = [p[0] for p in self.pos.values()]
+        return (min(xs), max(xs))
+
+    def _leg(self, li: int, hop: int, p: Point, q: Point) -> dict:
+        return {"line": li, "hop": hop, "p": p, "q": q,
+                "offset": 0.0, "shift": (0.0, 0.0)}
 
     def _build_segments(self) -> None:
         for li, line in enumerate(self.lines):
             ids = line["stations"]
+            at = line_continues(line)
+
+            # A line that carries on is drawn out to the edge, not merely
+            # arrowed beside its last stop. The hop sentinels keep these legs
+            # out of the station-pair lookups notes and rides do: they belong to
+            # no pair of stations, because one of their ends is not a station.
+            if at in ("start", "both") and ids and self.edges:
+                here = self.pos[ids[0]]
+                out = (self.edges[0], here[1])
+                if abs(out[0] - here[0]) > 0.5:
+                    self.segments.append(self._leg(li, -1, out, here))
+
             # "hop" is the index of the station pair a leg belongs to, so a note
             # written against hop k can find the legs that carry it — one leg
             # when the pair is octilinear already, two when it bends
@@ -330,6 +363,12 @@ class Map:
                 self.stop_seg.setdefault((li, b), self.segments[-1])
             if len(ids) >= 2:
                 self.stop_seg[(li, ids[-1])] = self.segments[-1]   # terminus
+
+            if at in ("end", "both") and ids and self.edges:
+                here = self.pos[ids[-1]]
+                out = (self.edges[1], here[1])
+                if abs(out[0] - here[0]) > 0.5:
+                    self.segments.append(self._leg(li, -2, here, out))
 
     # -- routes ------------------------------------------------------------
 
@@ -1004,7 +1043,7 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
         state = line_status(line)
         cls = f"route{STATUS_CLASS[state]}"
         title = esc(line["name"]) + STATUS_LABEL.get(state, "")
-        if len(line["stations"]) < 2:      # still being routed in the designer
+        if not any(g["line"] == i for g in m.segments):   # nothing to draw yet
             routes.append(f'    <path class="{cls} l{i}" d="" stroke="{line["color"]}">'
                           f'<title>{title}</title></path>')
             continue
@@ -1096,31 +1135,39 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
         ids = line["stations"]
         if at == "none" or not ids:
             continue
-        wanted = ([(ids[0], "start")] if at in ("start", "both") else []) \
-            + ([(ids[-1], "end")] if at in ("end", "both") else [])
-        for sid, which in wanted:
-            seg = m.stop_seg.get((li, sid))
-            here = m.pos[sid]
-            if seg:
-                away = (sub(seg["p"], seg["q"]) if dist(seg["p"], here) < dist(seg["q"], here)
-                        else sub(seg["q"], seg["p"]))
-                d, shift = norm(away), seg["shift"]
+        wanted = ([(ids[0], "start", -1)] if at in ("start", "both") else []) \
+            + ([(ids[-1], "end", -2)] if at in ("end", "both") else [])
+        for sid, which, tag in wanted:
+            run = [g for g in m.segments if g["line"] == li and g["hop"] == tag]
+            if run:
+                # the line was drawn out to the edge; the arrow caps it there
+                leg = run[0]
+                far = leg["p"] if which == "start" else leg["q"]
+                near = leg["q"] if which == "start" else leg["p"]
+                d = norm(sub(far, near))
+                base = add(add(far, leg["shift"]), scale(d, s.stroke * 0.5))
             else:
-                # A line with a single stop has no track, so there is no
-                # direction to read off one. On a dated map time runs left to
-                # right, which is the only sensible way for it to point.
-                d = (-1.0, 0.0) if which == "start" else (1.0, 0.0)
-                shift = (0.0, 0.0)
-            base = add(add(here, shift),
-                       scale(d, m.marker_radius(sid) + s.stroke * 0.5))
+                # nothing to extend — the stop already sits on the edge, or
+                # there is no calendar and no other station to reach towards
+                seg = m.stop_seg.get((li, sid))
+                here = m.pos[sid]
+                if seg:
+                    away = (sub(seg["p"], seg["q"])
+                            if dist(seg["p"], here) < dist(seg["q"], here)
+                            else sub(seg["q"], seg["p"]))
+                    d, shift = norm(away), seg["shift"]
+                else:
+                    d, shift = ((-1.0, 0.0) if which == "start" else (1.0, 0.0)), (0.0, 0.0)
+                base = add(add(here, shift),
+                           scale(d, m.marker_radius(sid) + s.stroke * 0.5))
             mark, reach = chevron(base, d, s, li)
             onward.append(
                 f'    <g class="onward-mark" stroke="{line["color"]}">'
                 f'<title>{esc(line["name"])} continues</title>{mark}</g>')
-            far = add(base, scale(d, reach))
+            far_pt = add(base, scale(d, reach))
             pad = s.stroke
-            grow(min(base[0], far[0]) - pad, min(base[1], far[1]) - pad,
-                 max(base[0], far[0]) + pad, max(base[1], far[1]) + pad)
+            grow(min(base[0], far_pt[0]) - pad, min(base[1], far_pt[1]) - pad,
+                 max(base[0], far_pt[0]) + pad, max(base[1], far_pt[1]) + pad)
 
     # notes riding the track between two stations — "6 weeks", "nightly batch"
     notes = []

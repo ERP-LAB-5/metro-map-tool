@@ -1,6 +1,6 @@
 # metro-map-tool
 
-**v2.9.2** · MIT · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
+**v2.10.0** · MIT · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
 
 Transit-map diagrams for landscapes, pipelines and migrations: a JSON spec of
 **stations** on a grid, **lines** routed through them and **zones** banding
@@ -67,12 +67,12 @@ meeting again at the saved file. After that it reopens whatever you had last.
   planned retirement; *smoke* adds drifting puffs — watch out; *burning
   platform* adds flames — get off this train. An out-of-service line still gets
   a plain bar automatically where it runs out.
-- **Runs on past the map** (line editor) puts an arrowhead just beyond a line's
-  first or last stop, saying it carries on beyond what the map shows — the
-  opposite of a dead end, and useful at the two ends of a timeline where the
-  work started before and continues after. A line with a single stop gets one
-  too — it has no track to take a direction from, so the arrow points the way
-  time runs.
+- **Runs on past the map** (line editor) draws a line out to the edge and caps
+  it with an arrowhead, saying it carries on beyond what the map shows — the
+  opposite of a dead end. On a roadmap the edge is the start or end of the
+  timeline, so a system that was already running and has one milestone on it
+  draws as a full-width line through that stop. Without a timeline the leftmost
+  and rightmost stations stand in for the edges.
 - **Joins** (Joins tab) draw a *stretched interchange*: one capsule covering
   several stops, the way a tube map marks a correspondance. Use it for a
   milestone that lands on several parallel lines at once — the capsule stretches
@@ -131,8 +131,8 @@ the *interchanges* toggle is on.
 with Windows 10 and later, and with every Linux and macOS:
 
 ```bash
-curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.9.2.tar.gz | tar xz
-cd metro-map-tool-2.9.2
+curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.10.0.tar.gz | tar xz
+cd metro-map-tool-2.10.0
 ./run.sh                 # or run.cmd on Windows
 ```
 
@@ -140,7 +140,7 @@ cd metro-map-tool-2.9.2
 commands on your PATH in their own virtual environment:
 
 ```bash
-pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.9.2
+pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.10.0
 metro-map-designer                    # the browser designer
 metro-map spec.json -o map.svg        # the renderer
 metro-map-mcp                         # the MCP server, for agents

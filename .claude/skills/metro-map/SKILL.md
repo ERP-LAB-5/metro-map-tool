@@ -72,7 +72,7 @@ canvas within a couple of seconds.
 | `label_at` | `above`, `below`, `left`, `right`, `above-left`, `above-right`, `below-left`, `below-right`. Omit it and the renderer picks the first side no track leaves on — usually right. Only override when a label collides. |
 | `label_angle` | `0` (default), `45` or `90`, counter-clockwise. A tilted label is anchored at the marker edge and reads *outward*, so it never crosses its own station. Use it to fit long names into a tight column. |
 | `status` | `live` (default, leave it out), `out-of-service`, `under-construction`, `planned`. |
-| `continues` | On a line: `start`, `end` or `both` draws an arrowhead past that terminal stop, saying the route runs on beyond the map. Works on a line with a single stop too, where it points the way time runs. The opposite of a `dead_end`, and drawn in the same place — never put both on one stop. |
+| `continues` | On a line: `start`, `end` or `both` runs the line out to the edge of the map and caps it with an arrowhead. On a roadmap the edge is the start/end of the timeline, so a one-stop line with `both` draws right across the chart through that stop — which is how to show something that was already running and still is. Without a timeline the leftmost and rightmost stations stand in. The opposite of a `dead_end`, and drawn in the same place, so never put both on one stop. |
 | `color` | `#rrggbb`. `spec_reference` returns the ten-colour palette the designer offers; stay inside it unless the diagram has its own brand colours. |
 
 **Line states.** `out-of-service` draws dashed and faded, and caps the route
