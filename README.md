@@ -1,6 +1,6 @@
 # metro-map-tool
 
-**v2.14.0** · GPL-3.0 · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
+**v2.15.0** · GPL-3.0 · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
 
 Transit-map diagrams for landscapes, pipelines and migrations: a JSON spec of
 **stations** on a grid, **lines** routed through them and **zones** banding
@@ -148,8 +148,8 @@ If it saves you an afternoon, [buy me a coffee](https://www.buymeacoffee.com/dla
 with Windows 10 and later, and with every Linux and macOS:
 
 ```bash
-curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.14.0.tar.gz | tar xz
-cd metro-map-tool-2.14.0
+curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.15.0.tar.gz | tar xz
+cd metro-map-tool-2.15.0
 ./run.sh                 # or run.cmd on Windows
 ```
 
@@ -157,7 +157,7 @@ cd metro-map-tool-2.14.0
 commands on your PATH in their own virtual environment:
 
 ```bash
-pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.14.0
+pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.15.0
 metro-map-designer                    # the browser designer
 metro-map spec.json -o map.svg        # the renderer
 metro-map-mcp                         # the MCP server, for agents
@@ -169,6 +169,14 @@ run `metro-map-designer` from wherever you keep your maps; the maps that ship
 with the tool travel inside the package and are always available.
 
 Upgrading is the same command with a later tag, or `pipx upgrade metro-map-tool`.
+
+## Drawing a git history
+
+A commit graph is already a metro map: lanes are grid y, commits are stations, a
+branch is a line through the commits on it, and a merge is a stop two lines
+share — so it becomes an interchange ring on its own. No mode and no extra
+fields; `.claude/skills/metro-map/SKILL.md` has the mapping and the judgement
+calls, so an agent with the skill can draw a repository's history on request.
 
 ## Roadmap mode
 
