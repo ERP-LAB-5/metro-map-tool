@@ -2,17 +2,12 @@
   "editor": {
     "snap": 0.5
   },
+  "format": 1,
+  "interchanges": [],
   "lines": [
     {
       "color": "#0098d4",
       "name": "Core programme",
-      "stations": [
-        "kickoff",
-        "discovery",
-        "blueprint",
-        "build",
-        "golive"
-      ],
       "notes": [
         {
           "at": 0,
@@ -22,7 +17,15 @@
           "at": 2,
           "text": "2 quarters"
         }
-      ]
+      ],
+      "stations": [
+        "kickoff",
+        "discovery",
+        "blueprint",
+        "build",
+        "golive"
+      ],
+      "continues": "both"
     },
     {
       "color": "#007d32",
@@ -38,36 +41,52 @@
     {
       "color": "#ee7c0e",
       "name": "Data",
-      "stations": [
-        "blueprint",
-        "migrate",
-        "cutover",
-        "golive"
-      ],
       "notes": [
         {
           "at": 1,
           "text": "dry run"
         }
+      ],
+      "stations": [
+        "blueprint",
+        "migrate",
+        "cutover",
+        "golive"
       ]
     },
     {
       "color": "#e1251b",
       "name": "Decommission",
-      "stations": [
-        "cutover",
-        "decom"
-      ],
-      "status": "under-construction",
       "notes": [
         {
           "at": 0,
           "text": "after sign-off"
         }
-      ]
+      ],
+      "stations": [
+        "cutover",
+        "decom"
+      ],
+      "status": "under-construction"
     }
   ],
   "mode": "roadmap",
+  "phases": [],
+  "scenarios": [
+    {
+      "color": "#7b3fb5",
+      "duration": 10,
+      "name": "The migration journey",
+      "stations": [
+        "kickoff",
+        "discovery",
+        "blueprint",
+        "migrate",
+        "cutover",
+        "golive"
+      ]
+    }
+  ],
   "stations": {
     "blueprint": {
       "gx": 2,
@@ -90,11 +109,11 @@
       "label_at": "below"
     },
     "decom": {
+      "dead_end": "buffer",
       "gx": 6,
       "gy": 4,
       "label": "Legacy off",
-      "label_at": "below",
-      "dead_end": "buffer"
+      "label_at": "below"
     },
     "discovery": {
       "gx": 1,
@@ -143,7 +162,7 @@
     "zone_pad": 34
   },
   "timeline": {
-    "end": "2027-07-01",
+    "end": "2027-09-30",
     "interval": "quarter",
     "start": "2026-01-01"
   },
@@ -164,21 +183,6 @@
         "pilot",
         "build",
         "rollout",
-        "migrate",
-        "cutover",
-        "golive"
-      ]
-    }
-  ],
-  "scenarios": [
-    {
-      "name": "The migration journey",
-      "color": "#7b3fb5",
-      "duration": 10,
-      "stations": [
-        "kickoff",
-        "discovery",
-        "blueprint",
         "migrate",
         "cutover",
         "golive"
