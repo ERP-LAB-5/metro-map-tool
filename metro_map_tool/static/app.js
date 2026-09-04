@@ -514,7 +514,11 @@ function onStationClick(id) {
     return;
   }
   if (tab === "zones" && S.sel.kind === "zone" && S.spec.zones[S.sel.id]) {
-    toggleZoneMember(S.sel.id, id);
+    // A capsule replaces the markers of every stop it covers and answers to
+    // only the first of them, so clicking it can reach just one. For a zone
+    // that is never what was meant: the capsule is one thing on the page, and
+    // banding it should band all of it.
+    toggleZoneMembers(S.sel.id, joinedWith(id));
     return;
   }
   if (tab === "joins" && S.sel.kind === "join" && S.spec.interchanges[S.sel.id]) {
@@ -1147,13 +1151,29 @@ function renderZoneEditor() {
   setHint();
 }
 
+/** Every stop drawn by the same capsule as this one, or just this one. */
+function joinedWith(sid) {
+  const group = (S.spec.interchanges || []).find(
+    (ix) => ix && (ix.stations || []).includes(sid));
+  return group ? group.stations.slice() : [sid];
+}
+
 function toggleZoneMember(zoneIndex, sid) {
+  toggleZoneMembers(zoneIndex, joinedWith(sid));
+}
+
+/** Put a set of stops in a zone, or take them all out if they are already in. */
+function toggleZoneMembers(zoneIndex, sids) {
   const zn = S.spec.zones[zoneIndex];
-  if (!zn) return;
+  if (!zn || !sids.length) return;
   applyChange(() => {
     zn.stations = zn.stations || [];
-    const at = zn.stations.indexOf(sid);
-    if (at >= 0) zn.stations.splice(at, 1); else zn.stations.push(sid);
+    const allIn = sids.every((s) => zn.stations.includes(s));
+    for (const sid of sids) {
+      const at = zn.stations.indexOf(sid);
+      if (allIn && at >= 0) zn.stations.splice(at, 1);
+      else if (!allIn && at < 0) zn.stations.push(sid);
+    }
   });
 }
 

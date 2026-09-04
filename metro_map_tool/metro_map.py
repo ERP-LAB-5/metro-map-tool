@@ -1208,6 +1208,7 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
     # Interchanges that stretch: one capsule covering several stops, the way a
     # tube map marks a correspondance across platforms. The members' own markers
     # are not drawn — the capsule replaces them rather than sitting behind them.
+    extent: Dict[str, Tuple[float, float, float, float]] = {}   # marker + label box
     capsules: List[str] = []
     capsule_box: Dict[int, Tuple[float, float, float, float]] = {}
     in_capsule: Dict[str, int] = {}
@@ -1229,6 +1230,8 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
         bx0, by0 = min(xs) - pad, min(ys) - pad
         bx1, by1 = max(xs) + pad, max(ys) + pad
         capsule_box[gi] = (bx0, by0, bx1, by1)
+        for sid in members:
+            extent[sid] = (bx0, by0, bx1, by1)
         title = ix.get("label") or m.stations[members[0]]["label"]
         capsules.append(
             f'    <rect class="capsule" data-station="{attr(members[0])}" '
@@ -1239,7 +1242,6 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
 
     # stations and labels
     stops, labels = [], []
-    extent: Dict[str, Tuple[float, float, float, float]] = {}   # marker + label box
     cx = sum(p[0] for p in m.pos.values()) / len(m.pos)
     cy = sum(p[1] for p in m.pos.values()) / len(m.pos)
 
@@ -1290,8 +1292,12 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
         )
         w = len(st["label"]) * s.label_size * 0.56          # estimated text box
         box = label_extent((lx, ly), anchor, w, angle, s)
-        extent[sid] = (min(center[0] - r, box[0]), min(center[1] - r, box[1]),
-                       max(center[0] + r, box[2]), max(center[1] + r, box[3]))
+        was = extent.get(sid, (center[0] - r, center[1] - r,
+                               center[0] + r, center[1] + r))
+        extent[sid] = (min(was[0], center[0] - r, box[0]),
+                       min(was[1], center[1] - r, box[1]),
+                       max(was[2], center[0] + r, box[2]),
+                       max(was[3], center[1] + r, box[3]))
         grow(*box)
 
     # a capsule's label, drawn once for the whole group rather than per stop
