@@ -1,6 +1,6 @@
 # metro-map-tool
 
-**v2.17.0** · GPL-3.0 · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
+**v2.17.1** · GPL-3.0 · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
 
 Transit-map diagrams for landscapes, pipelines and migrations: a JSON spec of
 **stations** on a grid, **lines** routed through them and **zones** banding
@@ -148,8 +148,8 @@ If it saves you an afternoon, [buy me a coffee](https://www.buymeacoffee.com/dla
 with Windows 10 and later, and with every Linux and macOS:
 
 ```bash
-curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.17.0.tar.gz | tar xz
-cd metro-map-tool-2.17.0
+curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.17.1.tar.gz | tar xz
+cd metro-map-tool-2.17.1
 ./run.sh                 # or run.cmd on Windows
 ```
 
@@ -157,7 +157,7 @@ cd metro-map-tool-2.17.0
 commands on your PATH in their own virtual environment:
 
 ```bash
-pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.17.0
+pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.17.1
 metro-map-designer                    # the browser designer
 metro-map spec.json -o map.svg        # the renderer
 metro-map-mcp                         # the MCP server, for agents
@@ -169,7 +169,40 @@ yourself. Installed like this, **`mymaps/` follows your working directory**, so
 run `metro-map-designer` from wherever you keep your maps; the maps that ship
 with the tool travel inside the package and are always available.
 
-Upgrading is the same command with a later tag, or `pipx upgrade metro-map-tool`.
+## Updating an install
+
+**From the designer:** *About → Update and restart*. It runs pip against the
+latest published tag, shows you what pip said whatever the outcome, and restarts
+into the new version only if the install actually succeeded.
+
+**From the command line:**
+
+```bash
+# name the new tag — the dependable form
+pip install --upgrade git+https://github.com/ERP-LAB-5/metro-map-tool@v2.17.1
+
+# or drop the tag to track the default branch and always get the newest
+pip install --upgrade git+https://github.com/ERP-LAB-5/metro-map-tool
+```
+
+`--upgrade` on its own will not move you if you pinned a tag: `@v2.16.0` means
+that commit for good, so re-running it reinstalls the same version. Change the
+tag, or leave it off.
+
+With pipx, `pipx upgrade` re-runs whatever spec you first installed and has the
+same pinned-tag problem, so name the tag and force it:
+
+```bash
+pipx install --force git+https://github.com/ERP-LAB-5/metro-map-tool@v2.17.1
+```
+
+**After any update**, if you use the agent skill, refresh your copy — it is a
+copy under `~/.claude/skills`, so upgrading the package does not touch it:
+
+```bash
+metro-map --version                    # what you have now
+metro-map-skill --install --force      # refresh the skill
+```
 
 ## Drawing a git history
 
