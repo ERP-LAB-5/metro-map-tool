@@ -386,3 +386,8 @@ button.icon {
   color: var(--muted);
 }
 body.side-hidden .side { display: none; }
+
+/* ------------------------------------------------------- ride controls -- */
+
+.ride-controls { display: flex; gap: 4px; margin-left: auto; margin-right: 8px; }
+.ride-controls button { padding: 3px 8px; font-size: 12px; }

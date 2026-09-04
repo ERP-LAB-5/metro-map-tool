@@ -1,6 +1,6 @@
 # metro-map-tool
 
-**v2.6.0** · MIT · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
+**v2.6.1** · MIT · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
 
 Transit-map diagrams for landscapes, pipelines and migrations: a JSON spec of
 **stations** on a grid, **lines** routed through them and **zones** banding
@@ -70,9 +70,10 @@ meeting again at the saved file. After that it reopens whatever you had last.
 - **Rides** (Rides tab) animate a traveller along a route from start to end.
   A ride is an ordered list of stops; it follows the drawn track and changes
   line wherever the journey does, so you can show "the migration path" across
-  three branches as one moving dot. The motion is written into the exported SVG,
-  so a file you send someone animates in their browser — and honours their
-  reduced-motion setting.
+  three branches as one moving dot. **A ride starts on its own** as soon as it
+  has a route — the ⏸ and ↻ buttons in the Rides tab only pause and rewind it.
+  The motion is written into the exported SVG, so a file you send someone
+  animates in their browser — and honours their reduced-motion setting.
 - **Notes between stops** (Lines tab, *Between stops*) put a short label on the
   track between two stations — "6 weeks", "nightly batch". They rotate to follow
   the track, never read upside down, and a vertical one reads top-to-bottom.
@@ -113,8 +114,8 @@ the *interchanges* toggle is on.
 with Windows 10 and later, and with every Linux and macOS:
 
 ```bash
-curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.6.0.tar.gz | tar xz
-cd metro-map-tool-2.6.0
+curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.6.1.tar.gz | tar xz
+cd metro-map-tool-2.6.1
 ./run.sh                 # or run.cmd on Windows
 ```
 
@@ -122,7 +123,7 @@ cd metro-map-tool-2.6.0
 commands on your PATH in their own virtual environment:
 
 ```bash
-pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.6.0
+pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.6.1
 metro-map-designer                    # the browser designer
 metro-map spec.json -o map.svg        # the renderer
 metro-map-mcp                         # the MCP server, for agents

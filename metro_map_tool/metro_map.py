@@ -1242,6 +1242,8 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
     }}
 """ if theme == "auto" else ""
 
+    # drawn last of the static layers: a stop marker painted over its own flame
+    # hides the very thing the marker is there to shout about
     dead_group = f"""  <g id="dead-ends">
 {chr(10).join(dead_ends)}
   </g>
@@ -1279,13 +1281,13 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
 {timeline_group}{zone_group}  <g id="routes">
 {chr(10).join(routes)}
   </g>
-{dead_group}{note_group}  <g id="stations">
+{note_group}  <g id="stations">
 {chr(10).join(stops)}
   </g>
   <g id="labels">
 {chr(10).join(labels)}
   </g>
-{traveller_group}{legend_group}</svg>
+{dead_group}{traveller_group}{legend_group}</svg>
 """
 
 

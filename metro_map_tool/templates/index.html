@@ -90,9 +90,13 @@
     <section class="pane" data-pane="scenarios">
       <div class="pane-head">
         <h2>Rides</h2>
+        <span class="ride-controls">
+          <button id="btn-ride-play" title="pause or resume the travellers">⏸ Pause</button>
+          <button id="btn-ride-restart" title="send them back to the start">↻</button>
+        </span>
         <button id="btn-add-scenario" class="primary">+ Add</button>
       </div>
-      <p class="note">A traveller's route from start to end. It rides the drawn track and changes line wherever the journey does, so every pair of stops needs a line between them.</p>
+      <p class="note">A traveller's route from start to end. It rides the drawn track and changes line wherever the journey does, so every pair of stops needs a line between them. <b>Rides play as soon as they have a route</b> — the buttons above only pause and rewind them.</p>
       <ul id="scenario-list" class="list"></ul>
     </section>
 

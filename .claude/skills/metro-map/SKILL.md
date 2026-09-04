@@ -116,6 +116,8 @@ animation is written into the SVG so an exported file moves too.
   ride is skipped — a traveller cannot walk across open ground.
 - It is an ordered list of *stops*, not of lines. Name the stations the traveller
   passes through and the renderer works out which track carries each hop.
+- **There is nothing to start.** A ride animates as soon as it has a valid
+  route; the designer's buttons only pause and rewind it.
 - `duration` is seconds end to end, 8 by default. Longer for a route with many
   stops, or the dot moves too fast to follow.
 - One or two rides on a map. Three dots moving at once is a screensaver, not an

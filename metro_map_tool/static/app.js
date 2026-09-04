@@ -42,6 +42,7 @@ const S = {
   autoIx: true,
   theme: "auto",                           // designer chrome and preview only
   sideHidden: false,
+  ridesPlaying: true,                      // the travellers run on their own
   snap: 1,                                 // grid step when dragging or nudging
 
   sel: { kind: null, id: null },           // "station" | "line"
@@ -310,6 +311,7 @@ async function doRender() {
   canvas.innerHTML = data.svg;
   applyTransform();
   decorate();
+  applyRideState();
 }
 
 function svgEl() { return $("#canvas svg"); }
@@ -570,7 +572,9 @@ function setHint() {
   } else if (tab === "scenarios" && S.sel.kind === "scenario" && S.spec.scenarios[S.sel.id]) {
     text = `Routing “${S.spec.scenarios[S.sel.id].name}” — click stations on the canvas in the order the traveller visits them`;
   } else if (tab === "scenarios") {
-    text = "Pick a ride to route it, or add one";
+    text = travellers().length
+      ? "Rides are running — pause or rewind them above"
+      : "Add a ride, then click stations on the canvas in order";
   } else if (tab === "timeline") {
     text = TIMELINE
       ? `${TIMELINE.columns} ${TIMELINE.interval} columns — a whole grid x is a period boundary`
@@ -1206,6 +1210,46 @@ function renderTimelineReadout() {
 }
 
 /* --------------------------------------------------------------- rides -- */
+
+/* A ride animates the moment it has a route — there is nothing to start. The
+   controls exist because that is not obvious, and because watching a loop you
+   cannot stop is worse than one you can. Play state is re-applied after every
+   render, since each render swaps in a fresh SVG that starts out running. */
+
+function travellers() {
+  return document.querySelectorAll("#canvas svg .traveller");
+}
+
+function applyRideState() {
+  travellers().forEach((t) => {
+    t.style.animationPlayState = S.ridesPlaying ? "running" : "paused";
+  });
+  const btn = $("#btn-ride-play");
+  if (btn) {
+    btn.textContent = S.ridesPlaying ? "⏸ Pause" : "▶ Play";
+    btn.title = S.ridesPlaying ? "pause the travellers" : "resume the travellers";
+  }
+  const none = !travellers().length;
+  for (const id of ["#btn-ride-play", "#btn-ride-restart"]) {
+    const b = $(id);
+    if (b) b.disabled = none;
+  }
+}
+
+function toggleRides() {
+  S.ridesPlaying = !S.ridesPlaying;
+  applyRideState();
+}
+
+/** Send every traveller back to its first stop. */
+function restartRides() {
+  travellers().forEach((t) => {
+    t.style.animation = "none";
+    void t.getBoundingClientRect();          // force a reflow, or the restart is a no-op
+    t.style.animation = "";
+  });
+  applyRideState();
+}
 
 function renderScenarios() {
   const list = $("#scenario-list");
@@ -1912,6 +1956,8 @@ async function boot() {
   $("#btn-add-line").addEventListener("click", addLine);
   $("#btn-add-zone").addEventListener("click", addZone);
   $("#btn-add-scenario").addEventListener("click", addScenario);
+  $("#btn-ride-play").addEventListener("click", toggleRides);
+  $("#btn-ride-restart").addEventListener("click", restartRides);
   $("#btn-new").addEventListener("click", newMap);
   $("#btn-open").addEventListener("click", openDialog);
   $("#btn-save").addEventListener("click", () => saveMap());
