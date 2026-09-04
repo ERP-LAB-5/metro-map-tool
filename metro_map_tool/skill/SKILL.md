@@ -74,6 +74,7 @@ canvas within a couple of seconds.
 | `label_angle` | `0` (default), `45` or `90`, counter-clockwise. A tilted label is anchored at the marker edge and reads *outward*, so it never crosses its own station. Use it to fit long names into a tight column. |
 | `status` | `live` (default, leave it out), `out-of-service`, `under-construction`, `planned`. |
 | `continues` | On a line: `start`, `end` or `both` runs the line out to the edge of the map and caps it with an arrowhead. On a roadmap the edge is the start/end of the timeline, so a one-stop line with `both` draws right across the chart through that stop — which is how to show something that was already running and still is. Without a timeline the leftmost and rightmost stations stand in. The opposite of a `dead_end`, and drawn in the same place, so never put both on one stop. |
+| `onward` | Beside `continues`, `{"start": str?, "end": str?}` — what is written past the arrow, the "to Cockfosters" of a transit map. Name where the line comes from or goes to: a date ("since 2019"), a destination, a phase. Only ends that actually run on may carry one. The `onward_reach` style, in cells, pushes the arrows further out from the ends when the labels need room. |
 | `color` | `#rrggbb`. `spec_reference` returns the ten-colour palette the designer offers; stay inside it unless the diagram has its own brand colours. |
 
 **Line states.** `out-of-service` draws dashed and faded, and caps the route

@@ -18,7 +18,8 @@ Input JSON
   },
   "lines": [ {"name": str, "color": "#rrggbb", "stations": ["<id>", ...],
               "status": "live"|"out-of-service"|"under-construction"|"planned"?,
-              "continues": "none"|"start"|"end"|"both"?} ],
+              "continues": "none"|"start"|"end"|"both"?,
+              "onward": {"start": str?, "end": str?}?} ],   # where it goes off-map
   "zones": [ {"name": str, "color": "#rrggbb", "stations": ["<id>", ...]} ]?,
   "mode": "metro"|"roadmap"?,                    # metro is the default
   "timeline": {"start": "yyyy-mm-dd", "end": "yyyy-mm-dd",
@@ -149,6 +150,8 @@ class Style:
     legend_swatch: float = 26.0  # length of the colour stroke beside a name
     legend_gap: float = 10.0     # swatch to name, and note to track
     note_size: float = 12.0      # a note riding a track between two stations
+    onward_reach: float = 0.0    # extra cells a continuing line runs past the edge
+    onward_size: float = 13.0    # the label written beyond a continuation arrow
     flame_scale: float = 1.0     # size of the burning-platform fire
     font: str = '"Hanken Grotesk","Helvetica Neue",Helvetica,Arial,sans-serif'
 
@@ -345,9 +348,10 @@ class Map:
             # arrowed beside its last stop. The hop sentinels keep these legs
             # out of the station-pair lookups notes and rides do: they belong to
             # no pair of stations, because one of their ends is not a station.
+            reach = self.style.onward_reach * self.style.cell
             if at in ("start", "both") and ids and self.edges:
                 here = self.pos[ids[0]]
-                out = (self.edges[0], here[1])
+                out = (self.edges[0] - reach, here[1])
                 if abs(out[0] - here[0]) > 0.5:
                     self.segments.append(self._leg(li, -1, out, here))
 
@@ -370,7 +374,7 @@ class Map:
 
             if at in ("end", "both") and ids and self.edges:
                 here = self.pos[ids[-1]]
-                out = (self.edges[1], here[1])
+                out = (self.edges[1] + reach, here[1])
                 if abs(out[0] - here[0]) > 0.5:
                     self.segments.append(self._leg(li, -2, here, out))
 
@@ -1134,6 +1138,7 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
     # run out on rather than at the drawing's border — the stop is where the
     # reader is looking, and the map has no border to speak of
     onward = []
+    said_any = False
     for li, line in enumerate(m.lines):
         at = line_continues(line)
         ids = line["stations"]
@@ -1165,10 +1170,38 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
                 base = add(add(here, shift),
                            scale(d, m.marker_radius(sid) + s.stroke * 0.5))
             mark, reach = chevron(base, d, s, li)
+            far_pt = add(base, scale(d, reach))
+
+            # "to Cockfosters": where the line goes once it is off the page.
+            # Written beyond the arrow, reading outward, so it belongs to the
+            # end of the line rather than to the last stop before it.
+            said = (line.get("onward") or {}).get(which) if isinstance(
+                line.get("onward"), dict) else None
+            said = said.strip() if isinstance(said, str) else ""
+            text = ""
+            if said:
+                said_any = True
+                anchor = add(far_pt, scale(d, s.stroke * 0.7))
+                width = len(said) * s.onward_size * 0.56 + s.stroke
+                # a line leaving sideways reads outward from the arrow; one
+                # leaving up or down has no side to read from, so it centres
+                # under its own tip instead
+                upright = abs(d[0]) < 0.35
+                align = "middle" if upright else ("start" if d[0] > 0 else "end")
+                dy = s.onward_size * (0.9 if d[1] > 0 else -0.3) if upright \
+                    else s.onward_size * 0.36
+                text = (f'<text class="onward-say" x="{anchor[0]:.1f}" '
+                        f'y="{anchor[1] + dy:.1f}" '
+                        f'text-anchor="{align}">{esc(said)}</text>')
+                x0 = anchor[0] - (width / 2 if upright else
+                                  (0 if d[0] > 0 else width))
+                grow(x0, anchor[1] + dy - s.onward_size,
+                     x0 + width, anchor[1] + dy + s.onward_size * 0.4)
+
             onward.append(
                 f'    <g class="onward-mark" stroke="{line["color"]}">'
-                f'<title>{esc(line["name"])} continues</title>{mark}</g>')
-            far_pt = add(base, scale(d, reach))
+                f'<title>{esc(line["name"])} continues'
+                f'{" — " + esc(said) if said else ""}</title>{mark}{text}</g>')
             pad = s.stroke
             grow(min(base[0], far_pt[0]) - pad, min(base[1], far_pt[1]) - pad,
                  max(base[0], far_pt[0]) + pad, max(base[1], far_pt[1]) + pad)
@@ -1465,6 +1498,10 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
   </g>
 """
 
+    says_css = "" if not said_any else (
+        f'    .onward-say {{ font-family: {s.font}; font-size: {s.onward_size}px;\n'
+        f'                  font-weight: 600; fill: var(--ink); stroke: none;\n'
+        f'                  opacity: .75; }}\n')
     onward_group = ""
     if onward:
         onward_group = f"""  <g id="onward">
@@ -1530,7 +1567,7 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
     .status-plan {{ stroke-dasharray: {s.stroke * 0.1:.1f} {s.stroke * 1.35:.1f}; opacity: .62; }}
     .onward {{ stroke-width: {max(3.0, s.stroke * 0.62):.1f}; stroke-linecap: round;
               stroke-linejoin: round; }}
-    .buffer {{ stroke: var(--ink); stroke-width: {max(3.0, s.stroke * 0.5):.1f};
+{says_css}    .buffer {{ stroke: var(--ink); stroke-width: {max(3.0, s.stroke * 0.5):.1f};
               stroke-linecap: butt; opacity: .7; }}
     .dead-end.fire .buffer {{ stroke: #7a2d0e; opacity: .9; }}
     .flame-outer {{ fill: #e1251b; }}
@@ -1796,6 +1833,18 @@ def validate_spec(spec: object) -> List[str]:
             errors.append(f"{where}: colour must be #rrggbb")
         if ln.get("continues") is not None and ln["continues"] not in CONTINUES:
             errors.append(f"{where}: continues must be one of " + ", ".join(CONTINUES))
+        said = ln.get("onward")
+        if said is not None:
+            if not isinstance(said, dict):
+                errors.append(f"{where}: onward must be an object of "
+                              "start and/or end to text")
+            else:
+                for key, value in said.items():
+                    if key not in ("start", "end"):
+                        errors.append(f"{where}: onward has no '{key}' — "
+                                      "only start and end")
+                    elif not isinstance(value, str):
+                        errors.append(f"{where}: onward.{key} must be text")
         if ln.get("status") is not None and ln["status"] not in STATUS_CLASS:
             errors.append(f"{where}: status must be one of "
                           + ", ".join(sorted(STATUS_CLASS)))
@@ -1921,7 +1970,8 @@ def style_from(source: object, base: Optional[Style] = None) -> Style:
                       "status_fade", "buffer_len",
                       "tl_row_h", "tl_label_size", "tl_major_size",
                       "legend_size", "legend_row_h", "legend_swatch",
-                      "legend_gap", "note_size", "flame_scale"):
+                      "legend_gap", "note_size", "flame_scale",
+                      "onward_reach", "onward_size"):
             v = source.get(field)
             if isinstance(v, (int, float)) and not isinstance(v, bool):
                 setattr(style, field, float(v))
@@ -1933,7 +1983,8 @@ def style_from(source: object, base: Optional[Style] = None) -> Style:
 def style_to_dict(style: Style) -> dict:
     """The style fields the web UI edits, for storing alongside a spec."""
     return {f: getattr(style, f)
-            for f in ("cell", "stroke", "corner", "bundle_gap", "label_size", "zone_pad")}
+            for f in ("cell", "stroke", "corner", "bundle_gap", "label_size",
+                      "zone_pad", "onward_reach")}
 
 
 def auto_interchanges(spec: dict) -> int:

@@ -249,6 +249,13 @@ def spec_reference() -> dict:
                          '"both" — an arrowhead just past that terminal stop, '
                          "saying the line runs on beyond what the map shows. "
                          "Do not put it on a stop that is also a dead_end",
+            "onward": 'beside "continues", a line may carry "onward": '
+                      '{"start": str?, "end": str?} — what is written beyond '
+                      'that arrow, the "to Cockfosters" of a transit map. Use '
+                      "it to name where the line comes from or goes to: a date "
+                      '("since 2019"), a destination, or a phase. Style '
+                      '"onward_reach" (in cells, default 0) runs the arrows '
+                      "further out from the ends when the labels need room",
             "interchanges": 'a stretched interchange: {"stations": [ids], '
                             '"label"?, "label_at"?, "label_angle"?}. One capsule '
                             "covers the stops listed, replacing their own "

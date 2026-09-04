@@ -399,7 +399,9 @@ the drawn track; every consecutive pair of stops needs a line between them.
 first two stops, so the last legal `at` is two less than the number of stops.
 `gx`/`gy` are grid cells, not pixels, and need not be whole numbers — `9.5`
 sits half a cell along.
-`continues` on a line is `start`, `end` or `both` and arrows that end onward.
+`continues` on a line is `start`, `end` or `both` and arrows that end onward;
+`onward` is `{"start": str?, "end": str?}` — the "to Cockfosters" written past
+that arrow, and the `onward_reach` style (in cells) runs the ends further out.
 `status` is one of `live` (the default, and left out), `out-of-service`,
 `under-construction` or `planned`. `label_angle` is `0`, `45` or `90` degrees
 counter-clockwise, on top of `label_at`. Segments are octilinear (0° / 45° / 90°),

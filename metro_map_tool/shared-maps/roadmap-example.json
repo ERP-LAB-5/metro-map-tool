@@ -7,6 +7,7 @@
   "lines": [
     {
       "color": "#0098d4",
+      "continues": "both",
       "name": "Core programme",
       "notes": [
         {
@@ -18,14 +19,17 @@
           "text": "2 quarters"
         }
       ],
+      "onward": {
+        "end": "and beyond",
+        "start": "running since 2019"
+      },
       "stations": [
         "kickoff",
         "discovery",
         "blueprint",
         "build",
         "golive"
-      ],
-      "continues": "both"
+      ]
     },
     {
       "color": "#007d32",
@@ -158,6 +162,7 @@
     "cell": 150,
     "corner": 22,
     "label_size": 16,
+    "onward_reach": 0.5,
     "stroke": 10,
     "zone_pad": 34
   },

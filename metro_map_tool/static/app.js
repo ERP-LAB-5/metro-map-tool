@@ -867,6 +867,35 @@ function stopName(sid) {
   return (S.spec.stations[sid] || {}).label || sid;
 }
 
+/** What a line says it runs on to, at one end of the map. */
+function saysAt(ln, which) {
+  const said = ln.onward;
+  return (said && typeof said === "object" && typeof said[which] === "string")
+    ? said[which] : "";
+}
+
+/** Set or clear one end's onward label, leaving no empty object behind. */
+function setSays(ln, which, text) {
+  const said = text.trim();
+  if (!said) {
+    if (ln.onward) delete ln.onward[which];
+  } else {
+    if (!ln.onward || typeof ln.onward !== "object") ln.onward = {};
+    ln.onward[which] = said;
+  }
+  if (ln.onward && !Object.keys(ln.onward).length) delete ln.onward;
+}
+
+/** Drop labels for an end that no longer runs on past the map. */
+function pruneSays(ln) {
+  if (!ln.onward) return;
+  const at = ln.continues || "none";
+  for (const which of ["start", "end"]) {
+    if (at !== which && at !== "both") delete ln.onward[which];
+  }
+  if (!Object.keys(ln.onward).length) delete ln.onward;
+}
+
 function noteAt(ln, hop) {
   const found = (ln.notes || []).find((n) => n && n.at === hop);
   return found ? found.text : "";
@@ -944,6 +973,17 @@ function renderLineEditor() {
     <label class="field"><span>Runs on past the map</span><select id="l-onward">
       ${CONTINUES.map((c) => `<option value="${esc(c.value)}" ${(ln.continues || "none") === c.value ? "selected" : ""}>${esc(c.label)}</option>`).join("")}
     </select></label>
+    ${(ln.continues && ln.continues !== "none") ? `
+    <div class="hops" id="l-says">
+      <p class="note">Where it goes once it is off the page — “since 2019”, “to Cockfosters”. Written beyond the arrow.</p>
+      ${["start", "end"].filter((w) => ln.continues === w || ln.continues === "both").map((w) => `
+        <label class="field hop">
+          <span>${w === "start" ? "Off the left" : "Off the right"}</span>
+          <input type="text" data-says="${w}" value="${esc(saysAt(ln, w))}"
+                 placeholder="nothing yet">
+        </label>`).join("")}
+    </div>` : ""}
+
     ${(ln.status || "live") === "out-of-service"
       ? `<p class="note">Drawn dashed and faded, with a dead-end bar wherever the route ends on a stop no line in service reaches.</p>` : ""}
 
@@ -1004,9 +1044,20 @@ function renderLineEditor() {
     else ln.status = ev.target.value;
   }));
   $("#l-onward").addEventListener("change", (ev) => applyChange(() => {
-    if (ev.target.value === "none") delete ln.continues;   // the default stays implicit
-    else ln.continues = ev.target.value;
+    if (ev.target.value === "none") { delete ln.continues; delete ln.onward; }
+    else {                            // the default stays implicit
+      ln.continues = ev.target.value;
+      pruneSays(ln);                  // an end that no longer runs on keeps no label
+    }
   }));
+  box.querySelectorAll("[data-says]").forEach((input) => {
+    input.addEventListener("focus", pushUndo);
+    input.addEventListener("input", () => {
+      setSays(ln, input.dataset.says, input.value);
+      markDirty();
+      scheduleRender();
+    });
+  });
   box.querySelectorAll("[data-add]").forEach((btn) =>
     btn.addEventListener("click", () => applyChange(() => ln.stations.push(btn.dataset.add))));
   box.querySelectorAll("[data-drop]").forEach((btn) =>
@@ -1686,6 +1737,7 @@ const STYLE_FIELDS = [
   ["bundle_gap", "Gap between parallel tracks", 4, 40, 1],
   ["label_size", "Label size", 8, 40, 1],
   ["zone_pad", "Zone band padding", 8, 90, 2],
+  ["onward_reach", "How far a continuing line runs past the ends", 0, 4, 0.25],
 ];
 
 const SNAP_STEPS = [[1, "1 cell"], [0.5, "½ cell"], [1 / 3, "⅓ cell"], [0.25, "¼ cell"]];
