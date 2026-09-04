@@ -223,6 +223,7 @@ def spec_reference() -> dict:
             "intervals": defaults["intervals"],
             "folders": defaults["folders"],
             "legend_positions": defaults["legend_positions"],
+            "dead_ends": defaults["dead_ends"],
             "palette": call("GET", "/api/palette"),
             "style_defaults": defaults["style"],
             "grid": "gx/gy are grid cells and may be fractional (0.5 puts two "
@@ -234,6 +235,10 @@ def spec_reference() -> dict:
             "legend": '"legend" names the lines on the drawing: hide, top, '
                       "left, bottom or right. It defaults to bottom, so leave "
                       'it out unless the map wants it elsewhere or off',
+            "dead_end": 'a station may carry "dead_end": "buffer" for a '
+                        'terminus bar, or "fire" for that bar with flames off '
+                        "it — the burning platform, for a branch that ends "
+                        "badly. The marker needs the stop to be on a line",
             "notes": 'a line may carry "notes": [{"at": <hop>, "text": str, '
                      '"flip": bool?}] — a short label riding the track between '
                      "two stops. 'at' is the hop index, so 0 is the gap "

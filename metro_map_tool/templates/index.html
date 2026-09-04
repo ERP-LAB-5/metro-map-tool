@@ -9,6 +9,8 @@
 <body>
 
 <header class="bar">
+  <button id="btn-side" class="icon" title="show or hide the panel (Ctrl+\)"
+          aria-label="Toggle the side panel">&#9776;</button>
   <span class="brand">metro&nbsp;map</span>
 
   <span class="name-slot">
@@ -64,7 +66,6 @@
       </div>
       <p class="note">Place stations first. Drag a dot on the canvas to move it — it snaps to the grid.</p>
       <ul id="station-list" class="list"></ul>
-      <div id="station-editor" class="editor"></div>
     </section>
 
     <section class="pane" data-pane="lines">
@@ -74,7 +75,6 @@
       </div>
       <p class="note">Order matters: lines sharing a corridor are drawn as parallel tracks in this order.</p>
       <ul id="line-list" class="list"></ul>
-      <div id="line-editor" class="editor"></div>
     </section>
 
     <section class="pane" data-pane="zones">
@@ -84,7 +84,6 @@
       </div>
       <p class="note">A tinted band behind the stations you put in it — “Upgrade”, “Preferred”, and so on.</p>
       <ul id="zone-list" class="list"></ul>
-      <div id="zone-editor" class="editor"></div>
     </section>
 
     <section class="pane" data-pane="timeline">

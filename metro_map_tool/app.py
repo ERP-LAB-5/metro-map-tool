@@ -388,6 +388,8 @@ def palette():
 
 
 MODE_TITLES = {"metro": "Metro map", "roadmap": "Roadmap"}
+DEAD_END_TITLES = {"none": "none", "buffer": "end of the line",
+                   "fire": "burning platform"}
 FOLDER_TITLES = {"mymaps": "My maps", "shared": "Shared"}
 
 STATUS_TITLES = {
@@ -409,6 +411,8 @@ def defaults():
                               for k in mm.MODES],
                     "intervals": list(mm.INTERVALS),
                     "legend_positions": list(mm.LEGEND_AT),
+                    "dead_ends": [{"value": k, "label": DEAD_END_TITLES.get(k, k)}
+                                  for k in mm.DEAD_ENDS],
                     "themes": list(mm.THEMES),
                     "default_legend": mm.DEFAULT_LEGEND,
                     "folders": [{"value": k, "label": FOLDER_TITLES.get(k, k)}

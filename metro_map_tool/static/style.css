@@ -361,3 +361,28 @@ button.stop:hover { filter: brightness(1.1); border-color: var(--danger); }
 .about-grid dt { color: var(--muted); font-size: 12px; }
 .about-grid dd { margin: 0; font-family: var(--mono); font-size: 12px; }
 .about-grid a { color: var(--accent); }
+
+/* ------------------------------------------------- inline item editors -- */
+
+/* The editor opens inside the list, directly under the row it belongs to, so
+   the thing you clicked and the fields that change it stay together. Before
+   this it sat below the whole list and you had to scroll to find it. */
+.edit-host { list-style: none; margin: 4px 0 8px; }
+.edit-host .editor { gap: 8px; }
+.edit-host .card {
+  border-left: 3px solid var(--accent);
+  border-radius: 0 8px 8px 0;
+}
+
+.row .caret { color: var(--muted); font-size: 11px; padding-left: 4px; }
+.row.is-on .caret { color: var(--accent); }
+
+/* ------------------------------------------------------- panel toggle -- */
+
+button.icon {
+  padding: 4px 9px;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--muted);
+}
+body.side-hidden .side { display: none; }

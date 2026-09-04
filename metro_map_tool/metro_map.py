@@ -11,7 +11,8 @@ Input JSON
              "label_at": "above"|"below"|"left"|"right"
                         |"above-left"|"above-right"
                         |"below-left"|"below-right",   # optional override
-             "label_angle": 0|45|90}                   # counter-clockwise tilt
+             "label_angle": 0|45|90,                   # counter-clockwise tilt
+             "dead_end": "buffer"|"fire"}               # terminus, or burning platform
   },
   "lines": [ {"name": str, "color": "#rrggbb", "stations": ["<id>", ...],
               "status": "live"|"out-of-service"|"under-construction"|"planned"?} ],
@@ -43,6 +44,9 @@ Geometry rules
    "label_at" overrides this per station.
    "label_angle" tilts the text; a tilted label is anchored at the marker edge
    and reads outward, so it never sweeps back across its own station.
+6a. A stop with "dead_end" is capped: "buffer" is the terminus bar, "fire" is
+   that bar with flames off it — the burning platform. The marker is oriented by
+   the track arriving at the stop, so it works at any angle.
 6. A line is in service unless "status" says otherwise: out-of-service is dashed
    and faded and gets a buffer-stop bar wherever it ends on a stop no line in
    service reaches — the dead end; under-construction is a long dash; planned is
@@ -126,6 +130,7 @@ class Style:
     legend_swatch: float = 26.0  # length of the colour stroke beside a name
     legend_gap: float = 10.0     # swatch to name, and note to track
     note_size: float = 12.0      # a note riding a track between two stations
+    flame_scale: float = 1.0     # size of the burning-platform fire
     font: str = '"Hanken Grotesk","Helvetica Neue",Helvetica,Arial,sans-serif'
 
 
@@ -308,6 +313,21 @@ class Map:
         return drop_collinear(out)
 
     # -- stations ----------------------------------------------------------
+
+    def end_segment(self, sid: str) -> Optional[dict]:
+        """A segment touching this stop, for orienting a terminus marker.
+
+        Prefers a line that ends here, so the bar sits across the track the
+        route actually arrives on rather than one merely passing through.
+        """
+        touching = [self.stop_seg.get((li, sid)) for li in self.lines_through(sid)]
+        ending = [self.stop_seg.get((li, sid)) for li in self.lines_through(sid)
+                  if self.lines[li]["stations"][-1] == sid
+                  or self.lines[li]["stations"][0] == sid]
+        for seg in ending + touching:
+            if seg:
+                return seg
+        return None
 
     def hop_midpoint(self, line_index: int, hop: int) -> Optional[Tuple[Point, Point]]:
         """The middle of one station-to-station hop, and the way the track runs.
@@ -621,6 +641,11 @@ def timeline_svg(tl: Timeline, style: Style, top: float, bottom: float
 # designer's side panel, and a reader had to infer what a colour meant from the
 # stations it happened to touch.
 
+# A stop can be marked as the end of the road. "buffer" is the ordinary
+# terminus bar an out-of-service line already gets; "fire" is that same bar with
+# flames off it — the burning platform, for the branch that ends badly.
+DEAD_ENDS = ("none", "buffer", "fire")
+
 LEGEND_AT = ("hide", "top", "left", "bottom", "right")
 DEFAULT_LEGEND = "bottom"
 
@@ -722,6 +747,60 @@ def legend_svg(entries: List[Tuple[int, dict]], at: str, style: Style,
 
 # ----------------------------------------------------------------- svg ----
 
+def buffer_bar(centre: Point, d: Point, style: Style, cls: str = "buffer") -> Tuple[str, Point, Point]:
+    """The terminus bar across a track, and the two ends it spans."""
+    arm = scale(perp(d), style.stroke * style.buffer_len)
+    a, b = sub(centre, arm), add(centre, arm)
+    return (f'<line class="{cls}" x1="{a[0]:.1f}" y1="{a[1]:.1f}" '
+            f'x2="{b[0]:.1f}" y2="{b[1]:.1f}"/>', a, b)
+
+
+def flames(centre: Point, style: Style) -> Tuple[str, float]:
+    """Flames rising off a terminus bar, and how far above it they reach.
+
+    Fire goes up the page, not along the track. Following the track was the
+    obvious thing to try and it is wrong: on a horizontal line the flames fire
+    sideways and read as a jet or a dart. The bar is what carries the track's
+    angle — that is the platform — and the fire rises from it.
+
+    Each tongue is wide and round at the base and tapers to a point, which is
+    what makes it read as fire; a narrow one reads as a dart. Three of them
+    overlap, because a single silhouette at this size reads as a triangle.
+    """
+    u, v = (0.0, -1.0), (1.0, 0.0)              # up the page, and across it
+    # taller than it is wide, or the three tongues merge into a blob — and big
+    # enough to read as fire rather than as a red speck at map scale
+    h = style.stroke * 3.4 * style.flame_scale   # how tall the fire stands
+    w = style.stroke * style.buffer_len * 1.15 * style.flame_scale
+
+    def at(along: float, across: float) -> str:
+        p = add(add(centre, scale(u, along)), scale(v, across))
+        return f"{p[0]:.1f} {p[1]:.1f}"
+
+    def tongue(c: float, hh: float, ww: float, lean: float = 0.0) -> str:
+        """One lick: a broad rounded base narrowing to a tip at height hh."""
+        t = c + lean
+        return (f"M {at(0, c - ww)} "
+                f"C {at(hh * 0.20, c - ww * 1.02)} {at(hh * 0.52, c - ww * 0.78)} "
+                f"{at(hh * 0.66, t - ww * 0.44)} "
+                f"C {at(hh * 0.82, t - ww * 0.30)} {at(hh * 0.93, t - ww * 0.16)} "
+                f"{at(hh, t)} "
+                f"C {at(hh * 0.93, t + ww * 0.16)} {at(hh * 0.82, t + ww * 0.30)} "
+                f"{at(hh * 0.66, t + ww * 0.44)} "
+                f"C {at(hh * 0.52, c + ww * 0.78)} {at(hh * 0.20, c + ww * 1.02)} "
+                f"{at(0, c + ww)} Z ")
+
+    outer = ('<path class="flame-outer" d="'
+             + tongue(-w * 0.50, h * 0.48, w * 0.40, -w * 0.18)
+             + tongue(w * 0.50, h * 0.56, w * 0.40, w * 0.16)
+             + tongue(0.0, h, w * 0.78, -w * 0.06)
+             + '"/>')
+    inner = ('<path class="flame-inner" d="'
+             + tongue(w * 0.02, h * 0.52, w * 0.34, -w * 0.04)
+             + '"/>')
+    return outer + inner, h
+
+
 def label_extent(at: Point, anchor: str, width: float, angle: float,
                  style: Style) -> Tuple[float, float, float, float]:
     """Box a label covers, rotated or not, for bounds and zone sizing."""
@@ -792,33 +871,47 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
             f'stroke="{line["color"]}"><title>{title}</title></path>'
         )
 
-    # dead ends — a buffer-stop bar where an out-of-service line runs out, unless
-    # the network still reaches that stop through a line that is in service
+    # Dead ends. A stop marked "dead_end" says so outright, whatever its lines
+    # are doing; otherwise an out-of-service line still earns a bar wherever it
+    # runs out on a stop the network no longer reaches in service.
     live = {sid for ln in m.lines if line_status(ln) == "live" for sid in ln["stations"]}
     dead_ends = []
+    marked: Dict[str, Tuple[str, str]] = {}          # station -> (style, why)
+
+    for sid, st in m.stations.items():
+        kind = st.get("dead_end")
+        if kind in ("buffer", "fire"):
+            marked[sid] = (kind, f'{st["label"]} — '
+                           + ("the end of the road" if kind == "buffer"
+                              else "burning platform"))
+
     for i, line in enumerate(m.lines):
         ids = line["stations"]
         if line_status(line) != "out-of-service" or len(ids) < 2:
             continue
         for sid in sorted({ids[0], ids[-1]} - live):
-            seg = m.stop_seg.get((i, sid))
-            if not seg:
-                continue
-            here = m.pos[sid]
-            # away from the body of the line, along the track it arrives on
-            away = (sub(seg["p"], seg["q"]) if dist(seg["p"], here) < dist(seg["q"], here)
-                    else sub(seg["q"], seg["p"]))
-            d = norm(away)
-            centre = add(add(here, seg["shift"]),
-                         scale(d, m.marker_radius(sid) + s.stroke * 0.55))
-            arm = scale(perp(d), s.stroke * s.buffer_len)
-            a, b = sub(centre, arm), add(centre, arm)
-            dead_ends.append(
-                f'    <line class="buffer" x1="{a[0]:.1f}" y1="{a[1]:.1f}" '
-                f'x2="{b[0]:.1f}" y2="{b[1]:.1f}"><title>{esc(line["name"])} '
-                f'ends here</title></line>'
-            )
-            grow(min(a[0], b[0]), min(a[1], b[1]), max(a[0], b[0]), max(a[1], b[1]))
+            marked.setdefault(sid, ("buffer", f'{line["name"]} ends here'))
+
+    for sid, (kind, why) in marked.items():
+        seg = m.end_segment(sid)
+        if not seg:
+            continue
+        here = m.pos[sid]
+        # away from the body of the line, along the track it arrives on
+        away = (sub(seg["p"], seg["q"]) if dist(seg["p"], here) < dist(seg["q"], here)
+                else sub(seg["q"], seg["p"]))
+        d = norm(away)
+        centre = add(add(here, seg["shift"]),
+                     scale(d, m.marker_radius(sid) + s.stroke * 0.55))
+        bar, a, b = buffer_bar(centre, d, s)
+        body, reach = (flames(centre, s) if kind == "fire" else ("", 0.0))
+        dead_ends.append(
+            f'    <g class="dead-end {kind}"><title>{esc(why)}</title>'
+            f'{bar}{body}</g>')
+        half = max(s.stroke * s.buffer_len,       # whichever of bar or fire is wider
+                   s.stroke * s.buffer_len * 1.15 * s.flame_scale)
+        grow(min(a[0], b[0]) - half, min(a[1], b[1]) - reach,
+             max(a[0], b[0]) + half, max(a[1], b[1]) + half)
 
     # notes riding the track between two stations — "6 weeks", "nightly batch"
     notes = []
@@ -888,6 +981,9 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
         outward = norm((center[0] - cx, center[1] - cy))
         if outward == (0.0, 0.0):
             outward = (0.0, -1.0)
+        end = st.get("dead_end")
+        if end is not None and end not in DEAD_ENDS:
+            errors.append(f"{where}: dead_end must be one of " + ", ".join(DEAD_ENDS))
         side = st.get("label_at") or choose_label_side(m.directions_at(sid), outward)
         angle = st.get("label_angle") or 0
         (lx, ly), anchor = label_geometry(side, center, r, s, angle)
@@ -1032,6 +1128,9 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
     .status-plan {{ stroke-dasharray: {s.stroke * 0.1:.1f} {s.stroke * 1.35:.1f}; opacity: .62; }}
     .buffer {{ stroke: var(--ink); stroke-width: {max(3.0, s.stroke * 0.5):.1f};
               stroke-linecap: butt; opacity: .7; }}
+    .dead-end.fire .buffer {{ stroke: #7a2d0e; opacity: .9; }}
+    .flame-outer {{ fill: #e1251b; }}
+    .flame-inner {{ fill: #f6a821; }}
     .muted {{ opacity: {s.status_fade + 0.15:.2f}; }}
     .zone-band {{ fill: var(--zc); fill-opacity: {s.zone_fill}; stroke: var(--zc);
                  stroke-width: 2; stroke-dasharray: 7 6; opacity: .9; }}
@@ -1115,6 +1214,9 @@ def validate_spec(spec: object) -> List[str]:
             v = st.get(axis)
             if not isinstance(v, (int, float)) or isinstance(v, bool):
                 errors.append(f"{where}: {axis} must be a number")
+        end = st.get("dead_end")
+        if end is not None and end not in DEAD_ENDS:
+            errors.append(f"{where}: dead_end must be one of " + ", ".join(DEAD_ENDS))
         side = st.get("label_at")
         if side is not None and side not in COMPASS:
             errors.append(f"{where}: label_at '{side}' is not a compass direction")
@@ -1219,6 +1321,14 @@ def spec_warnings(spec: dict) -> List[str]:
     for sid in spec.get("stations", {}):
         if sid not in used:
             out.append(f"station '{sid}': on no line — drawn without a route")
+    on_a_line = {sid for ln in spec.get("lines", [])
+                 for sid in (ln.get("stations") or [])}
+    for sid, st in spec.get("stations", {}).items():
+        if isinstance(st, dict) and st.get("dead_end") in ("buffer", "fire") \
+                and sid not in on_a_line:
+            out.append(f"station '{sid}': marked as a dead end but on no line — "
+                       "the marker needs a track to sit across")
+
     tl = spec_timeline(spec)
     if tl:
         for sid, st in spec.get("stations", {}).items():
@@ -1240,7 +1350,7 @@ def style_from(source: object, base: Optional[Style] = None) -> Style:
                       "status_fade", "buffer_len",
                       "tl_row_h", "tl_label_size", "tl_major_size",
                       "legend_size", "legend_row_h", "legend_swatch",
-                      "legend_gap", "note_size"):
+                      "legend_gap", "note_size", "flame_scale"):
             v = source.get(field)
             if isinstance(v, (int, float)) and not isinstance(v, bool):
                 setattr(style, field, float(v))

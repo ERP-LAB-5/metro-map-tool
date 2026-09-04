@@ -41,6 +41,7 @@ const S = {
   style: { cell: 120, stroke: 10, corner: 22, bundle_gap: 13, label_size: 16 },
   autoIx: true,
   theme: "auto",                           // designer chrome and preview only
+  sideHidden: false,
   snap: 1,                                 // grid step when dragging or nudging
 
   sel: { kind: null, id: null },           // "station" | "line"
@@ -64,6 +65,9 @@ let INTERVALS = ["day", "week", "month", "quarter", "year"];
 let FOLDERS = [{ value: "mymaps", label: "My maps" }, { value: "shared", label: "Shared" }];
 let DEFAULT_FOLDER = "mymaps";
 let LEGEND_POSITIONS = ["hide", "top", "left", "bottom", "right"];
+let DEAD_ENDS = [{ value: "none", label: "none" },
+                 { value: "buffer", label: "end of the line" },
+                 { value: "fire", label: "burning platform" }];
 let DEFAULT_LEGEND = "bottom";
 let lastSVG = "";
 let TIMELINE = null;                         // ruler the server resolved, or null
@@ -71,6 +75,7 @@ let TIMELINE = null;                         // ruler the server resolved, or nu
 const GUIDE_MAP = "how-this-tool-works";     // the map that explains the tool
 const LAST_MAP_KEY = "metro-map:last";
 const THEME_KEY = "metro-map:theme";
+const SIDE_KEY = "metro-map:side";
 
 /* --------------------------------------------------------------- theme -- */
 
@@ -90,6 +95,21 @@ function applyTheme(theme) {
   try { localStorage.setItem(THEME_KEY, S.theme); } catch (_) { /* no storage */ }
   const select = $("#theme-select");
   if (select && select.value !== S.theme) select.value = S.theme;
+}
+
+/* ---------------------------------------------------------- side panel -- */
+
+/** Fold the panel away for a wider canvas. Remembered per browser. */
+function applySide(hidden) {
+  S.sideHidden = !!hidden;
+  document.body.classList.toggle("side-hidden", S.sideHidden);
+  try { localStorage.setItem(SIDE_KEY, S.sideHidden ? "1" : "0"); } catch (_) { /* none */ }
+  const btn = $("#btn-side");
+  if (btn) btn.setAttribute("aria-expanded", String(!S.sideHidden));
+}
+
+function storedSide() {
+  try { return localStorage.getItem(SIDE_KEY) === "1"; } catch (_) { return false; }
 }
 
 /** What the preview should actually be drawn as, resolving "auto" now. */
@@ -490,11 +510,23 @@ function onStationClick(id) {
   select("station", id);
 }
 
+let lastRevealed = "";
+
 function select(kind, id) {
   S.sel = { kind, id };
   refreshPanels();
   decorate();
   setHint();
+  revealEditor();
+}
+
+/** Scroll a freshly opened editor into view — never while it is being typed in. */
+function revealEditor() {
+  const key = `${S.sel.kind}:${S.sel.id}`;
+  if (key === lastRevealed) return;
+  lastRevealed = key;
+  const host = document.querySelector(".pane.is-on .edit-host");
+  if (host) host.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
 /* ---------------------------------------------------------------- tabs -- */
@@ -572,6 +604,7 @@ function renderStations() {
     list.innerHTML = `<li class="note">No stations yet — press “+ Add”.</li>`;
   } else {
     list.innerHTML = ids.map((sid) => {
+      const open = S.sel.kind === "station" && S.sel.id === sid;
       const st = S.spec.stations[sid];
       const used = linesUsing(sid);
       const chips = (used.length
@@ -586,7 +619,8 @@ function renderStations() {
           <span class="id">${esc(sid)}</span> <span class="at">(${st.gx},${st.gy})</span>
           <span class="chips">${chips}</span>
         </span>
-      </li>`;
+        <span class="caret">${open ? "▾" : "▸"}</span>
+      </li>` + (open ? `<li class="edit-host"><div id="station-editor" class="editor"></div></li>` : "");
     }).join("");
     list.querySelectorAll("[data-sid]").forEach((row) =>
       row.addEventListener("click", () => select("station", row.dataset.sid)));
@@ -596,6 +630,7 @@ function renderStations() {
 
 function renderStationEditor() {
   const box = $("#station-editor");
+  if (!box) return;                    // nothing selected, so no host in the list
   if (S.sel.kind !== "station" || !S.spec.stations[S.sel.id]) { box.innerHTML = ""; return; }
   const sid = S.sel.id;
   const st = S.spec.stations[sid];
@@ -619,6 +654,9 @@ function renderStationEditor() {
         ${LABEL_ANGLES.map((a) => `<option value="${a}" ${(st.label_angle || 0) === a ? "selected" : ""}>${a}°</option>`).join("")}
       </select></label>
     </div>
+    <label class="field"><span>Dead end</span><select id="f-end">
+      ${DEAD_ENDS.map((e) => `<option value="${esc(e.value)}" ${(st.dead_end || "none") === e.value ? "selected" : ""}>${esc(e.label)}</option>`).join("")}
+    </select></label>
     <div class="row-btns">
       <button id="f-insert">Insert space…</button>
       <button id="f-del" class="danger">Delete station</button>
@@ -665,6 +703,10 @@ function renderStationEditor() {
   $("#f-angle").addEventListener("change", (ev) => applyChange(() => {
     const a = Number(ev.target.value);
     if (a) st.label_angle = a; else delete st.label_angle;   // 0 is the default
+  }));
+  $("#f-end").addEventListener("change", (ev) => applyChange(() => {
+    if (ev.target.value === "none") delete st.dead_end;   // the default stays implicit
+    else st.dead_end = ev.target.value;
   }));
   $("#f-id").addEventListener("change", (ev) => renameStation(sid, ev.target.value.trim()));
   $("#f-insert").addEventListener("click", () => insertSpaceDialog(sid));
@@ -753,6 +795,7 @@ function renderLines() {
     list.innerHTML = `<li class="note">No lines yet — place a few stations, then press “+ Add”.</li>`;
   } else {
     list.innerHTML = S.spec.lines.map((ln, i) => {
+      const open = S.sel.kind === "line" && S.sel.id === i;
       const state = ln.status && ln.status !== "live" ? ln.status : "";
       const badge = state
         ? `<span class="chip state ${esc(state)}">${esc(statusLabel(state))}</span>` : "";
@@ -765,7 +808,7 @@ function renderLines() {
         </span>
         <button class="ghost" data-move="${i}" data-dir="-1" title="earlier track" ${i === 0 ? "disabled" : ""}>↑</button>
         <button class="ghost" data-move="${i}" data-dir="1" title="later track" ${i === S.spec.lines.length - 1 ? "disabled" : ""}>↓</button>
-      </li>`;
+      </li>` + (open ? `<li class="edit-host"><div id="line-editor" class="editor"></div></li>` : "");
     }).join("");
     list.querySelectorAll("[data-line]").forEach((row) =>
       row.addEventListener("click", (ev) => {
@@ -836,6 +879,7 @@ function moveLine(i, dir) {
 
 function renderLineEditor() {
   const box = $("#line-editor");
+  if (!box) return;                    // nothing selected, so no host in the list
   if (S.sel.kind !== "line" || !S.spec.lines[S.sel.id]) { box.innerHTML = ""; return; }
   const i = S.sel.id;
   const ln = S.spec.lines[i];
@@ -984,14 +1028,16 @@ function renderZones() {
     list.innerHTML = `<li class="note">No zones yet — press “+ Add” to band a group of stations.</li>`;
   } else {
     list.innerHTML = S.spec.zones.map((zn, i) => {
+      const open = S.sel.kind === "zone" && S.sel.id === i;
       const n = (zn.stations || []).length;
-      return `<li class="row ${S.sel.kind === "zone" && S.sel.id === i ? "is-on" : ""}" data-zone="${i}">
+      return `<li class="row ${open ? "is-on" : ""}" data-zone="${i}">
         <span class="swatch band" style="background:${esc(zn.color)}"></span>
         <span class="grow">
           <span class="lbl">${esc(zn.name)}</span>
           <span class="at">${n ? `${n} station${n === 1 ? "" : "s"}` : "empty"}</span>
         </span>
-      </li>`;
+        <span class="caret">${open ? "▾" : "▸"}</span>
+      </li>` + (open ? `<li class="edit-host"><div id="zone-editor" class="editor"></div></li>` : "");
     }).join("");
     list.querySelectorAll("[data-zone]").forEach((row) =>
       row.addEventListener("click", () => select("zone", Number(row.dataset.zone))));
@@ -1001,6 +1047,7 @@ function renderZones() {
 
 function renderZoneEditor() {
   const box = $("#zone-editor");
+  if (!box) return;                    // nothing selected, so no host in the list
   if (S.sel.kind !== "zone" || !S.spec.zones[S.sel.id]) { box.innerHTML = ""; return; }
   const i = S.sel.id;
   const zn = S.spec.zones[i];
@@ -1663,6 +1710,7 @@ function initKeys() {
     }
     if (mod && ev.key.toLowerCase() === "y") { ev.preventDefault(); redo(); return; }
     if (mod && ev.key.toLowerCase() === "s") { ev.preventDefault(); saveMap(); return; }
+    if (mod && ev.key === "\\") { ev.preventDefault(); applySide(!S.sideHidden); return; }
     if (typing) return;
 
     if (S.sel.kind === "station" && S.spec.stations[S.sel.id]) {
@@ -1690,6 +1738,7 @@ function initKeys() {
 
 async function boot() {
   applyTheme(storedTheme());          // before anything paints, to avoid a flash
+  applySide(storedSide());
   try {
     const [defaults, palette] = await Promise.all([
       api("GET", "/api/defaults"), api("GET", "/api/palette"),
@@ -1703,6 +1752,7 @@ async function boot() {
     FOLDERS = defaults.folders || FOLDERS;
     DEFAULT_FOLDER = defaults.default_folder || DEFAULT_FOLDER;
     LEGEND_POSITIONS = defaults.legend_positions || LEGEND_POSITIONS;
+    DEAD_ENDS = defaults.dead_ends || DEAD_ENDS;
     DEFAULT_LEGEND = defaults.default_legend || DEFAULT_LEGEND;
     PALETTE = palette;
     S.style = { ...defaults.style };
@@ -1738,6 +1788,7 @@ async function boot() {
   $("#btn-export").addEventListener("click", exportSVG);
   $("#btn-stop").addEventListener("click", stopServer);
   $("#btn-about").addEventListener("click", aboutDialog);
+  $("#btn-side").addEventListener("click", () => applySide(!S.sideHidden));
   $("#btn-undo").addEventListener("click", undo);
   $("#btn-redo").addEventListener("click", redo);
   $("#btn-style-reset").addEventListener("click", () => {

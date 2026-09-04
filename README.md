@@ -1,6 +1,6 @@
 # metro-map-tool
 
-**v2.5.0** · MIT · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
+**v2.5.1** · MIT · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
 
 Transit-map diagrams for landscapes, pipelines and migrations: a JSON spec of
 **stations** on a grid, **lines** routed through them and **zones** banding
@@ -62,6 +62,10 @@ meeting again at the saved file. After that it reopens whatever you had last.
   own colour and dash pattern, so a retired line reads as retired there too.
   Put it at the top, left, bottom or right, or `hide` it. It defaults to
   **bottom**, so a map drawn before v3 gains one the first time you render it.
+- **Dead ends** (station editor) cap a stop that is the end of the road:
+  *end of the line* draws the terminus bar, *burning platform* draws that same
+  bar with flames rising off it, for the branch that ends badly. An
+  out-of-service line still gets a plain bar automatically where it runs out.
 - **Notes between stops** (Lines tab, *Between stops*) put a short label on the
   track between two stations — "6 weeks", "nightly batch". They rotate to follow
   the track, never read upside down, and a vertical one reads top-to-bottom.
@@ -73,6 +77,10 @@ meeting again at the saved file. After that it reopens whatever you had last.
   one, and links to the repository. The check is a single request for a text
   file, sends nothing about you or your maps, is cached for six hours, and is
   skipped silently when there is no network — `--no-update-check` turns it off.
+- **☰** (top bar, or Ctrl+\) folds the side panel away for a wider canvas, and
+  the choice is remembered. Picking a station, line or zone opens its editor
+  **inside the list, directly under the row you clicked**, so what you selected
+  and the fields that change it stay together.
 - **Theme** (top bar) switches the designer between *auto*, *light* and *dark*.
   It themes the workspace and its live preview only, and is remembered per
   browser — *auto*, the default, follows Windows or your desktop setting. An
@@ -98,8 +106,8 @@ the *interchanges* toggle is on.
 with Windows 10 and later, and with every Linux and macOS:
 
 ```bash
-curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.5.0.tar.gz | tar xz
-cd metro-map-tool-2.5.0
+curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.5.1.tar.gz | tar xz
+cd metro-map-tool-2.5.1
 ./run.sh                 # or run.cmd on Windows
 ```
 
@@ -107,7 +115,7 @@ cd metro-map-tool-2.5.0
 commands on your PATH in their own virtual environment:
 
 ```bash
-pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.5.0
+pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.5.1
 metro-map-designer                    # the browser designer
 metro-map spec.json -o map.svg        # the renderer
 metro-map-mcp                         # the MCP server, for agents
@@ -234,6 +242,9 @@ ln -s "$PWD/.claude/skills/metro-map" ~/.claude/skills/metro-map
 
 `mode` is `metro` (the default, and left out) or `roadmap`; a roadmap adds a
 `timeline` of `{start, end, interval}` and its grid x becomes a calendar.
+`dead_end` on a station is `buffer` (a terminus bar) or `fire` (that bar with
+flames — the burning platform); the stop has to be on a line, since the marker
+is laid across the track arriving at it.
 `legend` is `bottom` (the default), `top`, `left`, `right` or `hide`. A line's
 `notes` are `{"at": <hop index>, "text": str}` — hop `0` is the gap between the
 first two stops, so the last legal `at` is two less than the number of stops.

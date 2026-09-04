@@ -93,7 +93,8 @@
       "gx": 6,
       "gy": 4,
       "label": "Legacy off",
-      "label_at": "below"
+      "label_at": "below",
+      "dead_end": "buffer"
     },
     "discovery": {
       "gx": 1,

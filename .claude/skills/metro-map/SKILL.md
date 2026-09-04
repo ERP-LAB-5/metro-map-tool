@@ -64,6 +64,7 @@ canvas within a couple of seconds.
 |---|---|
 | `mode` | `metro` (default, leave it out) or `roadmap`. |
 | `legend` | `bottom` (the default), `top`, `left`, `right` or `hide`. Names every line beside a swatch in its own colour and dash pattern. Leave it out unless the map wants it elsewhere or off. |
+| `dead_end` | On a station: `buffer` caps it with a terminus bar, `fire` adds flames to that bar — the burning platform, for a branch that ends badly. The stop must be on a line, because the marker is laid across the track arriving at it. An out-of-service line still earns a plain bar automatically wherever it runs out. |
 | `notes` | On a **line**, not a station: `[{"at": <hop>, "text": str, "flip": bool?}]`. `at` is the hop index — `0` is the gap between `stations[0]` and `stations[1]`, so the last legal value is `len(stations) - 2`. |
 | `timeline` | Roadmap only: `{start, end, interval}` with ISO dates and an interval of `day`, `week`, `month`, `quarter` or `year`. |
 | `gx` / `gy` | Grid cells, **not pixels**, and may be fractional — `0.5` steps put two stations half a cell apart. Keep whole numbers unless the layout needs the room. |
@@ -187,6 +188,9 @@ A spec that will not draw is reported line by line and exits 2.
   and `label_angle` only when a column is genuinely too narrow.
 - **A branch that is being retired is its own line**, not a status on a shared
   one — that is what makes the dead-end bar land in the right place.
+- **Save the burning platform for the branch that genuinely ends badly.** It is
+  the loudest mark on the map; two of them on one diagram and neither reads as
+  urgent. `buffer` is the quiet way to say "this stops here".
 - **Making room is arithmetic, not a redraw.** To open a column, add the shift
   to the gx of every station past that point (and gy for a row) — do not move
   stations one at a time, and add the raw offset rather than re-snapping, or a
