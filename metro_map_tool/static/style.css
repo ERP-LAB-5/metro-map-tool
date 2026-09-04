@@ -397,3 +397,6 @@ body.side-hidden .side { display: none; }
 .phase-row { display: flex; gap: 4px; align-items: center; }
 .phase-row input[type="text"] { flex: 1 1 auto; min-width: 0; }
 .phase-row input[type="date"] { flex: 0 0 auto; font-size: 11px; padding: 3px 4px; }
+
+/* Three choices need room; two buttons fit a row but three can crowd. */
+#dialog-form .actions { flex-wrap: wrap; }

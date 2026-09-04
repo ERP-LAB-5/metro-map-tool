@@ -1094,19 +1094,24 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
     for li, line in enumerate(m.lines):
         at = line_continues(line)
         ids = line["stations"]
-        if at == "none" or len(ids) < 2:
+        if at == "none" or not ids:
             continue
-        wanted = ([ids[0]] if at in ("start", "both") else []) \
-            + ([ids[-1]] if at in ("end", "both") else [])
-        for sid in wanted:
+        wanted = ([(ids[0], "start")] if at in ("start", "both") else []) \
+            + ([(ids[-1], "end")] if at in ("end", "both") else [])
+        for sid, which in wanted:
             seg = m.stop_seg.get((li, sid))
-            if not seg:
-                continue
             here = m.pos[sid]
-            away = (sub(seg["p"], seg["q"]) if dist(seg["p"], here) < dist(seg["q"], here)
-                    else sub(seg["q"], seg["p"]))
-            d = norm(away)
-            base = add(add(here, seg["shift"]),
+            if seg:
+                away = (sub(seg["p"], seg["q"]) if dist(seg["p"], here) < dist(seg["q"], here)
+                        else sub(seg["q"], seg["p"]))
+                d, shift = norm(away), seg["shift"]
+            else:
+                # A line with a single stop has no track, so there is no
+                # direction to read off one. On a dated map time runs left to
+                # right, which is the only sensible way for it to point.
+                d = (-1.0, 0.0) if which == "start" else (1.0, 0.0)
+                shift = (0.0, 0.0)
+            base = add(add(here, shift),
                        scale(d, m.marker_radius(sid) + s.stroke * 0.5))
             mark, reach = chevron(base, d, s, li)
             onward.append(

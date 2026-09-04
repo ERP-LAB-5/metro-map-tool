@@ -1,6 +1,6 @@
 # metro-map-tool
 
-**v2.9.0** · MIT · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
+**v2.9.2** · MIT · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
 
 Transit-map diagrams for landscapes, pipelines and migrations: a JSON spec of
 **stations** on a grid, **lines** routed through them and **zones** banding
@@ -70,7 +70,9 @@ meeting again at the saved file. After that it reopens whatever you had last.
 - **Runs on past the map** (line editor) puts an arrowhead just beyond a line's
   first or last stop, saying it carries on beyond what the map shows — the
   opposite of a dead end, and useful at the two ends of a timeline where the
-  work started before and continues after.
+  work started before and continues after. A line with a single stop gets one
+  too — it has no track to take a direction from, so the arrow points the way
+  time runs.
 - **Joins** (Joins tab) draw a *stretched interchange*: one capsule covering
   several stops, the way a tube map marks a correspondance. Use it for a
   milestone that lands on several parallel lines at once — the capsule stretches
@@ -129,8 +131,8 @@ the *interchanges* toggle is on.
 with Windows 10 and later, and with every Linux and macOS:
 
 ```bash
-curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.9.0.tar.gz | tar xz
-cd metro-map-tool-2.9.0
+curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.9.2.tar.gz | tar xz
+cd metro-map-tool-2.9.2
 ./run.sh                 # or run.cmd on Windows
 ```
 
@@ -138,7 +140,7 @@ cd metro-map-tool-2.9.0
 commands on your PATH in their own virtual environment:
 
 ```bash
-pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.9.0
+pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.9.2
 metro-map-designer                    # the browser designer
 metro-map spec.json -o map.svg        # the renderer
 metro-map-mcp                         # the MCP server, for agents

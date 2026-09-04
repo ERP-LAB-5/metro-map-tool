@@ -1940,11 +1940,58 @@ function guardUnload(ev) {
   if (S.dirty) { ev.preventDefault(); ev.returnValue = ""; }
 }
 
+/* Stopping is the one action here that destroys work: the map lives in this
+   browser until it is written to disk, and the server going away takes it with
+   it. So the unsaved case offers to save rather than only warning — a confirm()
+   can say "lose them or cancel" and nothing else, which is why this is a
+   dialog. */
+
 function stopServer() {
-  const warning = S.dirty
-    ? "This map has unsaved changes that will be lost.\n\nStop the designer anyway?"
-    : "Stop the designer? This shuts down the local server.";
-  if (!confirm(warning)) return;
+  if (!S.dirty) {
+    dialog("Stop the designer?", `
+      <p class="note">This shuts down the local server. Everything you have saved
+        stays in your maps folder.</p>
+      <div class="actions">
+        <button value="cancel">Cancel</button>
+        <button type="button" class="danger" id="s-stop">Stop</button>
+      </div>`, (form, dlg) =>
+      form.querySelector("#s-stop").addEventListener("click", () => {
+        dlg.close();
+        shutDownServer();
+      }));
+    return;
+  }
+
+  const named = !!S.name;
+  dialog("Stop the designer?", `
+    <p class="note"><b>“${esc(S.name || "untitled")}” has unsaved changes.</b>
+      They are only in this browser — stopping the server loses them for good.</p>
+    <div class="actions">
+      <button value="cancel">Cancel</button>
+      <button type="button" class="danger" id="s-discard">Stop without saving</button>
+      <button type="button" class="primary" id="s-save">${named ? "Save and stop" : "Name it and save…"}</button>
+    </div>`, (form, dlg) => {
+    form.querySelector("#s-discard").addEventListener("click", () => {
+      dlg.close();
+      shutDownServer();
+    });
+    form.querySelector("#s-save").addEventListener("click", async () => {
+      dlg.close();
+      await saveMap();
+      // saveMap leaves us dirty when it could not finish: a name still to give,
+      // a validation error, or someone else's save in the way. Never stop then.
+      if (S.dirty) {
+        showProblems([named
+          ? "Not stopped — the save did not go through. Deal with that, then press Stop again."
+          : "Not stopped — give the map a name and save it, then press Stop again."]);
+        return;
+      }
+      shutDownServer();
+    });
+  });
+}
+
+function shutDownServer() {
   // the server answers, then exits — a failed fetch here is the expected ending
   fetch("/api/shutdown", { method: "POST", headers: { "Content-Type": "application/json" } })
     .catch(() => {})
