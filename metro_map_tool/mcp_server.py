@@ -235,6 +235,10 @@ def spec_reference() -> dict:
             "legend": '"legend" names the lines on the drawing: hide, top, '
                       "left, bottom or right. It defaults to bottom, so leave "
                       'it out unless the map wants it elsewhere or off',
+            "continues": 'a line may carry "continues": "start", "end" or '
+                         '"both" — an arrowhead just past that terminal stop, '
+                         "saying the line runs on beyond what the map shows. "
+                         "Do not put it on a stop that is also a dead_end",
             "interchanges": 'a stretched interchange: {"stations": [ids], '
                             '"label"?, "label_at"?, "label_angle"?}. One capsule '
                             "covers the stops listed, replacing their own "

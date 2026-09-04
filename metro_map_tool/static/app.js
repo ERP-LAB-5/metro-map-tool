@@ -66,6 +66,8 @@ let INTERVALS = ["day", "week", "month", "quarter", "year"];
 let FOLDERS = [{ value: "mymaps", label: "My maps" }, { value: "shared", label: "Shared" }];
 let DEFAULT_FOLDER = "mymaps";
 let LEGEND_POSITIONS = ["hide", "top", "left", "bottom", "right"];
+let CONTINUES = [{ value: "none", label: "no" }, { value: "start", label: "at the start" },
+                 { value: "end", label: "at the end" }, { value: "both", label: "at both ends" }];
 let DEAD_ENDS = [{ value: "none", label: "none" },
                  { value: "buffer", label: "end of the line" },
                  { value: "fire", label: "burning platform" }];
@@ -932,6 +934,9 @@ function renderLineEditor() {
       ${LINE_STATUSES.map((st) =>
         `<option value="${esc(st.value)}" ${(ln.status || "live") === st.value ? "selected" : ""}>${esc(st.label)}</option>`).join("")}
     </select></label>
+    <label class="field"><span>Runs on past the map</span><select id="l-onward">
+      ${CONTINUES.map((c) => `<option value="${esc(c.value)}" ${(ln.continues || "none") === c.value ? "selected" : ""}>${esc(c.label)}</option>`).join("")}
+    </select></label>
     ${(ln.status || "live") === "out-of-service"
       ? `<p class="note">Drawn dashed and faded, with a dead-end bar wherever the route ends on a stop no line in service reaches.</p>` : ""}
 
@@ -990,6 +995,10 @@ function renderLineEditor() {
   $("#l-status").addEventListener("change", (ev) => applyChange(() => {
     if (ev.target.value === "live") delete ln.status;      // the default stays implicit
     else ln.status = ev.target.value;
+  }));
+  $("#l-onward").addEventListener("change", (ev) => applyChange(() => {
+    if (ev.target.value === "none") delete ln.continues;   // the default stays implicit
+    else ln.continues = ev.target.value;
   }));
   box.querySelectorAll("[data-add]").forEach((btn) =>
     btn.addEventListener("click", () => applyChange(() => ln.stations.push(btn.dataset.add))));
@@ -2090,6 +2099,7 @@ async function boot() {
     FOLDERS = defaults.folders || FOLDERS;
     DEFAULT_FOLDER = defaults.default_folder || DEFAULT_FOLDER;
     LEGEND_POSITIONS = defaults.legend_positions || LEGEND_POSITIONS;
+    CONTINUES = defaults.continues || CONTINUES;
     DEAD_ENDS = defaults.dead_ends || DEAD_ENDS;
     DEFAULT_LEGEND = defaults.default_legend || DEFAULT_LEGEND;
     PALETTE = palette;

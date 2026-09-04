@@ -1,6 +1,6 @@
 # metro-map-tool
 
-**v2.8.0** · MIT · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
+**v2.9.0** · MIT · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
 
 Transit-map diagrams for landscapes, pipelines and migrations: a JSON spec of
 **stations** on a grid, **lines** routed through them and **zones** banding
@@ -67,6 +67,10 @@ meeting again at the saved file. After that it reopens whatever you had last.
   planned retirement; *smoke* adds drifting puffs — watch out; *burning
   platform* adds flames — get off this train. An out-of-service line still gets
   a plain bar automatically where it runs out.
+- **Runs on past the map** (line editor) puts an arrowhead just beyond a line's
+  first or last stop, saying it carries on beyond what the map shows — the
+  opposite of a dead end, and useful at the two ends of a timeline where the
+  work started before and continues after.
 - **Joins** (Joins tab) draw a *stretched interchange*: one capsule covering
   several stops, the way a tube map marks a correspondance. Use it for a
   milestone that lands on several parallel lines at once — the capsule stretches
@@ -125,8 +129,8 @@ the *interchanges* toggle is on.
 with Windows 10 and later, and with every Linux and macOS:
 
 ```bash
-curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.8.0.tar.gz | tar xz
-cd metro-map-tool-2.8.0
+curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.9.0.tar.gz | tar xz
+cd metro-map-tool-2.9.0
 ./run.sh                 # or run.cmd on Windows
 ```
 
@@ -134,7 +138,7 @@ cd metro-map-tool-2.8.0
 commands on your PATH in their own virtual environment:
 
 ```bash
-pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.8.0
+pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.9.0
 metro-map-designer                    # the browser designer
 metro-map spec.json -o map.svg        # the renderer
 metro-map-mcp                         # the MCP server, for agents
@@ -274,6 +278,7 @@ the drawn track; every consecutive pair of stops needs a line between them.
 first two stops, so the last legal `at` is two less than the number of stops.
 `gx`/`gy` are grid cells, not pixels, and need not be whole numbers — `9.5`
 sits half a cell along.
+`continues` on a line is `start`, `end` or `both` and arrows that end onward.
 `status` is one of `live` (the default, and left out), `out-of-service`,
 `under-construction` or `planned`. `label_angle` is `0`, `45` or `90` degrees
 counter-clockwise, on top of `label_at`. Segments are octilinear (0° / 45° / 90°),

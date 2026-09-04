@@ -15,7 +15,8 @@ Input JSON
              "dead_end": "buffer"|"smoke"|"fire"}      # stops here / watch out / get off
   },
   "lines": [ {"name": str, "color": "#rrggbb", "stations": ["<id>", ...],
-              "status": "live"|"out-of-service"|"under-construction"|"planned"?} ],
+              "status": "live"|"out-of-service"|"under-construction"|"planned"?,
+              "continues": "none"|"start"|"end"|"both"?} ],
   "zones": [ {"name": str, "color": "#rrggbb", "stations": ["<id>", ...]} ]?,
   "mode": "metro"|"roadmap"?,                    # metro is the default
   "timeline": {"start": "yyyy-mm-dd", "end": "yyyy-mm-dd",
@@ -738,6 +739,17 @@ def timeline_svg(tl: Timeline, style: Style, top: float, bottom: float,
 #   fire    the burning platform. Get off this train.
 DEAD_ENDS = ("none", "buffer", "smoke", "fire")
 
+# A line that runs past the edge of what the map shows: an arrowhead sits just
+# beyond its first or last stop, pointing the way it carries on. The opposite of
+# a dead end, and drawn at the same place, so a stop should not have both.
+CONTINUES = ("none", "start", "end", "both")
+
+
+def line_continues(line: dict) -> str:
+    """Which ends of a line carry on past the map."""
+    at = line.get("continues") or "none"
+    return at if at in CONTINUES else "none"
+
 LEGEND_AT = ("hide", "top", "left", "bottom", "right")
 DEFAULT_LEGEND = "bottom"
 
@@ -845,6 +857,23 @@ def buffer_bar(centre: Point, d: Point, style: Style, cls: str = "buffer") -> Tu
     a, b = sub(centre, arm), add(centre, arm)
     return (f'<line class="{cls}" x1="{a[0]:.1f}" y1="{a[1]:.1f}" '
             f'x2="{b[0]:.1f}" y2="{b[1]:.1f}"/>', a, b)
+
+
+def chevron(centre: Point, d: Point, style: Style, line_index: int) -> Tuple[str, float]:
+    """An arrowhead at `centre` pointing along d, saying the line carries on.
+
+    Stroked rather than filled so it can borrow the route's own `l{i}` class,
+    which is what already carries the lightened colour on a dark ground.
+    """
+    reach = style.stroke * 1.15
+    half = style.stroke * 0.85
+    tip = add(centre, scale(d, reach))
+    back = perp(d)
+    a = add(centre, scale(back, half))
+    b = sub(centre, scale(back, half))
+    return (f'<path class="onward l{line_index}" fill="none" '
+            f'd="M {a[0]:.1f} {a[1]:.1f} L {tip[0]:.1f} {tip[1]:.1f} '
+            f'L {b[0]:.1f} {b[1]:.1f}"/>', reach)
 
 
 def flames(centre: Point, style: Style) -> Tuple[str, float]:
@@ -1057,6 +1086,36 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
             f'    <circle class="traveller t{si}" cx="0" cy="0" '
             f'r="{s.stop_r * 1.15:.1f}"><title>{esc(sc.get("name") or "scenario")}'
             f'</title></circle>')
+
+    # lines that carry on past the edge of the map, arrowed at the stop they
+    # run out on rather than at the drawing's border — the stop is where the
+    # reader is looking, and the map has no border to speak of
+    onward = []
+    for li, line in enumerate(m.lines):
+        at = line_continues(line)
+        ids = line["stations"]
+        if at == "none" or len(ids) < 2:
+            continue
+        wanted = ([ids[0]] if at in ("start", "both") else []) \
+            + ([ids[-1]] if at in ("end", "both") else [])
+        for sid in wanted:
+            seg = m.stop_seg.get((li, sid))
+            if not seg:
+                continue
+            here = m.pos[sid]
+            away = (sub(seg["p"], seg["q"]) if dist(seg["p"], here) < dist(seg["q"], here)
+                    else sub(seg["q"], seg["p"]))
+            d = norm(away)
+            base = add(add(here, seg["shift"]),
+                       scale(d, m.marker_radius(sid) + s.stroke * 0.5))
+            mark, reach = chevron(base, d, s, li)
+            onward.append(
+                f'    <g class="onward-mark" stroke="{line["color"]}">'
+                f'<title>{esc(line["name"])} continues</title>{mark}</g>')
+            far = add(base, scale(d, reach))
+            pad = s.stroke
+            grow(min(base[0], far[0]) - pad, min(base[1], far[1]) - pad,
+                 max(base[0], far[0]) + pad, max(base[1], far[1]) + pad)
 
     # notes riding the track between two stations — "6 weeks", "nightly batch"
     notes = []
@@ -1344,6 +1403,13 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
   </g>
 """
 
+    onward_group = ""
+    if onward:
+        onward_group = f"""  <g id="onward">
+{chr(10).join(onward)}
+  </g>
+"""
+
     note_group = note_css = ""
     if notes:
         note_css = f"""    .note {{ font-family: {s.font}; font-size: {s.note_size}px; font-weight: 600;
@@ -1400,6 +1466,8 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
     .status-build {{ stroke-dasharray: {s.stroke * 3.0:.1f} {s.stroke * 1.1:.1f};
                     stroke-linecap: butt; opacity: .85; }}
     .status-plan {{ stroke-dasharray: {s.stroke * 0.1:.1f} {s.stroke * 1.35:.1f}; opacity: .62; }}
+    .onward {{ stroke-width: {max(3.0, s.stroke * 0.62):.1f}; stroke-linecap: round;
+              stroke-linejoin: round; }}
     .buffer {{ stroke: var(--ink); stroke-width: {max(3.0, s.stroke * 0.5):.1f};
               stroke-linecap: butt; opacity: .7; }}
     .dead-end.fire .buffer {{ stroke: #7a2d0e; opacity: .9; }}
@@ -1427,7 +1495,7 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
   <g id="labels">
 {chr(10).join(labels)}
   </g>
-{dead_group}{traveller_group}{legend_group}</svg>
+{dead_group}{onward_group}{traveller_group}{legend_group}</svg>
 """
 
 
@@ -1624,6 +1692,8 @@ def validate_spec(spec: object) -> List[str]:
             errors.append(f"{where}: needs a non-empty name")
         if not isinstance(ln.get("color"), str) or not HEX_RE.match(ln["color"]):
             errors.append(f"{where}: colour must be #rrggbb")
+        if ln.get("continues") is not None and ln["continues"] not in CONTINUES:
+            errors.append(f"{where}: continues must be one of " + ", ".join(CONTINUES))
         if ln.get("status") is not None and ln["status"] not in STATUS_CLASS:
             errors.append(f"{where}: status must be one of "
                           + ", ".join(sorted(STATUS_CLASS)))
@@ -1687,6 +1757,22 @@ def spec_warnings(spec: dict) -> List[str]:
         if isinstance(ix, dict) and len((ix.get("stations") or [])) < 2:
             out.append(f"interchange {i} ('{ix.get('label', '')}'): needs at least "
                        "two stops to stretch between — drawn as a plain marker")
+    for i, ln in enumerate(spec.get("lines", []) or [], 1):
+        if not isinstance(ln, dict):
+            continue
+        at = ln.get("continues") or "none"
+        route = ln.get("stations") or []
+        if at == "none" or len(route) < 2:
+            continue
+        ends = ([route[0]] if at in ("start", "both") else []) \
+            + ([route[-1]] if at in ("end", "both") else [])
+        for sid in ends:
+            st = spec.get("stations", {}).get(sid)
+            if isinstance(st, dict) and st.get("dead_end") in DEAD_ENDS[1:]:
+                out.append(f"line {i} ('{ln.get('name', '')}'): carries on past "
+                           f"'{sid}', but that stop is also marked a dead end — "
+                           "the arrow and the buffer sit in the same place")
+
     if (spec.get("phases") or []) and not spec_timeline(spec):
         out.append("phases are placed by date, so they only draw on a roadmap — "
                    "set mode to roadmap and give it a timeline")

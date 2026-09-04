@@ -215,6 +215,12 @@ def index() -> str:
     return render_template("index.html")
 
 
+@app.get("/favicon.ico")
+def favicon():
+    """Browsers ask for this by name whatever the page links to."""
+    return app.send_static_file("favicon.svg")
+
+
 # ------------------------------------------------------------------- api ----
 
 @app.get("/api/maps")
@@ -388,6 +394,8 @@ def palette():
 
 
 MODE_TITLES = {"metro": "Metro map", "roadmap": "Roadmap"}
+CONTINUES_TITLES = {"none": "no", "start": "at the start",
+                    "end": "at the end", "both": "at both ends"}
 DEAD_END_TITLES = {"none": "none", "buffer": "end of the line — stops here",
                    "smoke": "smoke — watch out",
                    "fire": "burning platform — get off"}
@@ -416,6 +424,8 @@ def defaults():
                                   for k in mm.DEAD_ENDS],
                     "themes": list(mm.THEMES),
                     "axes": ["top", "bottom"],
+                    "continues": [{"value": k, "label": CONTINUES_TITLES.get(k, k)}
+                                  for k in mm.CONTINUES],
                     "default_legend": mm.DEFAULT_LEGEND,
                     "folders": [{"value": k, "label": FOLDER_TITLES.get(k, k)}
                                 for k in FOLDERS],

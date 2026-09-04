@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img"
+     aria-label="metro map">
+  <title>metro map</title>
+  <!-- Two routes crossing at an interchange: the smallest thing that still
+       reads as a transit map. No background plate, and the colours are the
+       tool's own blue and orange, which stay legible on a light or a dark tab
+       bar; the white stop keeps the crossing readable at 16px, where a thinner
+       mark would silt up. -->
+  <g fill="none" stroke-linecap="round">
+    <path d="M 3 19 H 29" stroke="#0098d4" stroke-width="6"/>
+    <path d="M 8 29 L 24 7" stroke="#ee7c0e" stroke-width="6"/>
+  </g>
+  <circle cx="15.4" cy="19" r="5.2" fill="#ffffff" stroke="#101820" stroke-width="2.4"/>
+</svg>
