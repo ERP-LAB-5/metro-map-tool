@@ -34,15 +34,18 @@ Issues = "https://github.com/ERP-LAB-5/metro-map-tool/issues"
 metro-map = "metro_map_tool.metro_map:main"
 metro-map-designer = "metro_map_tool.app:main"
 metro-map-mcp = "metro_map_tool.mcp_server:main"
+metro-map-skill = "metro_map_tool.skill_install:main"
 
 [tool.setuptools]
 packages = ["metro_map_tool"]
 
 # Flask resolves templates/ and static/ relative to app.py, and app.py resolves
 # shared-maps/ the same way, so all three have to be installed beside it — and
-# VERSION with them, since that is what the About box reads.
+# VERSION with them, since that is what the About box reads. skill/ ships so an
+# install can hand the agent skill over without the repository.
 [tool.setuptools.package-data]
-metro_map_tool = ["VERSION", "templates/*.html", "static/*", "shared-maps/*.json"]
+metro_map_tool = ["VERSION", "templates/*.html", "static/*", "shared-maps/*.json",
+                  "skill/*.md"]
 
 [tool.setuptools.dynamic]
 version = { file = "metro_map_tool/VERSION" }

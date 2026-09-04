@@ -14,6 +14,9 @@ save from either shows up in the other on the next read.
     metro-map-mcp --no-autostart                # fail instead of starting one
     python3 -m metro_map_tool.mcp_server        # the same, from a checkout
 
+The agent skill ships alongside this server; `metro-map-skill --install` puts it
+in ~/.claude/skills.
+
 The designer is started automatically if it is not already answering. Register
 it with an agent as a stdio server, for example in .mcp.json:
 

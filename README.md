@@ -1,6 +1,6 @@
 # metro-map-tool
 
-**v2.15.0** · GPL-3.0 · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
+**v2.16.0** · GPL-3.0 · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
 
 Transit-map diagrams for landscapes, pipelines and migrations: a JSON spec of
 **stations** on a grid, **lines** routed through them and **zones** banding
@@ -148,8 +148,8 @@ If it saves you an afternoon, [buy me a coffee](https://www.buymeacoffee.com/dla
 with Windows 10 and later, and with every Linux and macOS:
 
 ```bash
-curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.15.0.tar.gz | tar xz
-cd metro-map-tool-2.15.0
+curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.16.0.tar.gz | tar xz
+cd metro-map-tool-2.16.0
 ./run.sh                 # or run.cmd on Windows
 ```
 
@@ -157,10 +157,11 @@ cd metro-map-tool-2.15.0
 commands on your PATH in their own virtual environment:
 
 ```bash
-pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.15.0
+pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.16.0
 metro-map-designer                    # the browser designer
 metro-map spec.json -o map.svg        # the renderer
 metro-map-mcp                         # the MCP server, for agents
+metro-map-skill --install             # the agent skill, into ~/.claude/skills
 ```
 
 `pip install` works the same way if you would rather manage the environment
@@ -261,13 +262,21 @@ seconds** with no reload. Unsaved edits of your own are never overwritten — yo
 get *Load theirs* / *Keep mine*. And a Save that would clobber a version you
 never saw is refused by the server (HTTP 409), offering the same choice.
 
-`.claude/skills/metro-map/SKILL.md` teaches an agent the spec, the design order
-and the judgement calls. Link it into `~/.claude/skills/` to use it outside this
-repo:
+The skill teaches an agent the spec, the design order and the judgement calls.
+**It ships inside the package**, so an install already has it — one command puts
+it where Claude Code looks:
 
 ```bash
-ln -s "$PWD/.claude/skills/metro-map" ~/.claude/skills/metro-map
+metro-map-skill --install        # copies it to ~/.claude/skills/metro-map
+metro-map-skill                  # just print where the packaged copy lives
+metro-map-skill --print          # write it to stdout
 ```
+
+Working from a checkout instead? The same file is at
+`.claude/skills/metro-map/SKILL.md`, so an agent working in this repository picks
+it up with no setup. That copy exists because a symlink does not survive a clone
+on Windows; `metro-map-skill --check .claude/skills/metro-map/SKILL.md` says
+whether the two have drifted.
 
 ## Spec shape
 
