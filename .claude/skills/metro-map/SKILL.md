@@ -126,6 +126,34 @@ between two dates with the name set vertically. `timeline.axis` is `"top"`
 (default) or `"bottom"`. Together with a legend and 45° labels these give the
 "project tube map" look; `shared-maps/project-tube-map.json` is that map.
 
+## Drawing a git history
+
+A commit graph is already a metro map; it needs no mode and no new fields, only
+the mapping:
+
+| git | map |
+|---|---|
+| lane | `gy` — main on 0, each concurrent branch on its own row |
+| commit | a station, `gx` = its position in the order |
+| branch | a line through the commits on it |
+| merge | **a stop two lines share** — it becomes an interchange ring by itself |
+| tag | `interchange: true` and the tag as the label |
+| history before the view | `continues: "start"` on the line |
+
+A branch line runs from the commit it forked at, through its own commits, to the
+merge commit — so it starts and ends on stops that main also has, and the fork
+and the merge draw themselves.
+
+- **Read the history, do not invent it.** `git log --reverse --pretty=%h|%s|%D`
+  gives the order, subjects and refs in one go; `%P` gives parents when you need
+  to work out lanes.
+- **A linear history draws as a straight line, and that is the honest answer.**
+  Say so rather than inventing branches to make it look busier.
+- **Tags earn a label; ordinary commits mostly do not.** Twenty short SHAs in a
+  row is noise. Label the releases, and use `label_angle: 45` when they crowd.
+- **Keep it to a couple of dozen commits.** Beyond that the map is longer than
+  it is useful; pick a range worth explaining.
+
 ## Rides — an animated traveller
 
 A `scenarios` entry is a traveller's route: `{"name", "stations": [...],
