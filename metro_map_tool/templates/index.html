@@ -55,8 +55,9 @@
       <button class="tab is-on" data-tab="stations">Stations</button>
       <button class="tab" data-tab="lines">Lines</button>
       <button class="tab" data-tab="zones">Zones</button>
+      <button class="tab" data-tab="joins">Joins</button>
       <button class="tab" data-tab="scenarios">Rides</button>
-      <button class="tab" data-tab="timeline" hidden>Timeline</button>
+      <button class="tab" data-tab="timeline" hidden>Time</button>
       <button class="tab" data-tab="style">Style</button>
     </nav>
 
@@ -85,6 +86,15 @@
       </div>
       <p class="note">A tinted band behind the stations you put in it — “Upgrade”, “Preferred”, and so on.</p>
       <ul id="zone-list" class="list"></ul>
+    </section>
+
+    <section class="pane" data-pane="joins">
+      <div class="pane-head">
+        <h2>Joins</h2>
+        <button id="btn-add-join" class="primary">+ Add</button>
+      </div>
+      <p class="note">A stretched interchange: one capsule covering several stops, the way a tube map marks a correspondance. Pick a join, then click the stops it covers — their own markers give way to the capsule.</p>
+      <ul id="join-list" class="list"></ul>
     </section>
 
     <section class="pane" data-pane="scenarios">

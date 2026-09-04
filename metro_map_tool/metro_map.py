@@ -22,7 +22,11 @@ Input JSON
                "interval": "day"|"week"|"month"|"quarter"|"year"}?,  # roadmap only
   "legend": "hide"|"top"|"left"|"bottom"|"right"?,  # bottom is the default
   "scenarios": [ {"name": str, "stations": ["<id>", ...],
-                  "color": "#rrggbb"?, "duration": <seconds>?} ]?
+                  "color": "#rrggbb"?, "duration": <seconds>?} ]?,
+  "interchanges": [ {"stations": ["<id>", ...], "label": str?,
+                     "label_at": <compass>?, "label_angle": 0|45|90?} ]?,
+  "phases": [ {"name": str, "from": "yyyy-mm-dd", "to": "yyyy-mm-dd",
+               "color": "#rrggbb"?} ]?          # roadmap only
 }
 
 A line may also carry "notes": [{"at": <hop index>, "text": str, "flip": bool?}],
@@ -590,6 +594,15 @@ class Timeline:
         """The date column k opens on; k == columns is the closing boundary."""
         return step(self.start, self.interval, k)
 
+    def gx_of(self, d: date) -> float:
+        """Where a date falls on the axis, as a fractional column."""
+        k = 0
+        while k < self.columns and self.boundary(k + 1) <= d:
+            k += 1
+        a, b = self.boundary(k), self.boundary(k + 1)
+        span = (b - a).days or 1
+        return max(0.0, min(float(self.columns), k + (d - a).days / span))
+
 
 def build_timeline(tl: object) -> Timeline:
     """A Timeline from a spec's timeline block, or ValueError saying why not."""
@@ -629,18 +642,32 @@ def spec_timeline(spec: dict) -> Optional[Timeline]:
         return None            # validate_spec reports it; render must not blow up
 
 
-def timeline_svg(tl: Timeline, style: Style, top: float, bottom: float
-                 ) -> Tuple[str, float]:
-    """The ruler group, plus the header height it claims above `top`.
+def timeline_svg(tl: Timeline, style: Style, top: float, bottom: float,
+                 axis: str = "top") -> Tuple[str, float]:
+    """The ruler group, plus the header height it claims outside the drawing.
 
     Boundaries run the full height so the header cells line up with the columns
-    below them. Labels thin out rather than overlap when a column is narrow.
+    they belong to. Labels thin out rather than overlap when a column is narrow.
+
+    With axis="bottom" the header sits under the map, and the rows are stacked
+    the other way up: the fine period stays next to the drawing it labels and
+    the coarse one goes outermost, which is the order the eye expects either way.
     """
     s, cell = style, style.cell
     rows = 2 if major_label(tl.start, tl.interval) else 1
     header = s.tl_row_h * rows
-    head_top = top - header
-    minor_top = head_top + s.tl_row_h * (rows - 1)
+    if axis == "bottom":
+        head_top = bottom
+        minor_top = head_top
+        major_top = head_top + s.tl_row_h * (rows - 1)
+        head_far = bottom + header
+        rule_at = bottom
+    else:
+        head_top = top - header
+        minor_top = head_top + s.tl_row_h * (rows - 1)
+        major_top = head_top
+        head_far = top
+        rule_at = top
 
     def fits(text: str, width: float, size: float) -> bool:
         return len(text) * size * 0.58 + 8 <= width
@@ -654,12 +681,13 @@ def timeline_svg(tl: Timeline, style: Style, top: float, bottom: float
                          f'width="{cell:.1f}" height="{bottom - top:.1f}"/>')
 
     # every boundary gets a line; the header sits on a rule of its own
+    span0, span1 = (min(top, head_top), max(bottom, head_far))
     for k in range(tl.columns + 1):
         x = k * cell
-        parts.append(f'    <line class="tl-line" x1="{x:.1f}" y1="{head_top:.1f}" '
-                     f'x2="{x:.1f}" y2="{bottom:.1f}"/>')
-    parts.append(f'    <line class="tl-line tl-rule" x1="0" y1="{top:.1f}" '
-                 f'x2="{tl.columns * cell:.1f}" y2="{top:.1f}"/>')
+        parts.append(f'    <line class="tl-line" x1="{x:.1f}" y1="{span0:.1f}" '
+                     f'x2="{x:.1f}" y2="{span1:.1f}"/>')
+    parts.append(f'    <line class="tl-line tl-rule" x1="0" y1="{rule_at:.1f}" '
+                 f'x2="{tl.columns * cell:.1f}" y2="{rule_at:.1f}"/>')
 
     # coarser period above, drawn once over the run of columns that share it
     if rows == 2:
@@ -672,12 +700,12 @@ def timeline_svg(tl: Timeline, style: Style, top: float, bottom: float
             width = (j - k) * cell
             if k:
                 parts.append(f'    <line class="tl-line tl-major-rule" '
-                             f'x1="{k * cell:.1f}" y1="{head_top:.1f}" '
-                             f'x2="{k * cell:.1f}" y2="{bottom:.1f}"/>')
+                             f'x1="{k * cell:.1f}" y1="{span0:.1f}" '
+                             f'x2="{k * cell:.1f}" y2="{span1:.1f}"/>')
             if fits(name, width, s.tl_major_size):
                 parts.append(
                     f'    <text class="tl-major" x="{(k + (j - k) / 2) * cell:.1f}" '
-                    f'y="{head_top + s.tl_row_h * 0.7:.1f}">{esc(name)}</text>')
+                    f'y="{major_top + s.tl_row_h * 0.7:.1f}">{esc(name)}</text>')
             k = j
 
     # column names, thinned to whatever the column width will carry
@@ -1062,6 +1090,38 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
             half = len(text) * s.note_size * 0.56 / 2 + s.note_size * 0.6
             grow(anchor[0] - half, anchor[1] - half, anchor[0] + half, anchor[1] + half)
 
+    # Interchanges that stretch: one capsule covering several stops, the way a
+    # tube map marks a correspondance across platforms. The members' own markers
+    # are not drawn — the capsule replaces them rather than sitting behind them.
+    capsules: List[str] = []
+    capsule_box: Dict[int, Tuple[float, float, float, float]] = {}
+    in_capsule: Dict[str, int] = {}
+    for gi, ix in enumerate(spec.get("interchanges", []) or []):
+        if not isinstance(ix, dict):
+            continue
+        members = [sid for sid in (ix.get("stations") or []) if sid in m.stations]
+        if not members:
+            continue                                  # nothing placed in it yet
+        xs: List[float] = []
+        ys: List[float] = []
+        for sid in members:
+            px, py = m.pos[sid]
+            r = m.marker_radius(sid)
+            xs += [px - r, px + r]
+            ys += [py - r, py + r]
+            in_capsule[sid] = gi
+        pad = s.stop_ring * 0.45
+        bx0, by0 = min(xs) - pad, min(ys) - pad
+        bx1, by1 = max(xs) + pad, max(ys) + pad
+        capsule_box[gi] = (bx0, by0, bx1, by1)
+        title = ix.get("label") or m.stations[members[0]]["label"]
+        capsules.append(
+            f'    <rect class="capsule" data-station="{attr(members[0])}" '
+            f'x="{bx0:.1f}" y="{by0:.1f}" width="{bx1 - bx0:.1f}" '
+            f'height="{by1 - by0:.1f}" rx="{min(bx1 - bx0, by1 - by0) / 2:.1f}">'
+            f'<title>{esc(title)}</title></rect>')
+        grow(bx0, by0, bx1, by1)
+
     # stations and labels
     stops, labels = [], []
     extent: Dict[str, Tuple[float, float, float, float]] = {}   # marker + label box
@@ -1077,7 +1137,9 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
         # under construction or planned is still drawn at full strength
         muted = " muted" if through and all(
             line_status(m.lines[li]) == "out-of-service" for li in through) else ""
-        if st.get("interchange"):
+        if sid in in_capsule:
+            pass                                # the capsule is this stop's marker
+        elif st.get("interchange"):
             stops.append(
                 f'    <circle class="interchange{muted}" data-station="{attr(sid)}" '
                 f'cx="{center[0]:.1f}" cy="{center[1]:.1f}" r="{r:.1f}"/>'
@@ -1098,9 +1160,10 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
         outward = norm((center[0] - cx, center[1] - cy))
         if outward == (0.0, 0.0):
             outward = (0.0, -1.0)
-        end = st.get("dead_end")
-        if end is not None and end not in DEAD_ENDS:
-            errors.append(f"{where}: dead_end must be one of " + ", ".join(DEAD_ENDS))
+        group = spec.get("interchanges", [])[in_capsule[sid]] \
+            if sid in in_capsule else None
+        if group and (group.get("label") or "").strip():
+            continue        # the capsule speaks for the stops it covers
         side = st.get("label_at") or choose_label_side(m.directions_at(sid), outward)
         angle = st.get("label_angle") or 0
         (lx, ly), anchor = label_geometry(side, center, r, s, angle)
@@ -1115,6 +1178,33 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
         extent[sid] = (min(center[0] - r, box[0]), min(center[1] - r, box[1]),
                        max(center[0] + r, box[2]), max(center[1] + r, box[3]))
         grow(*box)
+
+    # a capsule's label, drawn once for the whole group rather than per stop
+    for gi, ix in enumerate(spec.get("interchanges", []) or []):
+        box = capsule_box.get(gi)
+        text = (ix.get("label") or "").strip() if isinstance(ix, dict) else ""
+        if not box or not text:
+            continue
+        bx0, by0, bx1, by1 = box
+        mid = ((bx0 + bx1) / 2, (by0 + by1) / 2)
+        side = ix.get("label_at") or "above"
+        angle = ix.get("label_angle") or 0
+        # reach to the edge of the capsule in the direction the label goes, so a
+        # tall capsule's label clears its bottom rather than sitting inside it
+        d = COMPASS.get(side, (0, -1))
+        reach = abs(d[0]) * (bx1 - bx0) / 2 + abs(d[1]) * (by1 - by0) / 2
+        (lx, ly), anchor = label_geometry(side, mid, reach, s, angle)
+        spin = f' transform="rotate({-angle:g} {lx:.1f} {ly:.1f})"' if angle else ""
+        labels.append(
+            f'    <text class="label" x="{lx:.1f}" y="{ly:.1f}"{spin} '
+            f'text-anchor="{anchor}">{esc(text)}</text>')
+        w = len(text) * s.label_size * 0.56
+        lbox = label_extent((lx, ly), anchor, w, angle, s)
+        grow(*lbox)
+        for sid in (ix.get("stations") or []):
+            if sid in extent:
+                extent[sid] = (min(extent[sid][0], lbox[0]), min(extent[sid][1], lbox[1]),
+                               max(extent[sid][2], lbox[2]), max(extent[sid][3], lbox[3]))
 
     # zones — tinted bands behind the network, wrapping their stations and labels
     zones = []
@@ -1155,6 +1245,10 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
         timeline_css = f"""    .tl-line {{ stroke: var(--ink); stroke-width: 1; opacity: .16; }}
     .tl-major-rule, .tl-rule {{ opacity: .30; }}
     .tl-band {{ fill: var(--ink); opacity: .025; }}
+    .phase rect {{ fill: var(--pc, var(--ink)); opacity: .07; }}
+    .phase-name {{ font-family: {s.font}; font-size: {s.zone_label_size}px; font-weight: 700;
+                  letter-spacing: .09em; text-transform: uppercase;
+                  fill: var(--pc, var(--ink)); opacity: .45; }}
     .tl-minor {{ font-family: {s.font}; font-size: {s.tl_label_size}px; fill: var(--ink);
                 opacity: .55; text-anchor: middle; }}
     .tl-major {{ font-family: {s.font}; font-size: {s.tl_major_size}px; font-weight: 700;
@@ -1163,12 +1257,52 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
         cx0 = min(cx0, 0.0)
         cx1 = max(cx1, tl.columns * s.cell)
         top, bottom = cy0 - s.margin / 2, cy1 + s.margin / 2
-        body, header = timeline_svg(tl, s, top, bottom)
-        cy0, cy1 = top - header, bottom
+        axis = (spec.get("timeline") or {}).get("axis")
+        axis = axis if axis in ("top", "bottom") else "top"
+        body, header = timeline_svg(tl, s, top, bottom, axis)
+
+        # Phases: grey columns behind everything, banded by date rather than
+        # sized around stations the way a zone is. They belong to the ruler
+        # because that is what turns their dates into a position.
+        bands = []
+        for ph in spec.get("phases", []) or []:
+            if not isinstance(ph, dict):
+                continue
+            try:
+                a = tl.gx_of(parse_date(ph.get("from")))
+                b = tl.gx_of(parse_date(ph.get("to")))
+            except ValueError:
+                continue
+            if b <= a:
+                continue
+            x, wide = a * s.cell, (b - a) * s.cell
+            name = (ph.get("name") or "").strip()
+            tint = f' style="--pc: {ph["color"]}"' if isinstance(ph.get("color"), str) \
+                and HEX_RE.match(ph.get("color") or "") else ""
+            bands.append(f'    <g class="phase"{tint}>'
+                         f'<rect x="{x:.1f}" y="{top - header if axis == "top" else top:.1f}" '
+                         f'width="{wide:.1f}" '
+                         f'height="{(bottom - top) + header:.1f}"/>')
+            if name:
+                # reads bottom to top, anchored low enough that it grows up
+                # into the band rather than out of the top of it
+                run = len(name) * s.zone_label_size * 0.62
+                ly = (top - header if axis == "top" else top) + run + 10
+                lx = x + wide / 2
+                bands.append(f'<text class="phase-name" x="{lx:.1f}" y="{ly:.1f}" '
+                             f'transform="rotate(-90 {lx:.1f} {ly:.1f})">{esc(name)}</text>')
+            bands.append("</g>")
+
+        cy0, cy1 = (top - header, bottom) if axis == "top" else (top, bottom + header)
         timeline_group = f"""  <g id="timeline">
 {body}
   </g>
 """
+        if bands:
+            timeline_group = f"""  <g id="phases">
+{chr(10).join(bands)}
+  </g>
+""" + timeline_group
 
     # the legend goes outside the ruler, not between the ruler and the map, so
     # it is laid out last against everything the drawing has claimed so far
@@ -1280,13 +1414,15 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
                   letter-spacing: .09em; text-transform: uppercase; fill: var(--zc); }}
 {timeline_css}    .stop {{ fill: var(--paper); stroke-width: {s.stop_ring}; }}
     .interchange {{ fill: var(--paper); stroke: var(--ink); stroke-width: {s.stop_ring}; }}
+    .capsule {{ fill: var(--paper); stroke: var(--ink); stroke-width: {s.stop_ring};
+               stroke-linejoin: round; }}
     .label {{ font-family: {s.font}; font-size: {s.label_size}px; font-weight: 600; fill: var(--ink); }}
 {note_css}{traveller_css}{legend_css}{theme_block}  </style>
 {timeline_group}{zone_group}  <g id="routes">
 {chr(10).join(routes)}
   </g>
 {note_group}  <g id="stations">
-{chr(10).join(stops)}
+{chr(10).join(capsules + stops)}
   </g>
   <g id="labels">
 {chr(10).join(labels)}
@@ -1399,6 +1535,55 @@ def validate_spec(spec: object) -> List[str]:
                                      or isinstance(snap, bool) or snap <= 0):
                 errors.append("spec.editor.snap must be a positive number")
 
+    joins = spec.get("interchanges", []) or []
+    if not isinstance(joins, list):
+        errors.append("spec.interchanges must be a list")
+        joins = []
+    for i, ix in enumerate(joins, 1):
+        where = f"interchange {i}"
+        if not isinstance(ix, dict):
+            errors.append(f"{where}: must be an object")
+            continue
+        where = f"interchange {i} ('{ix.get('label', '')}')"
+        if ix.get("label") is not None and not isinstance(ix["label"], str):
+            errors.append(f"{where}: label must be text")
+        side = ix.get("label_at")
+        if side is not None and side not in COMPASS:
+            errors.append(f"{where}: label_at '{side}' is not a compass direction")
+        spin = ix.get("label_angle")
+        if spin is not None and spin not in LABEL_ANGLES:
+            errors.append(f"{where}: label_angle must be one of "
+                          + ", ".join(str(a) for a in LABEL_ANGLES))
+        members = ix.get("stations")
+        if not isinstance(members, list):
+            errors.append(f"{where}: stations must be a list of ids")
+            continue
+        for sid in members:
+            if sid not in stations:
+                errors.append(f"{where}: unknown station '{sid}'")
+
+    phases = spec.get("phases", []) or []
+    if not isinstance(phases, list):
+        errors.append("spec.phases must be a list")
+        phases = []
+    for i, ph in enumerate(phases, 1):
+        where = f"phase {i}"
+        if not isinstance(ph, dict):
+            errors.append(f"{where}: must be an object")
+            continue
+        where = f"phase {i} ('{ph.get('name', '')}')"
+        if not isinstance(ph.get("name"), str) or not ph["name"].strip():
+            errors.append(f"{where}: needs a non-empty name")
+        if ph.get("color") is not None and (not isinstance(ph["color"], str)
+                                            or not HEX_RE.match(ph["color"])):
+            errors.append(f"{where}: colour must be #rrggbb")
+        try:
+            a, b = parse_date(ph.get("from")), parse_date(ph.get("to"))
+            if b <= a:
+                errors.append(f"{where}: 'to' must fall after 'from'")
+        except ValueError as exc:
+            errors.append(f"{where}: {exc}")
+
     scenarios = spec.get("scenarios", []) or []
     if not isinstance(scenarios, list):
         errors.append("spec.scenarios must be a list")
@@ -1497,6 +1682,14 @@ def spec_warnings(spec: dict) -> List[str]:
                 and sid not in on_a_line:
             out.append(f"station '{sid}': marked as a dead end but on no line — "
                        "the marker needs a track to sit across")
+
+    for i, ix in enumerate(spec.get("interchanges", []) or [], 1):
+        if isinstance(ix, dict) and len((ix.get("stations") or [])) < 2:
+            out.append(f"interchange {i} ('{ix.get('label', '')}'): needs at least "
+                       "two stops to stretch between — drawn as a plain marker")
+    if (spec.get("phases") or []) and not spec_timeline(spec):
+        out.append("phases are placed by date, so they only draw on a roadmap — "
+                   "set mode to roadmap and give it a timeline")
 
     for i, sc in enumerate(spec.get("scenarios", []) or [], 1):
         if not isinstance(sc, dict):

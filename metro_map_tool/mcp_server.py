@@ -235,6 +235,17 @@ def spec_reference() -> dict:
             "legend": '"legend" names the lines on the drawing: hide, top, '
                       "left, bottom or right. It defaults to bottom, so leave "
                       'it out unless the map wants it elsewhere or off',
+            "interchanges": 'a stretched interchange: {"stations": [ids], '
+                            '"label"?, "label_at"?, "label_angle"?}. One capsule '
+                            "covers the stops listed, replacing their own "
+                            "markers — use it for a milestone that lands on "
+                            "several parallel lines at once. A label on the "
+                            "group replaces the labels of the stops it covers",
+            "phases": 'roadmap only: {"name", "from", "to", "color"?} draws a '
+                      "grey column behind everything between two dates, named "
+                      "vertically — the Preparation/Test/Go-to-market bands",
+            "axis": 'timeline.axis is "top" (default) or "bottom" — which side '
+                    "of the map the dates run along",
             "dead_end": 'a station may carry "dead_end": "buffer" for a '
                         'terminus bar, or "fire" for that bar with flames off '
                         "it — the burning platform, for a branch that ends "

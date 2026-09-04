@@ -37,7 +37,7 @@ async function api(method, path, payload) {
 const S = {
   name: null,                              // saved map name, null while untitled
   folder: null,                            // which folder it came from, null while untitled
-  spec: { stations: {}, lines: [], zones: [], scenarios: [] },
+  spec: { stations: {}, lines: [], zones: [], scenarios: [], interchanges: [] },
   style: { cell: 120, stroke: 10, corner: 22, bundle_gap: 13, label_size: 16 },
   autoIx: true,
   theme: "auto",                           // designer chrome and preview only
@@ -197,6 +197,8 @@ function normalise(spec) {
   spec.lines = spec.lines || [];
   spec.zones = spec.zones || [];
   spec.scenarios = spec.scenarios || [];
+  spec.interchanges = spec.interchanges || [];
+  spec.phases = spec.phases || [];
   // a hand-written or agent-written roadmap may arrive with no dates at all —
   // a GET does not validate, only a PUT does. Repair it on the way in, where
   // the map is being replaced wholesale anyway, not mid-render.
@@ -510,6 +512,10 @@ function onStationClick(id) {
     toggleZoneMember(S.sel.id, id);
     return;
   }
+  if (tab === "joins" && S.sel.kind === "join" && S.spec.interchanges[S.sel.id]) {
+    toggleJoinMember(S.sel.id, id);
+    return;
+  }
   if (tab === "scenarios" && S.sel.kind === "scenario" && S.spec.scenarios[S.sel.id]) {
     applyChange(() => {
       const sc = S.spec.scenarios[S.sel.id];
@@ -569,6 +575,10 @@ function setHint() {
     text = `Filling “${S.spec.zones[S.sel.id].name}” — click stations on the canvas to add or remove them`;
   } else if (tab === "zones") {
     text = "Pick a zone to choose which stations sit in it";
+  } else if (tab === "joins" && S.sel.kind === "join" && S.spec.interchanges[S.sel.id]) {
+    text = "Filling this join — click the stops the capsule should cover";
+  } else if (tab === "joins") {
+    text = "Pick a join to choose the stops it covers, or add one";
   } else if (tab === "scenarios" && S.sel.kind === "scenario" && S.spec.scenarios[S.sel.id]) {
     text = `Routing “${S.spec.scenarios[S.sel.id].name}” — click stations on the canvas in the order the traveller visits them`;
   } else if (tab === "scenarios") {
@@ -591,6 +601,7 @@ function refreshPanels() {
   renderStations();
   renderLines();
   renderZones();
+  renderJoins();
   renderScenarios();
   renderTimeline();
   renderStyle();
@@ -1161,7 +1172,7 @@ function renderTimeline() {
 
   // rebuilt only when the values changed under it — otherwise a date input
   // would lose focus on every keystroke that triggers a re-render
-  const stamp = `${tl.start}|${tl.end}|${tl.interval}`;
+  const stamp = `${tl.start}|${tl.end}|${tl.interval}|${tl.axis || "top"}|${JSON.stringify(S.spec.phases || [])}`;
   if (box.dataset.built === stamp) { renderTimelineReadout(); return; }
 
   box.innerHTML = `<div class="card">
@@ -1171,11 +1182,32 @@ function renderTimeline() {
       <label class="field"><span>End</span>
         <input type="date" id="t-end" value="${esc(tl.end)}"></label>
     </div>
-    <label class="field"><span>One column is</span><select id="t-interval">
-      ${INTERVALS.map((iv) =>
-        `<option value="${esc(iv)}" ${tl.interval === iv ? "selected" : ""}>${esc(iv)}</option>`).join("")}
-    </select></label>
+    <div class="pair">
+      <label class="field"><span>One column is</span><select id="t-interval">
+        ${INTERVALS.map((iv) =>
+          `<option value="${esc(iv)}" ${tl.interval === iv ? "selected" : ""}>${esc(iv)}</option>`).join("")}
+      </select></label>
+      <label class="field"><span>Dates go</span><select id="t-axis">
+        ${["top", "bottom"].map((v) =>
+          `<option value="${v}" ${(tl.axis || "top") === v ? "selected" : ""}>${v}</option>`).join("")}
+      </select></label>
+    </div>
     <p class="note" id="t-readout"></p>
+  </div>
+
+  <div class="card">
+    <h3>Phases</h3>
+    <p class="note">Grey columns behind everything, banded by date — “Preparation”, “Test”, “Go to market”.</p>
+    <div class="hops" id="t-phases">
+      ${(S.spec.phases || []).map((ph, k) => `
+        <div class="phase-row" data-phase="${k}">
+          <input type="text" data-pf="name" data-k="${k}" value="${esc(ph.name || "")}" placeholder="name">
+          <input type="date" data-pf="from" data-k="${k}" value="${esc(ph.from || "")}">
+          <input type="date" data-pf="to" data-k="${k}" value="${esc(ph.to || "")}">
+          <button class="ghost" data-pdel="${k}" title="remove">×</button>
+        </div>`).join("")}
+    </div>
+    <div><button id="t-add-phase">+ Add phase</button></div>
   </div>`;
   box.dataset.built = stamp;
 
@@ -1188,6 +1220,29 @@ function renderTimeline() {
   $("#t-start").addEventListener("change", (ev) => write("start", ev.target.value));
   $("#t-end").addEventListener("change", (ev) => write("end", ev.target.value));
   $("#t-interval").addEventListener("change", (ev) => write("interval", ev.target.value));
+  $("#t-axis").addEventListener("change", (ev) => write("axis", ev.target.value));
+
+  box.querySelectorAll("[data-pf]").forEach((input) => {
+    input.addEventListener("focus", pushUndo);
+    input.addEventListener("input", () => {
+      const ph = S.spec.phases[Number(input.dataset.k)];
+      if (!ph) return;
+      ph[input.dataset.pf] = input.value;
+      markDirty();
+      scheduleRender();
+    });
+  });
+  box.querySelectorAll("[data-pdel]").forEach((btn) =>
+    btn.addEventListener("click", () => applyChange(() =>
+      S.spec.phases.splice(Number(btn.dataset.pdel), 1))));
+  $("#t-add-phase").addEventListener("click", () => applyChange(() => {
+    // default to the span the ruler already covers, so it draws immediately
+    const first = TIMELINE && TIMELINE.columns_at[0];
+    const last = TIMELINE && TIMELINE.columns_at[TIMELINE.columns_at.length - 1];
+    S.spec.phases.push({ name: `Phase ${S.spec.phases.length + 1}`,
+                         from: first ? first.date : "",
+                         to: last ? last.ends : "" });
+  }));
   renderTimelineReadout();
 }
 
@@ -1207,6 +1262,115 @@ function renderTimelineReadout() {
     startField.value = TIMELINE.start;
   }
   setHint();
+}
+
+/* --------------------------------------------------------------- joins -- */
+
+function renderJoins() {
+  const list = $("#join-list");
+  if (!list) return;
+  if (!S.spec.interchanges.length) {
+    list.innerHTML = `<li class="note">No joins yet — press “+ Add”, then click the stops the capsule should cover.</li>`;
+  } else {
+    list.innerHTML = S.spec.interchanges.map((ix, i) => {
+      const open = S.sel.kind === "join" && S.sel.id === i;
+      const n = (ix.stations || []).length;
+      return `<li class="row ${open ? "is-on" : ""}" data-join="${i}">
+        <span class="swatch band" style="background:var(--ink)"></span>
+        <span class="grow">
+          <span class="lbl">${esc(ix.label || "(unnamed)")}</span>
+          <span class="at">${n ? `${n} stop${n === 1 ? "" : "s"}` : "empty"}</span>
+        </span>
+        <span class="caret">${open ? "▾" : "▸"}</span>
+      </li>` + (open ? `<li class="edit-host"><div id="join-editor" class="editor"></div></li>` : "");
+    }).join("");
+    list.querySelectorAll("[data-join]").forEach((row) =>
+      row.addEventListener("click", () => select("join", Number(row.dataset.join))));
+  }
+  renderJoinEditor();
+}
+
+function renderJoinEditor() {
+  const box = $("#join-editor");
+  if (!box) return;
+  if (S.sel.kind !== "join" || !S.spec.interchanges[S.sel.id]) { box.innerHTML = ""; return; }
+  const i = S.sel.id;
+  const ix = S.spec.interchanges[i];
+  const members = ix.stations || [];
+  const ids = Object.keys(S.spec.stations).sort((a, b) => {
+    const A = S.spec.stations[a], B = S.spec.stations[b];
+    return A.gx - B.gx || A.gy - B.gy;
+  });
+  const sides = ["auto", ...LABEL_SIDES];
+
+  box.innerHTML = `<div class="card">
+    <h3>Join</h3>
+    <label class="field"><span>Label — replaces the labels of the stops it covers</span>
+      <input type="text" id="j-label" value="${esc(ix.label || "")}" placeholder="leave blank to keep each stop's own"></label>
+    <div class="pair">
+      <label class="field"><span>Label side</span><select id="j-side">
+        ${sides.map((v) => `<option value="${esc(v)}" ${(ix.label_at || "auto") === v ? "selected" : ""}>${esc(v)}</option>`).join("")}
+      </select></label>
+      <label class="field"><span>Label angle</span><select id="j-angle">
+        ${LABEL_ANGLES.map((a) => `<option value="${a}" ${(ix.label_angle || 0) === a ? "selected" : ""}>${a}°</option>`).join("")}
+      </select></label>
+    </div>
+
+    <h3>Stops covered — ${members.length}</h3>
+    ${members.length < 2 ? `<p class="warn">A join needs two stops to stretch between.</p>` : ""}
+    <div class="pick" id="j-pick">
+      ${ids.length ? ids.map((sid) =>
+        `<button type="button" data-toggle="${esc(sid)}"
+           class="${members.includes(sid) ? "in-zone" : ""}"
+         >${esc(S.spec.stations[sid].label)}</button>`).join("")
+        : `<p class="note">No stations yet.</p>`}
+    </div>
+
+    <div><button id="j-del" class="danger">Delete join</button></div>
+  </div>`;
+
+  const label = $("#j-label");
+  label.addEventListener("focus", pushUndo);
+  label.addEventListener("input", () => {
+    if (label.value.trim()) ix.label = label.value; else delete ix.label;
+    markDirty();
+    scheduleRender();
+  });
+  label.addEventListener("change", refreshPanels);
+  $("#j-side").addEventListener("change", (ev) => applyChange(() => {
+    if (ev.target.value === "auto") delete ix.label_at; else ix.label_at = ev.target.value;
+  }));
+  $("#j-angle").addEventListener("change", (ev) => applyChange(() => {
+    const a = Number(ev.target.value);
+    if (a) ix.label_angle = a; else delete ix.label_angle;
+  }));
+  box.querySelectorAll("[data-toggle]").forEach((btn) =>
+    btn.addEventListener("click", () => toggleJoinMember(i, btn.dataset.toggle)));
+  $("#j-del").addEventListener("click", () => applyChange(() => {
+    S.spec.interchanges.splice(i, 1);
+    S.sel = { kind: null, id: null };
+  }));
+  setHint();
+}
+
+function toggleJoinMember(index, sid) {
+  const ix = S.spec.interchanges[index];
+  if (!ix) return;
+  applyChange(() => {
+    ix.stations = ix.stations || [];
+    const at = ix.stations.indexOf(sid);
+    if (at >= 0) ix.stations.splice(at, 1); else ix.stations.push(sid);
+  });
+}
+
+function addJoin() {
+  const i = S.spec.interchanges.length;
+  applyChange(() => {
+    S.spec.interchanges.push({ stations: [] });
+    S.sel = { kind: "join", id: i };
+  });
+  const label = $("#j-label");
+  if (label) label.focus();
 }
 
 /* --------------------------------------------------------------- rides -- */
@@ -1956,6 +2120,7 @@ async function boot() {
   $("#btn-add-line").addEventListener("click", addLine);
   $("#btn-add-zone").addEventListener("click", addZone);
   $("#btn-add-scenario").addEventListener("click", addScenario);
+  $("#btn-add-join").addEventListener("click", addJoin);
   $("#btn-ride-play").addEventListener("click", toggleRides);
   $("#btn-ride-restart").addEventListener("click", restartRides);
   $("#btn-new").addEventListener("click", newMap);

@@ -415,6 +415,7 @@ def defaults():
                     "dead_ends": [{"value": k, "label": DEAD_END_TITLES.get(k, k)}
                                   for k in mm.DEAD_ENDS],
                     "themes": list(mm.THEMES),
+                    "axes": ["top", "bottom"],
                     "default_legend": mm.DEFAULT_LEGEND,
                     "folders": [{"value": k, "label": FOLDER_TITLES.get(k, k)}
                                 for k in FOLDERS],

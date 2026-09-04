@@ -1,6 +1,6 @@
 # metro-map-tool
 
-**v2.7.0** · MIT · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
+**v2.8.0** · MIT · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
 
 Transit-map diagrams for landscapes, pipelines and migrations: a JSON spec of
 **stations** on a grid, **lines** routed through them and **zones** banding
@@ -67,6 +67,17 @@ meeting again at the saved file. After that it reopens whatever you had last.
   planned retirement; *smoke* adds drifting puffs — watch out; *burning
   platform* adds flames — get off this train. An out-of-service line still gets
   a plain bar automatically where it runs out.
+- **Joins** (Joins tab) draw a *stretched interchange*: one capsule covering
+  several stops, the way a tube map marks a correspondance. Use it for a
+  milestone that lands on several parallel lines at once — the capsule stretches
+  across every lane it touches and replaces those stops' own markers. A label on
+  the join replaces the labels of the stops it covers, so a milestone is named
+  once rather than six times.
+- **Phases** (Time tab) band the map with grey columns between two dates, named
+  vertically — "Preparation", "Test", "Go to market". Roadmap only, since they
+  are placed by date.
+- **Dates top or bottom** (Time tab) puts the ruler under the map instead of
+  over it.
 - **Rides** (Rides tab) animate a traveller along a route from start to end.
   A ride is an ordered list of stops; it follows the drawn track and changes
   line wherever the journey does, so you can show "the migration path" across
@@ -114,8 +125,8 @@ the *interchanges* toggle is on.
 with Windows 10 and later, and with every Linux and macOS:
 
 ```bash
-curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.7.0.tar.gz | tar xz
-cd metro-map-tool-2.7.0
+curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.8.0.tar.gz | tar xz
+cd metro-map-tool-2.8.0
 ./run.sh                 # or run.cmd on Windows
 ```
 
@@ -123,7 +134,7 @@ cd metro-map-tool-2.7.0
 commands on your PATH in their own virtual environment:
 
 ```bash
-pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.7.0
+pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.8.0
 metro-map-designer                    # the browser designer
 metro-map spec.json -o map.svg        # the renderer
 metro-map-mcp                         # the MCP server, for agents
@@ -162,7 +173,10 @@ thin out rather than overlap when a column is narrow. Everything else — lines,
 zones, service states, interchanges — works exactly as in metro mode, and the
 dates are kept if you switch back, so flipping modes costs nothing.
 
-`metro_map_tool/shared-maps/roadmap-example.json` is a worked example.
+`metro_map_tool/shared-maps/roadmap-example.json` is a worked example, and
+`project-tube-map.json` is the full treatment: six team lines, milestones drawn
+as stretched interchanges across the lanes they touch, phase bands and a bottom
+axis.
 
 ## The command line
 

@@ -104,6 +104,26 @@ where it crosses something.
   paragraph; long ones overrun the hop and collide with the stations at each end.
 - `flip: true` moves a note to the other side of its track.
 
+## Stretched interchanges
+
+`interchanges` is a list of `{"stations": [ids], "label"?, "label_at"?,
+"label_angle"?}`. Each draws **one capsule covering the stops listed**, replacing
+their individual markers — the tube-map way of showing a correspondance.
+
+Reach for it when one event lands on several parallel lines at once: a milestone
+across six team lanes is six stops (each line needs its own, or the line does not
+stop there) joined into one capsule. Give the *join* the label and the member
+stops' labels are not drawn, so the milestone is named once instead of six times.
+Name the member stops something like "Kick-off · Alpha" anyway — the station list
+in the designer still shows them.
+
+## Phases and the axis — roadmap only
+
+`phases` is `[{"name", "from", "to", "color"?}]`, grey columns behind everything
+between two dates with the name set vertically. `timeline.axis` is `"top"`
+(default) or `"bottom"`. Together with a legend and 45° labels these give the
+"project tube map" look; `shared-maps/project-tube-map.json` is that map.
+
 ## Rides — an animated traveller
 
 A `scenarios` entry is a traveller's route: `{"name", "stations": [...],

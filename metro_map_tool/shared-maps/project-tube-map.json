@@ -1,0 +1,588 @@
+{
+  "mode": "roadmap",
+  "timeline": {
+    "start": "2026-01-01",
+    "end": "2026-12-31",
+    "interval": "month",
+    "axis": "bottom"
+  },
+  "legend": "bottom",
+  "phases": [
+    {
+      "name": "Preparation",
+      "from": "2026-01-01",
+      "to": "2026-02-15"
+    },
+    {
+      "name": "Implementation",
+      "from": "2026-02-15",
+      "to": "2026-05-01"
+    },
+    {
+      "name": "Test",
+      "from": "2026-05-01",
+      "to": "2026-07-15"
+    },
+    {
+      "name": "Go to market",
+      "from": "2026-09-01",
+      "to": "2026-10-15"
+    },
+    {
+      "name": "Analysis",
+      "from": "2026-11-01",
+      "to": "2026-12-31"
+    }
+  ],
+  "style": {
+    "cell": 130,
+    "stroke": 9,
+    "label_size": 13
+  },
+  "stations": {
+    "e0r0": {
+      "label": "Kick-off meeting · Alpha",
+      "gx": 0,
+      "gy": 0
+    },
+    "e0r1": {
+      "label": "Kick-off meeting · Beta",
+      "gx": 0,
+      "gy": 1
+    },
+    "e0r2": {
+      "label": "Kick-off meeting · Gamma",
+      "gx": 0,
+      "gy": 2
+    },
+    "e0r3": {
+      "label": "Kick-off meeting · Delta",
+      "gx": 0,
+      "gy": 3
+    },
+    "e0r4": {
+      "label": "Kick-off meeting · Epsilon",
+      "gx": 0,
+      "gy": 4
+    },
+    "e0r5": {
+      "label": "Kick-off meeting · Zeta",
+      "gx": 0,
+      "gy": 5
+    },
+    "e1r0": {
+      "label": "Implementation starts · Alpha",
+      "gx": 1,
+      "gy": 0
+    },
+    "e1r1": {
+      "label": "Implementation starts · Beta",
+      "gx": 1,
+      "gy": 1
+    },
+    "e1r2": {
+      "label": "Implementation starts · Gamma",
+      "gx": 1,
+      "gy": 2
+    },
+    "e1r3": {
+      "label": "Implementation starts · Delta",
+      "gx": 1,
+      "gy": 3
+    },
+    "e1r4": {
+      "label": "Implementation starts · Epsilon",
+      "gx": 1,
+      "gy": 4
+    },
+    "e1r5": {
+      "label": "Implementation starts · Zeta",
+      "gx": 1,
+      "gy": 5
+    },
+    "e2r0": {
+      "label": "Strategic plan review · Alpha",
+      "gx": 2,
+      "gy": 0
+    },
+    "e2r1": {
+      "label": "Strategic plan review · Beta",
+      "gx": 2,
+      "gy": 1
+    },
+    "e2r2": {
+      "label": "Strategic plan review · Gamma",
+      "gx": 2,
+      "gy": 2
+    },
+    "e2r3": {
+      "label": "Strategic plan review · Delta",
+      "gx": 2,
+      "gy": 3
+    },
+    "e2r4": {
+      "label": "Strategic plan review · Epsilon",
+      "gx": 2,
+      "gy": 4
+    },
+    "e2r5": {
+      "label": "Strategic plan review · Zeta",
+      "gx": 2,
+      "gy": 5
+    },
+    "e3r0": {
+      "label": "Financials update · Alpha",
+      "gx": 3,
+      "gy": 0
+    },
+    "e3r1": {
+      "label": "Financials update · Beta",
+      "gx": 3,
+      "gy": 1
+    },
+    "e3r2": {
+      "label": "Financials update · Gamma",
+      "gx": 3,
+      "gy": 2
+    },
+    "e3r3": {
+      "label": "Financials update · Delta",
+      "gx": 3,
+      "gy": 3
+    },
+    "e3r4": {
+      "label": "Financials update · Epsilon",
+      "gx": 3,
+      "gy": 4
+    },
+    "e3r5": {
+      "label": "Financials update · Zeta",
+      "gx": 3,
+      "gy": 5
+    },
+    "e4r0": {
+      "label": "Long-term objectives · Alpha",
+      "gx": 4,
+      "gy": 0
+    },
+    "e4r1": {
+      "label": "Long-term objectives · Beta",
+      "gx": 4,
+      "gy": 1
+    },
+    "e4r2": {
+      "label": "Long-term objectives · Gamma",
+      "gx": 4,
+      "gy": 2
+    },
+    "e4r3": {
+      "label": "Long-term objectives · Delta",
+      "gx": 4,
+      "gy": 3
+    },
+    "e5r1": {
+      "label": "Committee meeting · Beta",
+      "gx": 5,
+      "gy": 1
+    },
+    "e5r2": {
+      "label": "Committee meeting · Gamma",
+      "gx": 5,
+      "gy": 2
+    },
+    "e6r0": {
+      "label": "On-demand analyses · Alpha",
+      "gx": 6,
+      "gy": 0
+    },
+    "e6r1": {
+      "label": "On-demand analyses · Beta",
+      "gx": 6,
+      "gy": 1
+    },
+    "e6r2": {
+      "label": "On-demand analyses · Gamma",
+      "gx": 6,
+      "gy": 2
+    },
+    "e6r3": {
+      "label": "On-demand analyses · Delta",
+      "gx": 6,
+      "gy": 3
+    },
+    "e6r4": {
+      "label": "On-demand analyses · Epsilon",
+      "gx": 6,
+      "gy": 4
+    },
+    "e7r0": {
+      "label": "Second kick-off · Alpha",
+      "gx": 7,
+      "gy": 0
+    },
+    "e7r1": {
+      "label": "Second kick-off · Beta",
+      "gx": 7,
+      "gy": 1
+    },
+    "e7r2": {
+      "label": "Second kick-off · Gamma",
+      "gx": 7,
+      "gy": 2
+    },
+    "e7r3": {
+      "label": "Second kick-off · Delta",
+      "gx": 7,
+      "gy": 3
+    },
+    "e7r4": {
+      "label": "Second kick-off · Epsilon",
+      "gx": 7,
+      "gy": 4
+    },
+    "e7r5": {
+      "label": "Second kick-off · Zeta",
+      "gx": 7,
+      "gy": 5
+    },
+    "e8r0": {
+      "label": "Management update · Alpha",
+      "gx": 8,
+      "gy": 0
+    },
+    "e8r1": {
+      "label": "Management update · Beta",
+      "gx": 8,
+      "gy": 1
+    },
+    "e8r2": {
+      "label": "Management update · Gamma",
+      "gx": 8,
+      "gy": 2
+    },
+    "e8r3": {
+      "label": "Management update · Delta",
+      "gx": 8,
+      "gy": 3
+    },
+    "e9r1": {
+      "label": "Go to market · Beta",
+      "gx": 9,
+      "gy": 1
+    },
+    "e9r2": {
+      "label": "Go to market · Gamma",
+      "gx": 9,
+      "gy": 2
+    },
+    "e9r3": {
+      "label": "Go to market · Delta",
+      "gx": 9,
+      "gy": 3
+    },
+    "e10r0": {
+      "label": "First data analysis · Alpha",
+      "gx": 10,
+      "gy": 0
+    },
+    "e10r1": {
+      "label": "First data analysis · Beta",
+      "gx": 10,
+      "gy": 1
+    },
+    "e10r2": {
+      "label": "First data analysis · Gamma",
+      "gx": 10,
+      "gy": 2
+    },
+    "e10r3": {
+      "label": "First data analysis · Delta",
+      "gx": 10,
+      "gy": 3
+    },
+    "e10r4": {
+      "label": "First data analysis · Epsilon",
+      "gx": 10,
+      "gy": 4
+    },
+    "e10r5": {
+      "label": "First data analysis · Zeta",
+      "gx": 10,
+      "gy": 5
+    },
+    "e11r0": {
+      "label": "Year-end review · Alpha",
+      "gx": 11,
+      "gy": 0
+    },
+    "e11r1": {
+      "label": "Year-end review · Beta",
+      "gx": 11,
+      "gy": 1
+    },
+    "e11r2": {
+      "label": "Year-end review · Gamma",
+      "gx": 11,
+      "gy": 2
+    },
+    "e11r3": {
+      "label": "Year-end review · Delta",
+      "gx": 11,
+      "gy": 3
+    },
+    "e11r4": {
+      "label": "Year-end review · Epsilon",
+      "gx": 11,
+      "gy": 4
+    },
+    "e11r5": {
+      "label": "Year-end review · Zeta",
+      "gx": 11,
+      "gy": 5
+    }
+  },
+  "lines": [
+    {
+      "name": "Alpha team",
+      "color": "#e1251b",
+      "stations": [
+        "e0r0",
+        "e1r0",
+        "e2r0",
+        "e3r0",
+        "e4r0",
+        "e6r0",
+        "e7r0",
+        "e8r0",
+        "e10r0",
+        "e11r0"
+      ]
+    },
+    {
+      "name": "Beta team",
+      "color": "#ee7c0e",
+      "stations": [
+        "e0r1",
+        "e1r1",
+        "e2r1",
+        "e3r1",
+        "e4r1",
+        "e5r1",
+        "e6r1",
+        "e7r1",
+        "e8r1",
+        "e9r1",
+        "e10r1",
+        "e11r1"
+      ]
+    },
+    {
+      "name": "Gamma team",
+      "color": "#c8a415",
+      "stations": [
+        "e0r2",
+        "e1r2",
+        "e2r2",
+        "e3r2",
+        "e4r2",
+        "e5r2",
+        "e6r2",
+        "e7r2",
+        "e8r2",
+        "e9r2",
+        "e10r2",
+        "e11r2"
+      ]
+    },
+    {
+      "name": "Delta team",
+      "color": "#007d32",
+      "stations": [
+        "e0r3",
+        "e1r3",
+        "e2r3",
+        "e3r3",
+        "e4r3",
+        "e6r3",
+        "e7r3",
+        "e8r3",
+        "e9r3",
+        "e10r3",
+        "e11r3"
+      ]
+    },
+    {
+      "name": "Epsilon team",
+      "color": "#8d5b2d",
+      "stations": [
+        "e0r4",
+        "e1r4",
+        "e2r4",
+        "e3r4",
+        "e6r4",
+        "e7r4",
+        "e10r4",
+        "e11r4"
+      ]
+    },
+    {
+      "name": "Zeta team",
+      "color": "#0098d4",
+      "stations": [
+        "e0r5",
+        "e1r5",
+        "e2r5",
+        "e3r5",
+        "e7r5",
+        "e10r5",
+        "e11r5"
+      ]
+    }
+  ],
+  "interchanges": [
+    {
+      "label": "Kick-off meeting",
+      "stations": [
+        "e0r0",
+        "e0r1",
+        "e0r2",
+        "e0r3",
+        "e0r4",
+        "e0r5"
+      ],
+      "label_at": "above",
+      "label_angle": 45
+    },
+    {
+      "label": "Implementation starts",
+      "stations": [
+        "e1r0",
+        "e1r1",
+        "e1r2",
+        "e1r3",
+        "e1r4",
+        "e1r5"
+      ],
+      "label_at": "above",
+      "label_angle": 45
+    },
+    {
+      "label": "Strategic plan review",
+      "stations": [
+        "e2r0",
+        "e2r1",
+        "e2r2",
+        "e2r3",
+        "e2r4",
+        "e2r5"
+      ],
+      "label_at": "above",
+      "label_angle": 45
+    },
+    {
+      "label": "Financials update",
+      "stations": [
+        "e3r0",
+        "e3r1",
+        "e3r2",
+        "e3r3",
+        "e3r4",
+        "e3r5"
+      ],
+      "label_at": "above",
+      "label_angle": 45
+    },
+    {
+      "label": "Long-term objectives",
+      "stations": [
+        "e4r0",
+        "e4r1",
+        "e4r2",
+        "e4r3"
+      ],
+      "label_at": "above",
+      "label_angle": 45
+    },
+    {
+      "label": "Committee meeting",
+      "stations": [
+        "e5r1",
+        "e5r2"
+      ],
+      "label_at": "above",
+      "label_angle": 45
+    },
+    {
+      "label": "On-demand analyses",
+      "stations": [
+        "e6r0",
+        "e6r1",
+        "e6r2",
+        "e6r3",
+        "e6r4"
+      ],
+      "label_at": "above",
+      "label_angle": 45
+    },
+    {
+      "label": "Second kick-off",
+      "stations": [
+        "e7r0",
+        "e7r1",
+        "e7r2",
+        "e7r3",
+        "e7r4",
+        "e7r5"
+      ],
+      "label_at": "above",
+      "label_angle": 45
+    },
+    {
+      "label": "Management update",
+      "stations": [
+        "e8r0",
+        "e8r1",
+        "e8r2",
+        "e8r3"
+      ],
+      "label_at": "above",
+      "label_angle": 45
+    },
+    {
+      "label": "Go to market",
+      "stations": [
+        "e9r1",
+        "e9r2",
+        "e9r3"
+      ],
+      "label_at": "above",
+      "label_angle": 45
+    },
+    {
+      "label": "First data analysis",
+      "stations": [
+        "e10r0",
+        "e10r1",
+        "e10r2",
+        "e10r3",
+        "e10r4",
+        "e10r5"
+      ],
+      "label_at": "above",
+      "label_angle": 45
+    },
+    {
+      "label": "Year-end review",
+      "stations": [
+        "e11r0",
+        "e11r1",
+        "e11r2",
+        "e11r3",
+        "e11r4",
+        "e11r5"
+      ],
+      "label_at": "above",
+      "label_angle": 45
+    }
+  ]
+}

@@ -391,3 +391,9 @@ body.side-hidden .side { display: none; }
 
 .ride-controls { display: flex; gap: 4px; margin-left: auto; margin-right: 8px; }
 .ride-controls button { padding: 3px 8px; font-size: 12px; }
+
+/* ---------------------------------------------------------- phase rows -- */
+
+.phase-row { display: flex; gap: 4px; align-items: center; }
+.phase-row input[type="text"] { flex: 1 1 auto; min-width: 0; }
+.phase-row input[type="date"] { flex: 0 0 auto; font-size: 11px; padding: 3px 4px; }
