@@ -400,3 +400,54 @@ body.side-hidden .side { display: none; }
 
 /* Three choices need room; two buttons fit a row but three can crowd. */
 #dialog-form .actions { flex-wrap: wrap; }
+
+/* ------------------------------------------------------- about, part 2 -- */
+
+.about-logo {
+  display: block;
+  margin: 0 auto 10px;
+  border-radius: 12px;
+  /* the logo carries its own near-white plate, so it needs one on a dark
+     ground too or it floats as a pale square with ragged edges */
+  background: #f5f6f7;
+  padding: 4px;
+}
+.about-foot {
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--edge);
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+  line-height: 1.7;
+}
+.about-foot a { color: var(--accent); text-decoration: none; }
+.about-foot a:hover { text-decoration: underline; }
+.about-log {
+  margin: 8px 0 0;
+  padding: 8px;
+  max-height: 150px;
+  overflow: auto;
+  background: var(--panel-2);
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  font: 11px/1.5 var(--mono);
+  white-space: pre-wrap;
+  color: var(--muted);
+}
+
+/* Restart is not destructive like Stop, but it does take the server away. */
+#btn-restart, button.warn-btn {
+  color: #b45309;
+  border-color: #f0a35e;
+}
+#btn-restart:hover:not(:disabled), button.warn-btn:hover:not(:disabled) {
+  border-color: #ee7c0e;
+  color: #ee7c0e;
+}
+:root[data-theme="dark"] #btn-restart,
+:root[data-theme="dark"] button.warn-btn { color: #f6a821; border-color: #8a5a1c; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) #btn-restart,
+  :root:not([data-theme="light"]) button.warn-btn { color: #f6a821; border-color: #8a5a1c; }
+}

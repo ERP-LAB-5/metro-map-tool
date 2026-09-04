@@ -29,6 +29,7 @@ import ipaddress
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import threading
@@ -206,6 +207,8 @@ def version_info():
         "offline": bool(found.get("error")),
         "repo": mm.REPO_URL,
         "releases": f"{mm.REPO_URL}/releases",
+        "install": install_kind(),
+        "coffee": "https://www.buymeacoffee.com/dlab5",
     })
 
 
@@ -476,6 +479,50 @@ def _reexec() -> None:
         pass
     os.execv(sys.executable,
              [sys.executable, "-m", "metro_map_tool.app", *sys.argv[1:]])
+
+
+def install_kind() -> str:
+    """How this copy was installed, which decides how it can be updated.
+
+    A checkout updates with git and has a working tree the user can see; an
+    installed copy lives in site-packages, where pip is the only sane way in.
+    """
+    parts = Path(mm.__file__).resolve().parts
+    return "installed" if any(
+        d in parts for d in ("site-packages", "dist-packages")) else "checkout"
+
+
+@app.post("/api/update")
+def update():
+    """Upgrade an installed copy in place. The caller restarts afterwards.
+
+    Deliberately not automatic: pip rewrites the files this process is running
+    from, so the new code only takes effect on a restart, and a restart into a
+    half-finished install is worse than staying put. The output comes back
+    whatever happens, because a failed upgrade is exactly when you want to read
+    what pip said.
+    """
+    only_local("update")
+    if install_kind() != "installed":
+        return jsonify({
+            "ok": False, "kind": "checkout",
+            "output": "This is a source checkout, not an installed package. "
+                      "Update it with:  git pull",
+        }), 400
+
+    want = latest_version().get("version")
+    target = f"{mm.REPO_URL}@v{want}" if want else f"{mm.REPO_URL}@main"
+    cmd = [sys.executable, "-m", "pip", "install", "--upgrade", f"git+{target}"]
+    try:
+        done = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return jsonify({"ok": False, "kind": "installed",
+                        "output": f"could not run pip: {exc}"}), 500
+
+    tail = (done.stdout + done.stderr).strip().splitlines()
+    return jsonify({"ok": done.returncode == 0, "kind": "installed",
+                    "target": target,
+                    "output": "\n".join(tail[-14:]) or "(pip said nothing)"})
 
 
 @app.post("/api/restart")

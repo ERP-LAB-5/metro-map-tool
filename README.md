@@ -1,6 +1,6 @@
 # metro-map-tool
 
-**v2.11.0** · MIT · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
+**v2.12.0** · MIT · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
 
 Transit-map diagrams for landscapes, pipelines and migrations: a JSON spec of
 **stations** on a grid, **lines** routed through them and **zones** banding
@@ -99,7 +99,11 @@ meeting again at the saved file. After that it reopens whatever you had last.
   step. Negative values close a gap. A checkbox moves the anchor station too, for
   when you mean "insert a column *here*" rather than "make room after this".
 - **About** (top bar) shows the installed version, checks github.com for a newer
-  one, and links to the repository. The check is a single request for a text
+  one, and links to the repository. On a pip or pipx install it can **update
+  itself**: it runs pip against the latest tag, shows you what pip said, and
+  restarts into the new version only if that succeeded. From a source checkout
+  it tells you to `git pull` instead, because pip cannot update what it did not
+  install. The check is a single request for a text
   file, sends nothing about you or your maps, is cached for six hours, and is
   skipped silently when there is no network — `--no-update-check` turns it off.
 - **☰** (top bar, or Ctrl+\) folds the side panel away for a wider canvas, and
@@ -125,14 +129,19 @@ meeting again at the saved file. After that it reopens whatever you had last.
 Any stop shared by two or more lines is drawn as a white interchange ring while
 the *interchanges* toggle is on.
 
+## Licence and credits
+
+MIT. © 2026 D-LAB-5 — *Twin. Experiment. Automate.*
+If it saves you an afternoon, [buy me a coffee](https://www.buymeacoffee.com/dlab5).
+
 ## Installing without a clone
 
 **A release tarball** — needs neither git nor pip. `curl` and `tar` both ship
 with Windows 10 and later, and with every Linux and macOS:
 
 ```bash
-curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.11.0.tar.gz | tar xz
-cd metro-map-tool-2.11.0
+curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.12.0.tar.gz | tar xz
+cd metro-map-tool-2.12.0
 ./run.sh                 # or run.cmd on Windows
 ```
 
@@ -140,7 +149,7 @@ cd metro-map-tool-2.11.0
 commands on your PATH in their own virtual environment:
 
 ```bash
-pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.11.0
+pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.12.0
 metro-map-designer                    # the browser designer
 metro-map spec.json -o map.svg        # the renderer
 metro-map-mcp                         # the MCP server, for agents

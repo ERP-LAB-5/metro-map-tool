@@ -1736,11 +1736,13 @@ function saveAsDialog() {
   });
 }
 
-/** Version, licence and where this came from. */
+/** Version, licence, where this came from, and how to move it forward. */
 async function aboutDialog() {
   const repo = "https://github.com/ERP-LAB-5/metro-map-tool";
   dialog("About metro map", `
     <div class="about">
+      <img class="about-logo" src="/static/dlab5.png" alt="D-LAB-5"
+           width="88" height="88">
       <p class="about-lead">A transit-map drawing tool: stations on a grid, lines
         routed through them, zones banding groups of them.</p>
       <dl class="about-grid">
@@ -1751,16 +1753,23 @@ async function aboutDialog() {
         <dt>Licence</dt><dd>MIT</dd>
       </dl>
       <p class="note" id="a-note"></p>
+      <pre class="about-log" id="a-log" hidden></pre>
+      <p class="about-foot">© 2026 D-LAB-5 — Twin. Experiment. Automate.<br>
+        <a href="https://www.buymeacoffee.com/dlab5" target="_blank"
+           rel="noopener noreferrer">☕ Buy me a coffee</a></p>
     </div>
-    <div class="actions"><button value="cancel" class="primary">Close</button></div>`);
+    <div class="actions">
+      <button type="button" id="a-update" hidden>Update and restart</button>
+      <button value="cancel" class="primary">Close</button>
+    </div>`);
 
   let info;
   try { info = await api("GET", "/api/version"); }
   catch (_) { info = null; }
   const installed = $("#a-installed");
+  if (!installed) return;                       // dialog closed while we asked
   const latest = $("#a-latest");
   const note = $("#a-note");
-  if (!installed) return;                       // dialog closed while we asked
 
   if (!info) {
     installed.textContent = "unknown";
@@ -1777,12 +1786,48 @@ async function aboutDialog() {
     note.textContent = "Could not reach github.com — offline, or behind a proxy.";
   } else if (info.update_available) {
     latest.innerHTML = `<strong>${esc(info.latest)}</strong> — `
-      + `<a href="${esc(info.releases)}" target="_blank" rel="noopener noreferrer">update available</a>`;
-    note.textContent = `You are on ${info.installed}.`;
+      + `<a href="${esc(info.releases)}" target="_blank" rel="noopener noreferrer">release notes</a>`;
+    // pip can only upgrade what pip installed; a checkout is git's business
+    if (info.install === "installed") {
+      note.textContent = `You are on ${info.installed}. Updating runs pip, then restarts.`;
+      const btn = $("#a-update");
+      btn.hidden = false;
+      btn.className = "warn-btn";
+      btn.addEventListener("click", () => runUpdate(btn));
+    } else {
+      note.textContent = `You are on ${info.installed}, running from a checkout — `
+        + "update it with git pull, then press Restart.";
+    }
   } else {
     latest.textContent = info.latest;
     note.textContent = "Up to date.";
   }
+}
+
+/** Ask the server to pip-upgrade itself, then offer the restart that lands it. */
+async function runUpdate(btn) {
+  const note = $("#a-note");
+  const log = $("#a-log");
+  btn.disabled = true;
+  btn.textContent = "Updating…";
+  note.textContent = "Running pip. This can take a minute.";
+  let out;
+  try { out = await api("POST", "/api/update"); }
+  catch (err) { out = (err.data && err.data.output) ? err.data : { ok: false, output: err.errors.join("\n") }; }
+  if (log) {
+    log.hidden = false;
+    log.textContent = out.output || "";
+  }
+  if (!out.ok) {
+    btn.disabled = false;
+    btn.textContent = "Try again";
+    note.textContent = "The update did not go through — nothing has changed.";
+    return;
+  }
+  // the files are new; only a restart is running them
+  note.textContent = "Updated. Restarting to run the new version.";
+  btn.textContent = "Restarting…";
+  restartTheServer();
 }
 
 /** Start over: an empty grid, unnamed until it is saved. */
