@@ -120,7 +120,13 @@ def build(items: List[dict], groups: List[dict], *, source: str,
             stations[it["id"]] = {
                 "label": label, "gx": place, "gy": row,
                 "label_at": "above" if row % 2 == 0 else "below",
-                "origin": it["origin"]}
+                "origin": it["origin"],
+                # The date is the fact; gx is a drawing of it, and the two are
+                # deliberately different numbers — items due the same week are
+                # nudged apart so both labels can be read. Reading a date back
+                # out of gx would turn that nudge into a real change of date,
+                # so the date is kept as itself.
+                "date": it["date"]}
             routes[name].append((place, it["id"]))
 
     # A release is a moment, not a set of things: what makes it worth drawing is

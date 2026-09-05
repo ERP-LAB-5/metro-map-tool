@@ -478,3 +478,16 @@ body.side-hidden .side { display: none; }
 .strands button { font-size: 12px; padding: 4px 9px; }
 .strands button.is-on { background: var(--accent, #0098d4); color: #fff; border-color: transparent; }
 .pick .junction-pick { border-style: dashed; }
+
+/* The discovery browser: columns you walk left to right, like a file picker. */
+.browse { display: flex; gap: 8px; overflow-x: auto; margin: 8px 0;
+          border: 1px solid var(--edge); border-radius: 8px; padding: 6px; }
+.browse-col { min-width: 190px; max-width: 260px; max-height: 320px;
+              overflow-y: auto; border-right: 1px solid var(--edge);
+              padding-right: 6px; }
+.browse-col:last-child { border-right: none; }
+.browse-row { display: flex; align-items: center; gap: 6px; padding: 4px 6px;
+              border-radius: 6px; cursor: pointer; font-size: 13px; }
+.browse-row:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.browse-row.is-on { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.browse-row .grow { display: flex; flex-direction: column; line-height: 1.25; }

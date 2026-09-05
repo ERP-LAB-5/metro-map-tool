@@ -231,12 +231,39 @@ def list_sources() -> dict:
 
 
 @server.tool()
+def browse_source(source: str, path: str = "", view: str = "") -> dict:
+    """Look at what is in an external system before importing any of it.
+
+    Returns the children of one level, so walk down rather than asking for
+    everything: `path` is the ids so far joined by "/", empty for the top,
+    which for Jira is the list of projects. `view` picks a spine when a source
+    has more than one — list_sources() names them; Jira offers "hierarchy"
+    (project, epic set, epic, issue) and "boards" (project, board, sprint).
+
+    Each node's id is what import_map's `select` option takes, so the way to
+    import part of a project is to browse to the pieces and pass their ids.
+    """
+    ensure_designer()
+    from urllib.parse import urlencode
+    query = urlencode({k: v for k, v in
+                       (("path", path), ("view", view)) if v})
+    return call("GET", f"/api/browse/{source}" + (f"?{query}" if query else ""))
+
+
+@server.tool()
 def import_map(source: str, options: dict, into: str = "",
                folder: str = "") -> dict:
     """Build a map spec from an external system — git history, GitHub, Jira.
 
     `source` is a name from list_sources(); `options` is that source's options
     as a flat object, e.g. {"repo": "owner/name", "label_prefix": "area:"}.
+    Pass `select` — a list of ids from browse_source — to import part of a
+    project rather than all of it.
+
+    Credentials are the designer's business, not yours: they come from that
+    machine's environment or its settings file. Never ask a human to paste a
+    token to you, and if a source reports itself unconfigured, say so and point
+    them at Settings in the designer.
 
     Nothing is saved: the spec comes back for you to look at and adjust, and you
     save it with save_map when it is right.

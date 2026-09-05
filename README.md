@@ -1,6 +1,6 @@
 # metro-map-tool
 
-**v2.18.1** · GPL-3.0 · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
+**v3.1.0** · GPL-3.0 · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
 
 Transit-map diagrams for landscapes, pipelines and migrations: a JSON spec of
 **stations** on a grid, **lines** routed through them and **zones** banding
@@ -153,8 +153,8 @@ If it saves you an afternoon, [buy me a coffee](https://www.buymeacoffee.com/dla
 with Windows 10 and later, and with every Linux and macOS:
 
 ```bash
-curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v2.18.1.tar.gz | tar xz
-cd metro-map-tool-2.18.1
+curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v3.1.0.tar.gz | tar xz
+cd metro-map-tool-3.1.0
 ./run.sh                 # or run.cmd on Windows
 ```
 
@@ -162,7 +162,7 @@ cd metro-map-tool-2.18.1
 commands on your PATH in their own virtual environment:
 
 ```bash
-pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v2.18.1
+pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v3.1.0
 metro-map-designer                    # the browser designer
 metro-map spec.json -o map.svg        # the renderer
 metro-map-mcp                         # the MCP server, for agents
@@ -184,7 +184,7 @@ into the new version only if the install actually succeeded.
 
 ```bash
 # name the new tag — the dependable form
-pip install --upgrade git+https://github.com/ERP-LAB-5/metro-map-tool@v2.18.1
+pip install --upgrade git+https://github.com/ERP-LAB-5/metro-map-tool@v3.1.0
 
 # or drop the tag to track the default branch and always get the newest
 pip install --upgrade git+https://github.com/ERP-LAB-5/metro-map-tool
@@ -198,7 +198,7 @@ With pipx, `pipx upgrade` re-runs whatever spec you first installed and has the
 same pinned-tag problem, so name the tag and force it:
 
 ```bash
-pipx install --force git+https://github.com/ERP-LAB-5/metro-map-tool@v2.18.1
+pipx install --force git+https://github.com/ERP-LAB-5/metro-map-tool@v3.1.0
 ```
 
 **After any update**, if you use the agent skill, refresh your copy — it is a
@@ -279,11 +279,50 @@ Or **Import…** in the designer, which asks the same questions as a form.
 | a sprint | a **band** behind the map |
 | an epic where nothing has started | the line drawn as **planned** |
 
-Credentials come from the environment and nowhere else — `GITHUB_TOKEN`, or
-`JIRA_BASE_URL` / `JIRA_EMAIL` / `JIRA_API_TOKEN`. There is no field to type a
-token into and no file to put one in, so a token cannot end up in a map you
-share. `metro-map --from NAME --describe` says which variables a source wants
-and whether they are set.
+### Connecting
+
+**Settings** in the designer is the shortest way: pick the importer, fill in the
+boxes, press **Test connection**. It saves to a file only you can read
+(`~/.config/metro-map/jira.conf`, mode `0600`), and a secret is never sent back
+to the page once saved.
+
+Environment variables still work and still win, so CI and one-off overrides are
+unchanged — `GITHUB_TOKEN`, or `JIRA_BASE_URL` / `JIRA_EMAIL` /
+`JIRA_API_TOKEN`. Already keeping those in a config file elsewhere? Point
+`METRO_MAP_JIRA_CONFIG` at it; the format is the usual `[jira]` ini section.
+
+A credential is never an option, so it cannot reach a map, an API response or
+an error message. `metro-map --from NAME --describe` says what a source wants
+and whether it is set.
+
+### Browsing before importing
+
+Importing used to need three things you could only get from somewhere else: the
+project key, a JQL query, and the number of the custom field holding sprints.
+Now you browse to them — **Import… → Browse**, starting at the project:
+
+| view | what you walk down |
+|---|---|
+| By hierarchy | project → epic set → epic → issue |
+| By board | project → board → sprint → issue |
+
+Tick what you want and import it. The same selection works on the command line,
+because the browser only fills in an ordinary option:
+
+```bash
+metro-map --from jira --opt project=ACME --opt select=ACME-831,ACME-902
+```
+
+And you no longer have to know your instance's field numbers: the plugin asks
+Jira which fields are called Sprint, Start date and Epic Link, and remembers
+the answer. `--opt sprint_field=` still overrides it.
+
+An issue with no due date but a quarter label like `FY25Q1` is placed in that
+quarter rather than left out — `--opt quarter_labels=false` turns that off.
+
+**Jira is read-only.** The client refuses anything but `GET` and says so.
+Changing tickets from a map is a separate feature with its own confirmation,
+and it is not built yet.
 
 ### Re-syncing keeps what you did
 

@@ -47,7 +47,8 @@ metro-map-mcp = "metro_map_tool.mcp_server:main"
 metro-map-skill = "metro_map_tool.skill_install:main"
 
 [tool.setuptools]
-packages = ["metro_map_tool", "metro_map_tool.sources"]
+packages = ["metro_map_tool", "metro_map_tool.sources",
+            "metro_map_tool.sources.jira"]
 
 # Flask resolves templates/ and static/ relative to app.py, and app.py resolves
 # shared-maps/ the same way, so all three have to be installed beside it — and

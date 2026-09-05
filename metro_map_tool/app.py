@@ -502,6 +502,134 @@ def import_map():
                     "errors": mm.validate_spec(spec)})
 
 
+@app.get("/api/settings/<name>")
+def get_settings(name):
+    """What a source needs, and which of it is already set.
+
+    Never a value. A secret that has been saved reports only that it is saved,
+    because there is no reason for a token to travel back to a browser and
+    every reason for it not to.
+    """
+    from . import sources as S
+    only_local("settings")
+    try:
+        src = S.get(name)
+    except S.SourceError as exc:
+        abort(404, str(exc))
+    return jsonify({"source": src.name, "title": src.title,
+                    "fields": S.env_status(src),
+                    "path": str(S.config_path(src.name))})
+
+
+@app.put("/api/settings/<name>")
+def put_settings(name):
+    """Save a source's settings to its own config file, mode 0600.
+
+    This is the one place a credential is typed, and it goes browser -> local
+    server -> a file only this account can read. A field left out is left
+    alone; a field sent empty is cleared — so "" means "forget this", and
+    absent means "keep whatever is there".
+    """
+    from . import sources as S
+    only_local("settings")
+    try:
+        src = S.get(name)
+    except S.SourceError as exc:
+        abort(404, str(exc))
+
+    given = body().get("values")
+    if not isinstance(given, dict):
+        abort(400, "values must be an object of setting name to value")
+    allowed = {item.config_key(src.name) for item in src.env}
+    unknown = sorted(set(given) - allowed)
+    if unknown:
+        abort(400, f"{src.name} has no setting called " + ", ".join(unknown))
+
+    path = S.write_config(src.name, {k: str(v) for k, v in given.items()})
+    return jsonify({"saved": True, "path": str(path),
+                    "fields": S.env_status(src)})
+
+
+@app.post("/api/settings/<name>/test")
+def test_settings(name):
+    """One cheap authenticated call, to say whether the settings actually work.
+
+    Worth its own endpoint: "is this token right" is the question somebody has
+    the moment they paste one, and the alternative is finding out through a
+    failed import that looks like a different problem.
+    """
+    from . import sources as S
+    only_local("settings")
+    try:
+        src = S.get(name)
+    except S.SourceError as exc:
+        abort(404, str(exc))
+    check = getattr(src, "check", None) or _source_check(src)
+    if check is None:
+        return jsonify({"ok": False, "said": f"{src.name} has nothing to test"})
+    try:
+        return jsonify({"ok": True, "said": check()})
+    except S.SourceError as exc:
+        return jsonify({"ok": False, "said": str(exc)})
+    except OSError as exc:
+        return jsonify({"ok": False, "said": str(exc)})
+
+
+def _source_check(src):
+    """A connection test for a source that has one, or None.
+
+    Looked up rather than declared on Source, because only the sources that
+    reach a network need it and adding a field every plugin must think about
+    to serve two of them is the wrong trade.
+    """
+    if src.name != "jira":
+        return None
+    from . import sources as S
+    from .sources.jira import client as jira_client
+
+    def check():
+        conn = jira_client.connect(S.credentials(src))
+        me = conn.myself()
+        projects = conn.projects(limit=50)
+        who = me.get("displayName") or me.get("emailAddress") or "you"
+        return (f"connected to {conn.site} as {who} — "
+                f"{len(projects)} project(s) visible")
+    return check
+
+
+@app.get("/api/browse/<name>")
+def browse_source(name):
+    """The children of one path in a source's discovery tree.
+
+    One level per request on purpose: a project with four thousand issues must
+    not be fetched to draw three rows.
+    """
+    from . import sources as S
+    only_local("browsing a source")
+    try:
+        src = S.get(name)
+    except S.SourceError as exc:
+        abort(404, str(exc))
+    if src.browse is None:
+        abort(400, f"{src.name} has nothing to browse")
+
+    path = [p for p in (request.args.get("path") or "").split("/") if p]
+    view = request.args.get("view") or (src.views[0].name if src.views else "")
+    opts, errors = S.coerce(src, {k: v for k, v in request.args.items()
+                                  if k not in ("path", "view")
+                                  and src.option(k) is not None})
+    if errors:
+        return jsonify({"errors": errors}), 400
+    try:
+        nodes = src.browse(path, opts, view)
+    except S.SourceError as exc:
+        return jsonify({"errors": [str(exc)]}), 400
+    except OSError as exc:
+        return jsonify({"errors": [f"{src.name}: {exc}"]}), 400
+    return jsonify({"path": path, "view": view,
+                    "nodes": [n.as_json() for n in nodes]})
+
+
 @app.get("/api/defaults")
 def defaults():
     return jsonify({"style": mm.style_to_dict(mm.Style()),

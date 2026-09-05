@@ -221,10 +221,17 @@ what changed upstream comes in, and the layout, colours and wording already in
 the map survive. Prefer that to importing again — a fresh import throws away
 everything anyone arranged.
 
-Two rules worth carrying: something that vanished upstream is kept and reported
-rather than deleted (`prune` is how you actually remove it), and credentials
-live only in the server's environment, so never ask a human to paste a token to
-you and never put one in a spec.
+**Browse before you import.** `browse_source` walks one level at a time —
+Jira starts at the project and goes down either the hierarchy (epic set, epic,
+issue) or the boards (board, sprint, issue). Pass the ids you want as
+`select`, rather than importing a whole project and discarding most of it.
+
+Three rules worth carrying: something that vanished upstream is kept and
+reported rather than deleted (`prune` is how you actually remove it);
+credentials belong to the machine running the designer, so **never ask a human
+to paste a token to you** — if a source is unconfigured, say so and point them
+at Settings; and Jira is read-only, so a request to "update the ticket" is a
+thing to decline and explain, not to attempt.
 
 ## Working through MCP
 
@@ -241,6 +248,7 @@ The `metro-map` server (`.mcp.json` in the repo) starts the designer on demand.
 | `spec_reference` | palette, label sides and angles, line states, modes, intervals, legend positions, style defaults |
 | `designer_url` | hand the human a link to take over in the browser |
 | `list_sources` | the importers available, their options, and which credentials each needs |
+| `browse_source(source, path="", view="")` | look before importing — one level at a time; node ids feed `import_map`'s `select` |
 | `import_map(source, options, into="")` | build a spec from git, GitHub or Jira; `into` re-syncs a map instead of starting over |
 | `stop_designer` | shut the local server down |
 

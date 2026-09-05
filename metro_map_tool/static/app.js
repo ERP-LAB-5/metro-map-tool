@@ -2047,13 +2047,108 @@ function renderStyle() {
 
 /* ------------------------------------------------------------- dialogs -- */
 
+/* ------------------------------------------------------------ settings -- */
+
+/** Connect an importer: the one place a credential is ever typed. */
+async function settingsDialog(only) {
+  let info;
+  try { info = await api("GET", "/api/sources"); }
+  catch (err) { showProblems(err.errors); return; }
+  const wanting = info.sources.filter((s) => (s.env || []).length);
+  if (!wanting.length) {
+    showProblems([], ["No importer needs credentials."]);
+    return;
+  }
+  let chosen = only && wanting.some((s) => s.name === only)
+    ? only : wanting[0].name;
+  let state = null;
+
+  const load = async () => { state = await api("GET", `/api/settings/${chosen}`); };
+  try { await load(); } catch (err) { showProblems(err.errors); return; }
+
+  const body = () => `
+    <label class="field"><span>Importer</span>
+      <select id="set-source">${wanting.map((s) =>
+        `<option value="${esc(s.name)}" ${s.name === chosen ? "selected" : ""}
+         >${esc(s.title)}</option>`).join("")}</select></label>
+    ${state.fields.map((f) => `
+      <label class="field" title="${esc(f.help)}">
+        <span>${esc(f.key)}${f.required ? " *" : ""}</span>
+        <input type="${f.secret ? "password" : "text"}" data-set="${esc(f.key)}"
+               placeholder="${esc(f.secret && f.present
+                 ? "•••••••• saved — type to replace"
+                 : (f.placeholder || f.help))}"
+               autocomplete="off" spellcheck="false"
+               value="${esc(f.secret ? "" : (f.present && f.from === "settings" ? "" : ""))}">
+        <span class="note">${f.present
+          ? `set from ${esc(f.from)}${f.from === "environment"
+              ? " — the environment wins, so this box will not change it" : ""}`
+          : "not set"}</span>
+      </label>`).join("")}
+    <p class="note">Saved to <code>${esc(state.path)}</code>, readable only by
+      you. A secret is never sent back to this page, and never reaches a map.</p>
+    <p class="note" id="set-said"></p>
+    <div class="actions">
+      <button value="cancel">Close</button>
+      <button type="button" id="set-test">Test connection</button>
+      <button type="button" class="primary" id="set-save">Save</button>
+    </div>`;
+
+  dialog("Settings", body(), (form, dlg) => {
+    const wire = () => {
+      form.querySelector("#set-source").addEventListener("change", async (ev) => {
+        chosen = ev.target.value;
+        try { await load(); } catch (err) { showProblems(err.errors); return; }
+        form.innerHTML = `<h2>Settings</h2>${body()}`;
+        wire();
+      });
+      const said = form.querySelector("#set-said");
+      const collect = () => {
+        const values = {};
+        form.querySelectorAll("[data-set]").forEach((el) => {
+          // an untouched box means "leave it alone", not "clear it" — otherwise
+          // opening Settings and pressing Save would wipe a saved token
+          if (el.value !== "") values[el.dataset.set] = el.value;
+        });
+        return values;
+      };
+      form.querySelector("#set-save").addEventListener("click", async () => {
+        const values = collect();
+        if (!Object.keys(values).length) { said.textContent = "Nothing to save."; return; }
+        said.textContent = "Saving…";
+        try { state = await api("PUT", `/api/settings/${chosen}`, { values }); }
+        catch (err) { said.textContent = (err.errors || ["could not save"])[0]; return; }
+        form.innerHTML = `<h2>Settings</h2>${body()}`;
+        wire();
+        form.querySelector("#set-said").textContent = "Saved.";
+      });
+      form.querySelector("#set-test").addEventListener("click", async () => {
+        said.textContent = "Testing…";
+        let res;
+        try { res = await api("POST", `/api/settings/${chosen}/test`); }
+        catch (err) { said.textContent = (err.errors || ["could not test"])[0]; return; }
+        said.textContent = (res.ok ? "✓ " : "! ") + res.said;
+      });
+    };
+    wire();
+  });
+}
+
 /* -------------------------------------------------------------- import -- */
 
 /** One form field for one declared source option, chosen by its kind. */
-function optField(o) {
+/** A field's starting value: what the browser picked, else its declared default. */
+function optValue(o, filled) {
+  if (filled && filled[o.name] !== undefined && filled[o.name] !== "") {
+    return filled[o.name];
+  }
+  return o.default === null || o.default === undefined ? "" : String(o.default);
+}
+
+function optField(o, filled) {
   const id = `imp-${o.name}`;
   const common = `id="${id}" data-opt="${esc(o.name)}"`;
-  const value = o.default === null || o.default === undefined ? "" : String(o.default);
+  const value = optValue(o, filled);
   if (o.kind === "bool") {
     return `<label class="field"><span>${esc(o.name)}</span>
       <span class="note"><input type="checkbox" ${common} ${o.default ? "checked" : ""}>
@@ -2072,13 +2167,117 @@ function optField(o) {
            placeholder="${esc(o.placeholder || "")}"></label>`;
 }
 
-async function importDialog() {
+/** Walk a source's tree and tick what to import. */
+async function browseDialog(src, onPicked) {
+  const view = { name: (src.views[0] || {}).name || "" };
+  const columns = [];                 // [{path, nodes}] — one per level opened
+  const picked = new Map();           // id -> label, in the order ticked
+
+  const fetchLevel = async (path) => {
+    const q = new URLSearchParams({ path: path.join("/"), view: view.name });
+    return api("GET", `/api/browse/${src.name}?${q}`);
+  };
+
+  const body = () => `
+    ${src.views.length > 1 ? `<div class="strands" id="brw-views">
+      ${src.views.map((v) => `<button type="button" data-view="${esc(v.name)}"
+        class="${v.name === view.name ? "is-on" : ""}"
+        title="${esc(v.help || "")}">${esc(v.title)}</button>`).join("")}
+    </div>` : ""}
+    <div class="browse" id="brw-cols">
+      ${columns.map((col, depth) => `
+        <div class="browse-col" data-depth="${depth}">
+          ${col.nodes.length ? col.nodes.map((n) => `
+            <div class="browse-row ${picked.has(n.id) ? "is-on" : ""}"
+                 data-node="${esc(n.id)}" data-depth="${depth}">
+              ${n.selectable ? `<input type="checkbox" data-pick="${esc(n.id)}"
+                 ${picked.has(n.id) ? "checked" : ""}>` : ""}
+              <span class="grow">${esc(n.label)}
+                ${n.hint ? `<span class="id">${esc(n.hint)}</span>` : ""}</span>
+              ${n.expandable ? `<span class="caret">▸</span>` : ""}
+            </div>`).join("")
+            : `<p class="note">Nothing here.</p>`}
+        </div>`).join("")}
+    </div>
+    <p class="note" id="brw-said">${picked.size
+      ? `${picked.size} selected — ${[...picked.values()].slice(0, 3).map(esc).join(", ")}${picked.size > 3 ? "…" : ""}`
+      : "Pick a project, then tick what to import. Nothing ticked imports everything in the project."}</p>
+    <div class="actions">
+      <button value="cancel">Cancel</button>
+      <button type="button" class="primary" id="brw-go">Import</button>
+    </div>`;
+
+  let redraw = () => {};
+  const open = async (path, depth) => {
+    const said = document.querySelector("#brw-said");
+    if (said) said.textContent = "Loading…";
+    let res;
+    try { res = await fetchLevel(path); }
+    catch (err) { showProblems(err.errors); return; }
+    columns.length = depth;
+    columns.push({ path, nodes: res.nodes });
+    redraw();
+  };
+
+  dialog(`Browse ${src.title}`, body(), (form, dlg) => {
+    redraw = () => {
+      form.innerHTML = `<h2>Browse ${esc(src.title)}</h2>${body()}`;
+      wire();
+    };
+    const wire = () => {
+      form.querySelectorAll("[data-view]").forEach((b) =>
+        b.addEventListener("click", async () => {
+          view.name = b.dataset.view;
+          columns.length = 0;
+          picked.clear();
+          await open([], 0);
+        }));
+      form.querySelectorAll("[data-node]").forEach((row) =>
+        row.addEventListener("click", async (ev) => {
+          if (ev.target.matches("[data-pick]")) return;   // ticking is not opening
+          const depth = Number(row.dataset.depth);
+          const path = columns[depth].path.concat(row.dataset.node);
+          await open(path, depth + 1);
+        }));
+      form.querySelectorAll("[data-pick]").forEach((box) =>
+        box.addEventListener("change", () => {
+          const id = box.dataset.pick;
+          if (box.checked) {
+            // the node's own label, not the row's text — the row also carries
+            // the hint, and "Cutover In Progress · due 2026-03-31" is not a name
+            const depth = Number(box.closest(".browse-row").dataset.depth);
+            const node = (columns[depth].nodes || []).find((n) => n.id === id);
+            picked.set(id, (node && node.label) || id);
+          } else {
+            picked.delete(id);
+          }
+          const said = form.querySelector("#brw-said");
+          said.textContent = picked.size
+            ? `${picked.size} selected — ${[...picked.values()].slice(0, 3).join(", ")}${picked.size > 3 ? "…" : ""}`
+            : "Nothing ticked imports everything in the project.";
+          box.closest(".browse-row").classList.toggle("is-on", box.checked);
+        }));
+      form.querySelector("#brw-go").addEventListener("click", () => {
+        // the first column is projects, so whatever is open there is the scope
+        const project = (columns[0] || {}).path !== undefined && columns[1]
+          ? columns[1].path[0] : "";
+        dlg.close();
+        onPicked({ project, select: [...picked.keys()] });
+      });
+    };
+    wire();
+    open([], 0);
+  });
+}
+
+async function importDialog(want, filled) {
   let info;
   try { info = await api("GET", "/api/sources"); }
   catch (err) { showProblems(err.errors); return; }
   // fetched now rather than at boot: whether a credential is set can change
   // while the designer is running, and a stale "not set" reads as a bug
-  let chosen = info.sources.length ? info.sources[0].name : "";
+  let chosen = info.sources.some((s) => s.name === want)
+    ? want : (info.sources.length ? info.sources[0].name : "");
 
   const body = () => {
     const src = info.sources.find((s) => s.name === chosen) || {};
@@ -2092,9 +2291,14 @@ async function importDialog() {
            >${esc(s.title)}</option>`).join("")}</select></label>
       <p class="note">${esc(src.summary || "")}</p>
       ${(src.env || []).map((e) => `<p class="note">${e.present ? "✓" : "!"}
-        <code>${esc(e.name)}</code> — ${e.present ? "set"
-          : `not set. ${esc(e.help)}. Export it and restart the designer.`}</p>`).join("")}
-      ${opts.map(optField).join("")}
+        <code>${esc(e.name)}</code> — ${e.present ? `set from ${esc(e.from || "settings")}`
+          : `not set. ${esc(e.help)}`}</p>`).join("")}
+      ${missing.length ? `<p class="warn">Not connected yet —
+        <button type="button" id="imp-settings" class="ghost">open Settings</button></p>` : ""}
+      ${src.browsable && !missing.length ? `<p class="note">
+        <button type="button" id="imp-browse" class="ghost">Browse ${esc(src.title)}…</button>
+        — pick a project and tick what you want, instead of typing keys.</p>` : ""}
+      ${opts.map((o) => optField(o, filled)).join("")}
       ${S.name ? `<label class="field"><span>
         <input type="checkbox" id="imp-into" ${(S.spec.source || {}).name === chosen ? "checked" : ""}>
         Re-sync into “${esc(S.name)}”</span>
@@ -2113,6 +2317,23 @@ async function importDialog() {
         chosen = ev.target.value;
         form.innerHTML = `<h2>Import a plan</h2>${body()}`;
         wire();
+      });
+      const openSettings = form.querySelector("#imp-settings");
+      if (openSettings) openSettings.addEventListener("click", () => {
+        document.querySelector("#dialog").close();
+        settingsDialog(chosen);
+      });
+      const openBrowse = form.querySelector("#imp-browse");
+      if (openBrowse) openBrowse.addEventListener("click", () => {
+        const src = info.sources.find((s) => s.name === chosen);
+        document.querySelector("#dialog").close();
+        browseDialog(src, (choice) => {
+          // straight back to the *same* source's form with the choice filled
+          // in, so what the browser picked is visible and editable rather than
+          // hidden — and so a Jira selection cannot land on git's form
+          importDialog(src.name, {project: choice.project,
+                                  select: choice.select.join(",")});
+        });
       });
       form.querySelector("#imp-go").addEventListener("click", async () => {
         const options = {};
@@ -2801,6 +3022,7 @@ async function boot() {
   $("#btn-add-station").addEventListener("click", addStation);
   $("#btn-add-junction").addEventListener("click", addJunction);
   $("#btn-import").addEventListener("click", importDialog);
+  $("#btn-settings").addEventListener("click", () => settingsDialog());
   $("#btn-add-line").addEventListener("click", addLine);
   $("#btn-add-zone").addEventListener("click", addZone);
   $("#btn-add-scenario").addEventListener("click", addScenario);

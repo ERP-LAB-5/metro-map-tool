@@ -55,15 +55,59 @@ class Option:
 
 @dataclasses.dataclass(frozen=True)
 class EnvVar:
-    """A credential a source reads from the environment.
+    """A credential a source needs, wherever it is kept.
 
     Not an Option, and that is the whole security design: an option's value
     travels through argparse, an HTTP body and a saved spec, and a token must
     travel through none of those.
+
+    The environment variable and the line in the config file are two views of
+    one declaration, so a source says what it needs once and both ways of
+    supplying it follow.
     """
-    name: str
+    name: str                   # JIRA_API_TOKEN
     help: str
     required: bool = True
+    key: str = ""               # the key in the config file; defaults from name
+    secret: bool = False        # never echoed back to anyone, ever
+    placeholder: str = ""
+
+    def config_key(self, source: str) -> str:
+        if self.key:
+            return self.key
+        bare = self.name.lower()
+        prefix = f"{source.lower()}_"
+        return bare[len(prefix):] if bare.startswith(prefix) else bare
+
+
+@dataclasses.dataclass(frozen=True)
+class Node:
+    """One row in a source's discovery tree.
+
+    Deliberately shallow and generic: the designer renders these without
+    knowing what a Jira epic is, so a source that grows a browser gets a
+    working one the same way it already gets a form from its options.
+    """
+    id: str                     # opaque to the UI, meaningful to the source
+    label: str
+    kind: str = "item"          # project | epicset | epic | issue | board | sprint
+    hint: str = ""              # the secondary line: a status, a date, a count
+    expandable: bool = False
+    selectable: bool = True
+
+    def as_json(self) -> dict:
+        return dataclasses.asdict(self)
+
+
+@dataclasses.dataclass(frozen=True)
+class View:
+    """One way of walking a source's tree — the same data, a different spine."""
+    name: str
+    title: str
+    help: str = ""
+
+    def as_json(self) -> dict:
+        return dataclasses.asdict(self)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -87,6 +131,10 @@ class Source:
     # exception: a commit's position *is* its place in the history, so letting
     # an old one stay put would put it in the wrong order as history grows.
     refresh_default: Tuple[str, ...] = ()
+    # A source may let you look before you import. Both optional: one without
+    # them simply has no browser, and the dialog falls back to its form.
+    views: Tuple[View, ...] = ()
+    browse: Optional[Callable[[List[str], dict, str], List[Node]]] = None
 
     def option(self, name: str) -> Optional[Option]:
         for opt in self.all_options():
@@ -112,19 +160,142 @@ UNIVERSAL: Tuple[Option, ...] = (
     Option("refresh", "fields to re-take from upstream on an item that already "
                       "exists, e.g. label,gx — by default the import never "
                       "overwrites what you changed", kind="csv"),
+    Option("select", "the ids to import, as the browser would have picked them "
+                     "— leave empty to take everything in scope", kind="csv"),
 )
 
 
-def env_status(src: Source) -> List[dict]:
-    """Which credentials a source wants, and whether they are set.
+# ------------------------------------------------------------- settings --
+#
+# Credentials come from the environment, or from a small config file per source.
+# The environment wins, so a one-off override and CI keep working exactly as
+# they did when it was the only way.
 
-    Presence only. This is the one place in the package that reads the
-    environment, and it must never return a value: the answer travels to a
-    browser over HTTP.
+CONFIG_HOME = "METRO_MAP_CONFIG_HOME"
+
+
+def config_path(source: str) -> "Path":
+    """Where a source's settings live.
+
+    $METRO_MAP_<SOURCE>_CONFIG points at a specific file — which is how an
+    existing config.conf from somewhere else gets reused without copying a
+    token about. Otherwise it is one file per source under the config home,
+    because a plugin owning its own settings is what lets it be lifted out into
+    its own package later without dragging a shared file with it.
     """
-    import os                                   # local: the renderer never needs it
-    return [{"name": e.name, "help": e.help, "required": e.required,
-             "present": bool(os.environ.get(e.name))} for e in src.env]
+    import os
+    named = os.environ.get(f"METRO_MAP_{source.upper()}_CONFIG")
+    if named:
+        return Path(named).expanduser()
+    home = os.environ.get(CONFIG_HOME) or os.environ.get("XDG_CONFIG_HOME") \
+        or str(Path.home() / ".config")
+    return Path(home).expanduser() / "metro-map" / f"{source}.conf"
+
+
+def read_config(source: str) -> Dict[str, str]:
+    """A source's saved settings, or {} when there are none.
+
+    A broken file is treated as empty rather than raised: the tool still has
+    the environment to fall back on, and refusing to start because a config
+    file has a stray bracket in it helps nobody.
+    """
+    import configparser
+    path = config_path(source)
+    if not path.exists():
+        return {}
+    parser = configparser.ConfigParser()
+    try:
+        parser.read(path, encoding="utf-8")
+    except configparser.Error:
+        return {}
+    if not parser.has_section(source):
+        return {}
+    return {k: v for k, v in parser.items(source) if v != ""}
+
+
+def write_config(source: str, values: Dict[str, str]) -> "Path":
+    """Save settings, merged over whatever is already there.
+
+    Written 0600 from the moment it exists — created with that mode rather than
+    chmod'd afterwards, so there is no instant where a token sits in a
+    world-readable file. A value given as "" clears that key rather than
+    storing an empty one.
+    """
+    import configparser
+    import os
+    path = config_path(source)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(path.parent, 0o700)
+    except OSError:
+        pass                                    # a shared config home is the
+                                                # user's business, not ours
+    parser = configparser.ConfigParser()
+    if path.exists():
+        try:
+            parser.read(path, encoding="utf-8")
+        except configparser.Error:
+            parser = configparser.ConfigParser()
+    if not parser.has_section(source):
+        parser.add_section(source)
+    for key, value in values.items():
+        if value == "" or value is None:
+            parser.remove_option(source, key)
+        else:
+            parser.set(source, key, str(value))
+
+    tmp = path.with_name(path.name + ".part")
+    fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        parser.write(handle)
+    os.replace(tmp, path)
+    return path
+
+
+def credentials(src: Source) -> Dict[str, str]:
+    """Everything a source needs to authenticate, or a SourceError saying what
+    is missing and both of the places it could come from."""
+    import os
+    saved = read_config(src.name)
+    out: Dict[str, str] = {}
+    missing: List[str] = []
+    for item in src.env:
+        key = item.config_key(src.name)
+        value = (os.environ.get(item.name) or saved.get(key) or "").strip()
+        if value:
+            out[key] = value
+        elif item.required:
+            missing.append(item.name)
+    if missing:
+        where = config_path(src.name)
+        raise SourceError(
+            f"{src.name} is not configured — missing {', '.join(missing)}. "
+            f"Set them in the environment, or in {where}, or fill them in under "
+            "Settings in the designer.")
+    return out
+
+
+def env_status(src: Source) -> List[dict]:
+    """Which credentials a source wants, and whether each one is set.
+
+    Presence only, and where it came from — never the value. This answer
+    travels to a browser over HTTP, so there is nothing here that could be
+    worth intercepting.
+    """
+    import os
+    saved = read_config(src.name)
+    out = []
+    for item in src.env:
+        key = item.config_key(src.name)
+        in_env = bool(os.environ.get(item.name))
+        in_file = bool(saved.get(key))
+        out.append({"name": item.name, "key": key, "help": item.help,
+                    "required": item.required, "secret": item.secret,
+                    "placeholder": item.placeholder,
+                    "present": in_env or in_file,
+                    "from": "environment" if in_env
+                            else ("settings" if in_file else "")})
+    return out
 
 
 # Options that are this machine's business, not the map's: a saved spec that
@@ -334,4 +505,7 @@ def describe(src: Source) -> dict:
     """A source as JSON, for --sources, /api/sources and the MCP catalogue."""
     return {"name": src.name, "title": src.title, "summary": src.summary,
             "options": [o.as_json() for o in src.all_options()],
-            "env": env_status(src)}
+            "env": env_status(src),
+            "views": [v.as_json() for v in src.views],
+            "browsable": src.browse is not None,
+            "config_path": str(config_path(src.name))}
