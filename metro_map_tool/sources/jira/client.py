@@ -86,15 +86,27 @@ class Jira:
     def myself(self) -> dict:
         return self.get("/rest/api/3/myself")
 
-    def projects(self, limit: int = 100) -> List[dict]:
+    def projects(self, query: str = "", limit: int = 2000) -> List[dict]:
+        """Every project you can see, or the ones matching a search term.
+
+        Paged to the end rather than to a fixed number of pages: a corporate
+        Jira has hundreds of projects, and a list that quietly stops at a round
+        number is worse than no list — it looks complete.
+
+        `query` is Jira's own search, which matches a project's key or name and
+        narrows the result server-side. It is a substring match; anything more
+        particular is applied to what comes back.
+        """
         out: List[dict] = []
-        for start in range(0, limit, 50):
+        start = 0
+        for _ in range(http.MAX_PAGES):
             page = self.get("/rest/api/3/project/search",
                             {"startAt": start, "maxResults": 50,
-                             "orderBy": "key"})
+                             "orderBy": "key", "query": query or None})
             values = page.get("values") or []
             out.extend(values)
-            if page.get("isLast", True) or not values:
+            start += len(values)
+            if page.get("isLast", True) or not values or len(out) >= limit:
                 break
         return out[:limit]
 

@@ -615,18 +615,19 @@ def browse_source(name):
 
     path = [p for p in (request.args.get("path") or "").split("/") if p]
     view = request.args.get("view") or (src.views[0].name if src.views else "")
+    query = (request.args.get("q") or "").strip()
     opts, errors = S.coerce(src, {k: v for k, v in request.args.items()
-                                  if k not in ("path", "view")
+                                  if k not in ("path", "view", "q")
                                   and src.option(k) is not None})
     if errors:
         return jsonify({"errors": errors}), 400
     try:
-        nodes = src.browse(path, opts, view)
+        nodes = src.browse(path, opts, view, query)
     except S.SourceError as exc:
         return jsonify({"errors": [str(exc)]}), 400
     except OSError as exc:
         return jsonify({"errors": [f"{src.name}: {exc}"]}), 400
-    return jsonify({"path": path, "view": view,
+    return jsonify({"path": path, "view": view, "q": query,
                     "nodes": [n.as_json() for n in nodes]})
 
 

@@ -309,6 +309,12 @@ Now you browse to them — **Import… → Browse**, starting at the project:
 | By hierarchy | project → epic set → epic → issue |
 | By board | project → board → sprint → issue |
 
+There is a **filter** above the columns, which matters on a site with hundreds
+of projects: a few letters means "contains", and a pattern with `*` or `?` is
+taken literally, so `SAP*` is the projects whose key or name *starts* with SAP.
+The plain part of a pattern is handed to Jira so the list is narrowed before it
+is sent, not after.
+
 Tick what you want and import it. The same selection works on the command line,
 because the browser only fills in an ordinary option:
 

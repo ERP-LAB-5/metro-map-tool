@@ -231,7 +231,8 @@ def list_sources() -> dict:
 
 
 @server.tool()
-def browse_source(source: str, path: str = "", view: str = "") -> dict:
+def browse_source(source: str, path: str = "", view: str = "",
+                  query: str = "") -> dict:
     """Look at what is in an external system before importing any of it.
 
     Returns the children of one level, so walk down rather than asking for
@@ -240,13 +241,18 @@ def browse_source(source: str, path: str = "", view: str = "") -> dict:
     has more than one — list_sources() names them; Jira offers "hierarchy"
     (project, epic set, epic, issue) and "boards" (project, board, sprint).
 
+    `query` filters the level being looked at — a bare word means "contains",
+    and a pattern with * or ? is taken literally, so "SAP*" is the projects
+    whose key or name starts with SAP. Use it on a site with hundreds of
+    projects rather than reading the whole list.
+
     Each node's id is what import_map's `select` option takes, so the way to
     import part of a project is to browse to the pieces and pass their ids.
     """
     ensure_designer()
     from urllib.parse import urlencode
     query = urlencode({k: v for k, v in
-                       (("path", path), ("view", view)) if v})
+                       (("path", path), ("view", view), ("q", query)) if v})
     return call("GET", f"/api/browse/{source}" + (f"?{query}" if query else ""))
 
 

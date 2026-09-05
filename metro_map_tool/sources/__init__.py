@@ -140,7 +140,7 @@ class Source:
     # A source may let you look before you import. Both optional: one without
     # them simply has no browser, and the dialog falls back to its form.
     views: Tuple[View, ...] = ()
-    browse: Optional[Callable[[List[str], dict, str], List[Node]]] = None
+    browse: Optional[Callable[[List[str], dict, str, str], List[Node]]] = None
 
     def option(self, name: str) -> Optional[Option]:
         for opt in self.all_options():

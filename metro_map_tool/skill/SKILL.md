@@ -248,7 +248,7 @@ The `metro-map` server (`.mcp.json` in the repo) starts the designer on demand.
 | `spec_reference` | palette, label sides and angles, line states, modes, intervals, legend positions, style defaults |
 | `designer_url` | hand the human a link to take over in the browser |
 | `list_sources` | the importers available, their options, and which credentials each needs |
-| `browse_source(source, path="", view="")` | look before importing — one level at a time; node ids feed `import_map`'s `select` |
+| `browse_source(source, path="", view="", query="")` | look before importing — one level at a time; `query` narrows it (`SAP*`); node ids feed `import_map`'s `select` |
 | `import_map(source, options, into="")` | build a spec from git, GitHub or Jira; `into` re-syncs a map instead of starting over |
 | `stop_designer` | shut the local server down |
 

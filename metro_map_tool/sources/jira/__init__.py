@@ -211,8 +211,8 @@ def _phases(data: dict, opts: dict, found: dict) -> List[dict]:
     return [seen[k] for k in sorted(seen)]
 
 
-def _browse(path: List[str], opts: dict, view: str) -> List[Node]:
-    return browse_mod.browse(path, opts, view, creds=credentials(SOURCE))
+def _browse(path: List[str], opts: dict, view: str, query: str = "") -> List[Node]:
+    return browse_mod.browse(path, opts, view, query, creds=credentials(SOURCE))
 
 
 SOURCE = Source(

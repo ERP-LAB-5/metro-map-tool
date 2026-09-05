@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
+import fnmatch
+
 from .. import Node, View
 from . import client as jira_client
 
@@ -55,22 +57,56 @@ def _types(client, project: str) -> List[str]:
     return [t.get("name") or "" for t in (found.get("issueTypes") or [])]
 
 
-def browse(path: List[str], opts: dict, view: str, client=None,
-           creds: Optional[dict] = None) -> List[Node]:
-    """The children of a path. An empty path is the list of projects."""
+def matches(node: Node, pattern: str) -> bool:
+    """Whether a row survives a filter, against both its name and its id.
+
+    A bare word is taken as "contains", because that is what somebody typing
+    three letters into a box means. A pattern with * or ? in it is taken
+    literally, so "S*" is the projects starting with S and not the ones merely
+    containing one.
+    """
+    pattern = (pattern or "").strip().lower()
+    if not pattern:
+        return True
+    if "*" not in pattern and "?" not in pattern:
+        pattern = f"*{pattern}*"
+    return any(fnmatch.fnmatch((text or "").lower(), pattern)
+               for text in (node.label, node.id, node.hint))
+
+
+def _term(pattern: str) -> str:
+    """The longest plain run of a pattern, for asking the server to narrow first.
+
+    Jira's own search is a substring match, so "SAP*" is sent as "SAP" and the
+    exact meaning of the star is applied to what comes back. Sending nothing
+    when a pattern is all wildcards is correct: there is nothing to narrow by.
+    """
+    parts = [p for p in (pattern or "").replace("?", "*").split("*") if p]
+    return max(parts, key=len) if parts else ""
+
+
+def browse(path: List[str], opts: dict, view: str, query: str = "",
+           client=None, creds: Optional[dict] = None) -> List[Node]:
+    """The children of a path. An empty path is the list of projects.
+
+    `query` filters the level being looked at. At the top it is handed to Jira
+    as well, so a site with hundreds of projects is narrowed before it is sent
+    rather than after.
+    """
     if client is None:
         client = jira_client.connect(creds or {})
     view = view or VIEWS[0].name
 
     if not path:
-        return [Node(id=p.get("key", ""), label=p.get("name") or p.get("key", ""),
-                     kind="project", hint=p.get("key", ""), expandable=True,
-                     selectable=True)
-                for p in client.projects()]
-
-    if view == "boards":
-        return _boards(client, path)
-    return _hierarchy(client, path)
+        found = [Node(id=p.get("key", ""), label=p.get("name") or p.get("key", ""),
+                      kind="project", hint=p.get("key", ""), expandable=True,
+                      selectable=True)
+                 for p in client.projects(query=_term(query))]
+    elif view == "boards":
+        found = _boards(client, path)
+    else:
+        found = _hierarchy(client, path)
+    return [n for n in found if matches(n, query)]
 
 
 def _hierarchy(client, path: List[str]) -> List[Node]:

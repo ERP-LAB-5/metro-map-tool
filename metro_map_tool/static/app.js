@@ -2173,12 +2173,18 @@ async function browseDialog(src, onPicked) {
   const columns = [];                 // [{path, nodes}] — one per level opened
   const picked = new Map();           // id -> label, in the order ticked
 
+  let filter = "";
   const fetchLevel = async (path) => {
     const q = new URLSearchParams({ path: path.join("/"), view: view.name });
+    if (filter) q.set("q", filter);
     return api("GET", `/api/browse/${src.name}?${q}`);
   };
 
   const body = () => `
+    <label class="field"><span>Filter this column</span>
+      <input type="text" id="brw-q" value="${esc(filter)}" autocomplete="off"
+             spellcheck="false"
+             placeholder="a few letters, or a pattern like SAP*"></label>
     ${src.views.length > 1 ? `<div class="strands" id="brw-views">
       ${src.views.map((v) => `<button type="button" data-view="${esc(v.name)}"
         class="${v.name === view.name ? "is-on" : ""}"
@@ -2196,7 +2202,9 @@ async function browseDialog(src, onPicked) {
                 ${n.hint ? `<span class="id">${esc(n.hint)}</span>` : ""}</span>
               ${n.expandable ? `<span class="caret">▸</span>` : ""}
             </div>`).join("")
-            : `<p class="note">Nothing here.</p>`}
+            : `<p class="note">${filter
+                 ? `Nothing matches “${esc(filter)}”.`
+                 : "Nothing here."}</p>`}
         </div>`).join("")}
     </div>
     <p class="note" id="brw-said">${picked.size
@@ -2225,6 +2233,22 @@ async function browseDialog(src, onPicked) {
       wire();
     };
     const wire = () => {
+      const box = form.querySelector("#brw-q");
+      // re-ask only once the typing stops: each keystroke would otherwise be a
+      // round trip to Jira, and the answers would race each other back
+      let waiting = null;
+      box.addEventListener("input", () => {
+        clearTimeout(waiting);
+        waiting = setTimeout(async () => {
+          filter = box.value.trim();
+          const depth = Math.max(0, columns.length - 1);
+          const at = columns[depth] ? columns[depth].path : [];
+          await open(at, depth);
+          const again = form.querySelector("#brw-q");
+          if (again) { again.focus(); again.setSelectionRange(again.value.length,
+                                                              again.value.length); }
+        }, 300);
+      });
       form.querySelectorAll("[data-view]").forEach((b) =>
         b.addEventListener("click", async () => {
           view.name = b.dataset.view;
@@ -2237,6 +2261,10 @@ async function browseDialog(src, onPicked) {
           if (ev.target.matches("[data-pick]")) return;   // ticking is not opening
           const depth = Number(row.dataset.depth);
           const path = columns[depth].path.concat(row.dataset.node);
+          // the words that found a project are not the words you want inside
+          // it, and leaving them in the box would filter the new column by a
+          // term meant for the last one
+          filter = "";
           await open(path, depth + 1);
         }));
       form.querySelectorAll("[data-pick]").forEach((box) =>

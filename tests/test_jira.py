@@ -35,9 +35,17 @@ class Stand_in:
         self.calls.append("fields")
         return self.FIELDS
 
-    def projects(self, limit=100):
-        self.calls.append("projects")
-        return [{"key": "ACME", "name": "Acme Platform"}]
+    def projects(self, query="", limit=2000):
+        self.calls.append(("projects", query))
+        found = [{"key": "ACME", "name": "Acme Platform"},
+                 {"key": "ACMESUB", "name": "Acme Subsidiary"},
+                 {"key": "BILL", "name": "Billing"},
+                 {"key": "SALES", "name": "Sales Ops"}]
+        if query:
+            found = [p for p in found
+                     if query.lower() in p["key"].lower()
+                     or query.lower() in p["name"].lower()]
+        return found
 
     def get(self, path, params=None):
         self.calls.append(path)
@@ -147,8 +155,8 @@ class FieldDiscoveryTest(unittest.TestCase):
 class BrowseTest(unittest.TestCase):
     def test_the_top_of_the_tree_is_projects(self):
         nodes = jira_browse.browse([], {}, "hierarchy", client=Stand_in())
-        self.assertEqual([n.kind for n in nodes], ["project"])
-        self.assertTrue(nodes[0].expandable)
+        self.assertEqual({n.kind for n in nodes}, {"project"})
+        self.assertTrue(all(n.expandable for n in nodes))
 
     def test_an_instance_with_an_epic_set_shows_that_level(self):
         stand = Stand_in(issues=[issue("ACME-1", "Platform Upgrade", "Epic Set")])
@@ -311,3 +319,43 @@ class OtherPeoplesConfigTest(unittest.TestCase):
         self.path.write_text("[jira]\nurl = https://x\nemail = a@b.c\n"
                              "api_token = t\n", encoding="utf-8")
         self.assertEqual(str(S.config_path("jira")), str(self.path))
+
+
+class FilterTest(unittest.TestCase):
+    """A site with hundreds of projects needs narrowing, not scrolling."""
+
+    def keys(self, query):
+        return [n.id for n in
+                jira_browse.browse([], {}, "hierarchy", query, client=Stand_in())]
+
+    def test_a_bare_word_means_contains(self):
+        self.assertEqual(self.keys("acme"), ["ACME", "ACMESUB"])
+
+    def test_a_star_is_taken_literally(self):
+        self.assertEqual(self.keys("ACME*"), ["ACME", "ACMESUB"])
+        self.assertEqual(self.keys("S*"), ["SALES"])       # not ACMESUB
+        self.assertEqual(self.keys("*SUB"), ["ACMESUB"])
+
+    def test_it_matches_the_name_as_well_as_the_key(self):
+        self.assertEqual(self.keys("Billing"), ["BILL"])
+
+    def test_no_filter_is_everything(self):
+        self.assertEqual(len(self.keys("")), 4)
+
+    def test_the_server_is_asked_to_narrow_first(self):
+        stand = Stand_in()
+        jira_browse.browse([], {}, "hierarchy", "ACME*", client=stand)
+        # the star cannot go to Jira, but the plain part of it can, so the
+        # whole list is not dragged back to be thrown away here
+        self.assertIn(("projects", "ACME"), stand.calls)
+
+    def test_a_pattern_of_only_wildcards_asks_the_server_for_everything(self):
+        stand = Stand_in()
+        jira_browse.browse([], {}, "hierarchy", "*", client=stand)
+        self.assertIn(("projects", ""), stand.calls)
+
+    def test_it_filters_deeper_levels_too(self):
+        stand = Stand_in(issues=[issue("ACME-1", "Platform Upgrade", "Epic Set"),
+                                 issue("ACME-2", "Data Migration", "Epic Set")])
+        nodes = jira_browse.browse(["ACME"], {}, "hierarchy", "Data", client=stand)
+        self.assertEqual([n.label for n in nodes], ["Data Migration"])
