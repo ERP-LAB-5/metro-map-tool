@@ -271,3 +271,43 @@ class ReadOnlyTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OtherPeoplesConfigTest(unittest.TestCase):
+    """A config file someone already keeps for their own scripts should work.
+
+    Making them copy a token from one file to another because this tool spells
+    a key differently is a worse outcome than being relaxed about key names.
+    """
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.path = pathlib.Path(self.dir) / "config.conf"
+        os.environ["METRO_MAP_JIRA_CONFIG"] = str(self.path)
+        for name in ("JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN"):
+            os.environ.pop(name, None)
+
+    def tearDown(self):
+        os.environ.pop("METRO_MAP_JIRA_CONFIG", None)
+
+    def test_the_common_spellings_are_understood(self):
+        self.path.write_text("[jira]\nurl = https://x\nemail = a@b.c\n"
+                             "api_token = t\n", encoding="utf-8")
+        self.assertEqual(S.credentials(SOURCE)["base_url"], "https://x")
+
+    def test_token_is_another_name_for_api_token(self):
+        self.path.write_text("[jira]\nurl = https://x\nuser = a@b.c\n"
+                             "token = t\n", encoding="utf-8")
+        got = S.credentials(SOURCE)
+        self.assertEqual(got["api_token"], "t")
+        self.assertEqual(got["email"], "a@b.c")
+
+    def test_our_own_spelling_still_wins_when_both_are_present(self):
+        self.path.write_text("[jira]\nbase_url = https://ours\nurl = https://theirs\n"
+                             "email = a@b.c\napi_token = t\n", encoding="utf-8")
+        self.assertEqual(S.credentials(SOURCE)["base_url"], "https://ours")
+
+    def test_the_env_var_points_at_a_file_anywhere(self):
+        self.path.write_text("[jira]\nurl = https://x\nemail = a@b.c\n"
+                             "api_token = t\n", encoding="utf-8")
+        self.assertEqual(str(S.config_path("jira")), str(self.path))

@@ -71,6 +71,12 @@ class EnvVar:
     key: str = ""               # the key in the config file; defaults from name
     secret: bool = False        # never echoed back to anyone, ever
     placeholder: str = ""
+    # Other spellings the same setting goes by. People arrive with a config
+    # file they already keep for their own scripts, and refusing to read it
+    # because it says "url" where this says "base_url" would make them copy a
+    # token from one file to another for no reason at all — which is a worse
+    # outcome than being relaxed about a key name.
+    aliases: Tuple[str, ...] = ()
 
     def config_key(self, source: str) -> str:
         if self.key:
@@ -252,6 +258,14 @@ def write_config(source: str, values: Dict[str, str]) -> "Path":
     return path
 
 
+def _from_file(saved: Dict[str, str], key: str, aliases: Tuple[str, ...]) -> str:
+    """One setting's value, under whichever name the file happens to use."""
+    for name in (key,) + tuple(aliases):
+        if saved.get(name):
+            return saved[name]
+    return ""
+
+
 def credentials(src: Source) -> Dict[str, str]:
     """Everything a source needs to authenticate, or a SourceError saying what
     is missing and both of the places it could come from."""
@@ -261,7 +275,8 @@ def credentials(src: Source) -> Dict[str, str]:
     missing: List[str] = []
     for item in src.env:
         key = item.config_key(src.name)
-        value = (os.environ.get(item.name) or saved.get(key) or "").strip()
+        value = (os.environ.get(item.name)
+                 or _from_file(saved, key, item.aliases) or "").strip()
         if value:
             out[key] = value
         elif item.required:
@@ -288,7 +303,7 @@ def env_status(src: Source) -> List[dict]:
     for item in src.env:
         key = item.config_key(src.name)
         in_env = bool(os.environ.get(item.name))
-        in_file = bool(saved.get(key))
+        in_file = bool(_from_file(saved, key, item.aliases))
         out.append({"name": item.name, "key": key, "help": item.help,
                     "required": item.required, "secret": item.secret,
                     "placeholder": item.placeholder,

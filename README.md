@@ -288,8 +288,11 @@ to the page once saved.
 
 Environment variables still work and still win, so CI and one-off overrides are
 unchanged — `GITHUB_TOKEN`, or `JIRA_BASE_URL` / `JIRA_EMAIL` /
-`JIRA_API_TOKEN`. Already keeping those in a config file elsewhere? Point
-`METRO_MAP_JIRA_CONFIG` at it; the format is the usual `[jira]` ini section.
+`JIRA_API_TOKEN`. Already keeping those in a config file for your own scripts? Point
+`METRO_MAP_JIRA_CONFIG` at it and leave it where it is — no copying a token
+from one file to another. It reads the usual `[jira]` ini section and
+understands the common spellings, so `url`/`base_url`, `token`/`api_token` and
+`user`/`email` all work.
 
 A credential is never an option, so it cannot reach a map, an API response or
 an error message. `metro-map --from NAME --describe` says what a source wants
