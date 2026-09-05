@@ -2047,6 +2047,113 @@ function renderStyle() {
 
 /* ------------------------------------------------------------- dialogs -- */
 
+/* -------------------------------------------------------------- import -- */
+
+/** One form field for one declared source option, chosen by its kind. */
+function optField(o) {
+  const id = `imp-${o.name}`;
+  const common = `id="${id}" data-opt="${esc(o.name)}"`;
+  const value = o.default === null || o.default === undefined ? "" : String(o.default);
+  if (o.kind === "bool") {
+    return `<label class="field"><span>${esc(o.name)}</span>
+      <span class="note"><input type="checkbox" ${common} ${o.default ? "checked" : ""}>
+      ${esc(o.help)}</span></label>`;
+  }
+  if (o.kind === "choice") {
+    return `<label class="field" title="${esc(o.help)}"><span>${esc(o.name)}</span>
+      <select ${common}>${(o.choices || []).map((c) =>
+        `<option value="${esc(c)}" ${c === o.default ? "selected" : ""}>${esc(c || "auto")}</option>`).join("")}
+      </select></label>`;
+  }
+  const type = { int: "number", date: "date" }[o.kind] || "text";
+  return `<label class="field" title="${esc(o.help)}">
+    <span>${esc(o.name)}${o.required ? " *" : ""}</span>
+    <input type="${type}" ${common} value="${esc(value)}"
+           placeholder="${esc(o.placeholder || "")}"></label>`;
+}
+
+async function importDialog() {
+  let info;
+  try { info = await api("GET", "/api/sources"); }
+  catch (err) { showProblems(err.errors); return; }
+  // fetched now rather than at boot: whether a credential is set can change
+  // while the designer is running, and a stale "not set" reads as a bug
+  let chosen = info.sources.length ? info.sources[0].name : "";
+
+  const body = () => {
+    const src = info.sources.find((s) => s.name === chosen) || {};
+    const opts = (src.options || []).filter(
+      (o) => !(info.local_only || []).includes(o.name));
+    const missing = (src.env || []).filter((e) => e.required && !e.present);
+    return `
+      <label class="field"><span>Import from</span>
+        <select id="imp-source">${info.sources.map((s) =>
+          `<option value="${esc(s.name)}" ${s.name === chosen ? "selected" : ""}
+           >${esc(s.title)}</option>`).join("")}</select></label>
+      <p class="note">${esc(src.summary || "")}</p>
+      ${(src.env || []).map((e) => `<p class="note">${e.present ? "✓" : "!"}
+        <code>${esc(e.name)}</code> — ${e.present ? "set"
+          : `not set. ${esc(e.help)}. Export it and restart the designer.`}</p>`).join("")}
+      ${opts.map(optField).join("")}
+      ${S.name ? `<label class="field"><span>
+        <input type="checkbox" id="imp-into" ${(S.spec.source || {}).name === chosen ? "checked" : ""}>
+        Re-sync into “${esc(S.name)}”</span>
+        <span class="note">Keeps the positions, colours and wording already in
+        this map; only what changed upstream comes in.</span></label>` : ""}
+      ${(info.broken || []).map((b) =>
+        `<p class="warn">A plugin failed to load — ${esc(b)}</p>`).join("")}
+      <div class="actions"><button value="cancel">Cancel</button>
+        <button type="button" class="primary" id="imp-go"
+          ${missing.length ? "disabled" : ""}>Import</button></div>`;
+  };
+
+  dialog("Import a plan", body(), (form, dlg) => {
+    const wire = () => {
+      form.querySelector("#imp-source").addEventListener("change", (ev) => {
+        chosen = ev.target.value;
+        form.innerHTML = `<h2>Import a plan</h2>${body()}`;
+        wire();
+      });
+      form.querySelector("#imp-go").addEventListener("click", async () => {
+        const options = {};
+        form.querySelectorAll("[data-opt]").forEach((el) => {
+          options[el.dataset.opt] = el.type === "checkbox" ? el.checked : el.value;
+        });
+        const into = form.querySelector("#imp-into");
+        const payload = { source: chosen, options };
+        if (into && into.checked) payload.into = { name: S.name, folder: S.folder };
+        const go = form.querySelector("#imp-go");
+        go.disabled = true;
+        go.textContent = "Importing…";
+        let res;
+        try { res = await api("POST", "/api/import", payload); }
+        catch (err) {
+          go.disabled = false;
+          go.textContent = "Import";
+          showProblems(err.errors);
+          return;
+        }
+        dlg.close();
+        // An import is an edit, not a save: it lands dirty so that keeping it
+        // stays a deliberate act. And unless it was a re-sync *into* the open
+        // map, it is a different map — leaving the old name attached would put
+        // the next Ctrl+S straight through whatever was open before.
+        const resync = !!(payload.into);
+        applyChange(() => {
+          S.spec = normalise(res.spec);
+          if (!resync) {
+            S.name = null;
+            S.folder = null;
+            S.version = null;
+          }
+        });
+        showProblems(res.errors, (res.notes || []).concat(res.warnings || []));
+      });
+    };
+    wire();
+  });
+}
+
 function dialog(title, bodyHTML, onOpen) {
   const dlg = $("#dialog");
   const form = $("#dialog-form");
@@ -2693,6 +2800,7 @@ async function boot() {
 
   $("#btn-add-station").addEventListener("click", addStation);
   $("#btn-add-junction").addEventListener("click", addJunction);
+  $("#btn-import").addEventListener("click", importDialog);
   $("#btn-add-line").addEventListener("click", addLine);
   $("#btn-add-zone").addEventListener("click", addZone);
   $("#btn-add-scenario").addEventListener("click", addScenario);

@@ -422,6 +422,86 @@ STATUS_TITLES = {
 }
 
 
+# Options that name a file on this machine. The designer is a local tool, but
+# --host can put it on a network, and an importer that reads any path the
+# browser names would turn it into a file-reading service. The browser gets the
+# model through "into" — a map this server already owns — instead.
+LOCAL_PATH_OPTIONS = ("from_file", "to_file", "model")
+
+
+@app.get("/api/sources")
+def sources():
+    """The importers available, with what each one takes.
+
+    Fetched when the Import dialog opens rather than at startup: whether a
+    credential is set can change while the server is running, and a stale "not
+    set" is a bad first impression.
+    """
+    from . import sources as S
+    return jsonify({
+        "sources": [S.describe(src) for _, src in sorted(S.catalogue().items())
+                    ],
+        "broken": S.broken(),
+        "local_only": list(LOCAL_PATH_OPTIONS),
+    })
+
+
+@app.post("/api/import")
+def import_map():
+    """Build a spec from a source. Deliberately does not save it.
+
+    The result goes back to the browser as an unsaved edit, so saving stays a
+    deliberate act and every write keeps going through PUT — which is where the
+    concurrency check, the interchange pass and the format stamp live.
+    """
+    from . import sources as S
+    from .sources.merge import merge
+
+    data = body()
+    name = (data.get("source") or "").strip()
+    try:
+        src = S.get(name)
+    except S.SourceError as exc:
+        abort(400, str(exc))
+
+    given = data.get("options") or {}
+    if not isinstance(given, dict):
+        abort(400, "options must be an object of name to value")
+    for key in LOCAL_PATH_OPTIONS:
+        if given.get(key):
+            abort(400, f"'{key}' names a file on the machine running the "
+                       "designer, so it is only available from the command "
+                       "line; use 'into' to re-sync a map this server holds")
+
+    opts, errors = S.coerce(src, given)
+    if errors:
+        return jsonify({"errors": errors}), 400
+
+    model = None
+    into = data.get("into") or {}
+    if into.get("name"):
+        path, folder = find_map(into["name"], into.get("folder"))
+        if not path:
+            abort(404, f"no map called '{into['name']}' to sync into")
+        model = read_spec(path)
+
+    try:
+        raw = S.payload(src, opts, model)
+        fresh, notes = src.build(raw, opts, model)
+    except S.SourceError as exc:
+        return jsonify({"errors": [str(exc)]}), 400
+    except OSError as exc:
+        return jsonify({"errors": [f"{src.name}: {exc}"]}), 400
+
+    spec, more = merge(model, fresh, source=src.name, options=opts,
+                       refresh=opts.get("refresh") or list(src.refresh_default),
+                       prune=bool(opts.get("prune")),
+                       stamp=S.stamp(src, opts))
+    return jsonify({"spec": spec, "notes": notes + more,
+                    "warnings": mm.spec_warnings(spec),
+                    "errors": mm.validate_spec(spec)})
+
+
 @app.get("/api/defaults")
 def defaults():
     return jsonify({"style": mm.style_to_dict(mm.Style()),

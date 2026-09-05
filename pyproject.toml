@@ -30,6 +30,16 @@ Homepage = "https://github.com/ERP-LAB-5/metro-map-tool"
 Source = "https://github.com/ERP-LAB-5/metro-map-tool"
 Issues = "https://github.com/ERP-LAB-5/metro-map-tool/issues"
 
+# Somebody else's importer joins the tool by declaring the entry-point group
+# "metro_map_tool.sources" in their own pyproject, pointing at a Source object:
+#
+#     [project.entry-points."metro_map_tool.sources"]
+#     gitlab = "metro_map_gitlab:SOURCE"
+#
+# The three that ship here are named in sources/__init__.py rather than
+# declared here, because a checkout has no installed metadata for entry points
+# to be found in — and run.sh and the MCP server both run from a checkout.
+
 [project.scripts]
 metro-map = "metro_map_tool.metro_map:main"
 metro-map-designer = "metro_map_tool.app:main"
@@ -37,7 +47,7 @@ metro-map-mcp = "metro_map_tool.mcp_server:main"
 metro-map-skill = "metro_map_tool.skill_install:main"
 
 [tool.setuptools]
-packages = ["metro_map_tool"]
+packages = ["metro_map_tool", "metro_map_tool.sources"]
 
 # Flask resolves templates/ and static/ relative to app.py, and app.py resolves
 # shared-maps/ the same way, so all three have to be installed beside it — and

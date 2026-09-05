@@ -255,6 +255,76 @@ The map is the intent; the repository is only the evidence. Notes are dropped on
 a sync — they are addressed by hop index, and after the commits change those
 indices point somewhere else entirely.
 
+## Importing a plan
+
+A map is worth drawing once. Keeping it worth looking at means re-drawing it
+every time the plan moves, which nobody does by hand — so the plan comes from
+where it already lives.
+
+```bash
+metro-map --sources                       # what can be imported from
+metro-map --from jira --describe          # and what that one needs
+
+metro-map --from github --opt repo=owner/name        -o plan.svg
+metro-map --from jira   --opt project=PAY            -o plan.svg
+```
+
+Or **Import…** in the designer, which asks the same questions as a form.
+
+| planning idea | how it is drawn |
+|---|---|
+| a Jira epic, or a GitHub `area:` label | a **line** |
+| an issue | a **station**, placed at its due date |
+| a fix version, or a milestone | a **capsule** across every lane it lands on |
+| a sprint | a **band** behind the map |
+| an epic where nothing has started | the line drawn as **planned** |
+
+Credentials come from the environment and nowhere else — `GITHUB_TOKEN`, or
+`JIRA_BASE_URL` / `JIRA_EMAIL` / `JIRA_API_TOKEN`. There is no field to type a
+token into and no file to put one in, so a token cannot end up in a map you
+share. `metro-map --from NAME --describe` says which variables a source wants
+and whether they are set.
+
+### Re-syncing keeps what you did
+
+This is the point of importing rather than exporting. Every stop an import
+creates remembers where it came from, so the next sync recognises it:
+
+```bash
+metro-map --from jira --opt project=PAY --model plan.json --write-spec plan.json
+```
+
+**The import owns what exists upstream; you own where it sits, what colour it
+is and what the map calls it.** Move a stop, recolour a line, rename something
+into words your team actually uses — a re-sync brings in what changed and
+leaves all of that alone. Where the wording upstream has drifted from yours it
+says so rather than overwriting you.
+
+Something that vanishes upstream is **kept**, with a note, because a sync that
+deletes is triggered by innocuous things — a narrower date window, a rename, a
+permissions change — and what it deletes is an afternoon of somebody's
+arranging. `--opt prune=true` is how you actually remove it.
+
+`--opt refresh=label,gx` asks for the upstream value on fields you would rather
+not maintain by hand.
+
+### Working offline, and adding your own source
+
+```bash
+metro-map --from jira --opt project=PAY --opt to_file=payload.json   # record
+metro-map --from jira --opt project=PAY --opt from_file=payload.json # replay
+```
+
+Fetching and drawing are separate, so a recorded payload replays identically
+with no network and no credentials — useful on a train, and it is how the
+importers are tested.
+
+Somebody else's importer joins the tool by declaring the entry-point group
+`metro_map_tool.sources` in their own `pyproject.toml`, pointing at a `Source`.
+It then appears in `--sources`, in the designer's Import dialog and to an agent,
+with no change here. One that fails to load costs you that importer and nothing
+else.
+
 ## Roadmap mode
 
 Switch **mode** in the top bar from *Metro map* to *Roadmap* and the x axis

@@ -217,6 +217,46 @@ def validate_map(spec: dict) -> dict:
 
 
 @server.tool()
+def list_sources() -> dict:
+    """Every importer available, and what each one takes.
+
+    Call this before import_map: the options differ per source, so import_map's
+    own signature cannot name them. Each option gives its name, kind (str, int,
+    bool, date, path, choice, csv), default and a line of help. Each source also
+    names the environment variables it reads for credentials — and only whether
+    they are set, never their values, which never leave the machine.
+    """
+    ensure_designer()
+    return call("GET", "/api/sources")
+
+
+@server.tool()
+def import_map(source: str, options: dict, into: str = "",
+               folder: str = "") -> dict:
+    """Build a map spec from an external system — git history, GitHub, Jira.
+
+    `source` is a name from list_sources(); `options` is that source's options
+    as a flat object, e.g. {"repo": "owner/name", "label_prefix": "area:"}.
+
+    Nothing is saved: the spec comes back for you to look at and adjust, and you
+    save it with save_map when it is right.
+
+    Give `into` the name of a map this source imported before and it re-syncs
+    instead of starting over — stops it created are recognised by their origin,
+    and the position, colour and wording a human gave them survive. That is the
+    point of importing at all: arrange it once, then keep it current.
+
+    Options naming a file on the designer's machine (from_file, to_file, model)
+    are only available on the command line.
+    """
+    ensure_designer()
+    payload = {"source": source, "options": options or {}}
+    if into:
+        payload["into"] = {"name": into, "folder": folder}
+    return call("POST", "/api/import", payload)
+
+
+@server.tool()
 def spec_reference() -> dict:
     """The vocabulary a spec may use: label sides and angles, line states, palette."""
     ensure_designer()
@@ -275,6 +315,13 @@ def spec_reference() -> dict:
                         "Use this for a Helsinki-style split, not two lines of "
                         "the same colour. Notes stay on the trunk, addressed by "
                         "its hop index",
+            "origin": 'a station, line, zone or interchange an importer made '
+                      'carries "origin": "<source>:<id>" — "jira:ACME-231", '
+                      '"github:issue/owner/repo#12". Leave it alone: it is how '
+                      "a re-sync recognises what it made last time and keeps "
+                      "the layout and wording a human gave it. A spec that came "
+                      'from an importer also carries a top-level "source" '
+                      "recording which one and with what options",
             "interchanges": 'a stretched interchange: {"stations": [ids], '
                             '"label"?, "label_at"?, "label_angle"?}. One capsule '
                             "covers the stops listed, replacing their own "

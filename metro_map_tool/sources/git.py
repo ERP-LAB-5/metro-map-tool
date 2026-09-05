@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 D-LAB-5
 """
-from_git.py — turn a repository's history into a map spec.
+git.py — turn a repository's history into a map spec.
 
 A commit graph is already a metro map: a branch is a line, a commit is a
 station, a lane is a row, and a commit two branches share becomes an
@@ -31,7 +31,8 @@ import tempfile
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 
-from . import metro_map as mm
+from .. import metro_map as mm
+from . import EnvVar, Option, Source, SourceError
 
 UNIT = "\x1f"                       # git's own field separator, safe in subjects
 REMOTE = re.compile(r"^(https?://|git@|ssh://|git://)")
@@ -41,7 +42,7 @@ REMOTE = re.compile(r"^(https?://|git@|ssh://|git://)")
 LANE_COLOURS = [c for _, c in mm.PALETTE]
 
 
-class GitError(RuntimeError):
+class GitError(SourceError):
     """git said no, with what it said."""
 
 
@@ -197,8 +198,13 @@ def read_history(repo: Path, lanes: Sequence[Tuple[str, str]],
 
 
 def build_spec(lanes: List[dict], seen: Dict[str, dict], order: Dict[str, int],
-               model: Optional[dict] = None, label_every: bool = False) -> dict:
-    """Assemble the map: stations left to right in topological order."""
+               label_every: bool = False) -> dict:
+    """Assemble the map: stations left to right in topological order.
+
+    Nothing here knows about a model. Folding an import into what the author
+    already drew is the same problem for every source, so it lives once in
+    merge.py rather than three times, subtly differently.
+    """
     ordered = sorted(seen.values(),
                      key=lambda c: (order.get(c["sha"], 1 << 30), c["when"]))
     gx = {c["sha"]: i for i, c in enumerate(ordered)}
@@ -212,16 +218,12 @@ def build_spec(lanes: List[dict], seen: Dict[str, dict], order: Dict[str, int],
         sid = c["short"]
         label = c["tag"] or (c["subject"] if label_every else c["short"])
         st = {"label": label, "gx": gx[c["sha"]], "gy": row_of[c["sha"]],
-              "label_at": "above" if row_of[c["sha"]] % 2 == 0 else "below"}
+              "label_at": "above" if row_of[c["sha"]] % 2 == 0 else "below",
+              "origin": f"git:{c['sha']}"}
         if c["tag"]:
             st["interchange"] = True            # a release is a real stop
             st["label_angle"] = 45
         stations[sid] = st
-
-    by_name = {}
-    if model:
-        by_name = {ln.get("name"): ln for ln in model.get("lines", [])
-                   if isinstance(ln, dict)}
 
     lines = []
     for lane in lanes:
@@ -231,25 +233,15 @@ def build_spec(lanes: List[dict], seen: Dict[str, dict], order: Dict[str, int],
             route.append(lane["rejoin"])
         route = [sid for i, sid in enumerate(route)      # a fork that is also
                  if i == 0 or sid != route[i - 1]]       # the first commit
-        keep = by_name.get(lane["name"], {})
-        # notes are addressed by hop index, and the hops are all different now —
-        # a note that meant "between the cut and going live" would silently come
-        # to mean "between two commits that happen to sit in that position"
-        line = {k: v for k, v in keep.items()
-                if k not in ("stations", "branch", "notes")}
-        line.setdefault("name", lane["name"])
-        line.setdefault("color", LANE_COLOURS[lane["row"] % len(LANE_COLOURS)])
-        line["branch"] = lane["branch"]
+        line = {"name": lane["name"],
+                "color": LANE_COLOURS[lane["row"] % len(LANE_COLOURS)]}
+        line["branch"] = lane["branch"]         # kept: shipped models carry it
+        line["origin"] = f"git:branch/{lane['branch']}"
         line["stations"] = route
         if len(route) >= 2 or not lane["missing"]:
             lines.append(line)
 
-    spec: dict = {}
-    if model:
-        # everything the author decided stays; only the history is replaced
-        spec = {k: v for k, v in model.items()
-                if k not in ("stations", "lines", "format")}
-    spec["stations"] = stations
+    spec: dict = {"stations": stations}
     spec["lines"] = lines
     spec.setdefault("legend", "bottom")
     spec.setdefault("style", {"cell": 110, "stroke": 8, "label_size": 12})
@@ -277,27 +269,63 @@ def lanes_from(model: Optional[dict], repo: Path,
     return [(b, b) for b in [head, *rest]]
 
 
-def from_git(source: str, model_path: Optional[str] = None,
-             branches: Optional[Sequence[str]] = None,
-             limit: int = 200, label_every: bool = False) -> Tuple[dict, List[str]]:
-    """A spec for a repository's history, plus anything worth saying about it."""
-    model = None
-    if model_path:
-        model = json.loads(Path(model_path).read_text(encoding="utf-8"))
 
-    notes: List[str] = []
-    with open_repo(source) as repo:
-        lanes = lanes_from(model, repo, branches)
+
+# ------------------------------------------------------------ the source --
+#
+# fetch talks to git; build is pure. Splitting them is what lets a recorded
+# payload stand in for a repository, so the lane and ordering logic — the part
+# that has been wrong three times — can be tested without one.
+
+
+def _fetch(opts: dict, model: Optional[dict]) -> dict:
+    """Everything the mapping needs, as plain data.
+
+    The repository is opened once and let go again: nothing below this line
+    touches git, so a payload saved here replays identically forever.
+    """
+    limit = int(opts.get("limit") or 200)
+    with open_repo(opts["repo"]) as repo:
+        lanes = lanes_from(model, repo, opts.get("branches") or None)
         seen, built = read_history(repo, lanes, limit)
         order = topo_order(repo, [b for _, b in lanes if exists(repo, b)], limit)
+        notes: List[str] = []
         for lane in built:
             if lane["missing"]:
-                notes.append(f"branch '{lane['branch']}' is not in the repository "
-                             f"— lane '{lane['name']}' is drawn empty")
+                notes.append(f"branch '{lane['branch']}' is not in the "
+                             f"repository — lane '{lane['name']}' has nothing "
+                             "to draw")
             elif not lane["commits"] and lane["row"]:
                 notes.append(f"lane '{lane['name']}' has no commits of its own "
                              "— it is merged up to date")
         if not seen:
             raise GitError("no commits found")
-        spec = build_spec(built, seen, order, model, label_every)
-    return spec, notes
+    return {"lanes": built, "commits": seen, "order": order, "notes": notes}
+
+
+def _build(data: dict, opts: dict, model: Optional[dict]) -> Tuple[dict, List[str]]:
+    spec = build_spec(data["lanes"], data["commits"], data["order"],
+                      bool(opts.get("label_every")))
+    return spec, list(data.get("notes") or [])
+
+
+SOURCE = Source(
+    name="git",
+    title="git history",
+    summary="branches as lines and commits as stations, from a local path or a "
+            "clonable URL",
+    options=(
+        Option("repo", "a path to a repository, or a URL to clone",
+               required=True, placeholder="."),
+        Option("branches", "which branches to draw, in order; default is the "
+                           "head branch then the rest alphabetically", kind="csv",
+               placeholder="main,stage,beta"),
+        Option("label_every", "label every commit with its subject, not just the "
+                              "tagged ones", kind="bool", default=False),
+    ),
+    fetch=_fetch,
+    build=_build,
+    # a commit's gx is its place in the topological order, which moves as
+    # history grows — pinning it to where it used to be would draw a lie
+    refresh_default=("gx", "gy", "label_at"),
+)

@@ -844,6 +844,20 @@ def line_strands(line: dict) -> List[dict]:
     return out
 
 
+def origin_errors(owner: dict, where: str) -> List[str]:
+    """Check the provenance an importer stamps on what it made.
+
+    "origin" is how a re-sync recognises its own work, so a broken one silently
+    turns the next sync into a duplicate rather than an update.
+    """
+    origin = owner.get("origin")
+    if origin is None:
+        return []
+    if not isinstance(origin, str) or not origin.strip():
+        return [f"{where}: origin must be non-empty text like 'jira:ACME-1'"]
+    return []
+
+
 def onward_errors(owner: dict, where: str) -> List[str]:
     """Check an onward label block, which lines and zones share."""
     said = owner.get("onward")
@@ -1881,6 +1895,14 @@ def validate_spec(spec: object) -> List[str]:
             f"this map is format {spec_format(spec)}, but this copy of the tool "
             f"reads up to {SPEC_FORMAT} — update the tool to open it")
 
+    came = spec.get("source")
+    if came is not None:
+        if not isinstance(came, dict):
+            errors.append("spec.source must be an object saying which importer "
+                          "made this map")
+        elif not isinstance(came.get("name"), str) or not came["name"].strip():
+            errors.append("spec.source needs a non-empty name")
+
     at = spec.get("legend")
     if at is not None and at not in LEGEND_AT:
         errors.append("spec.legend must be one of " + ", ".join(LEGEND_AT))
@@ -1918,6 +1940,7 @@ def validate_spec(spec: object) -> List[str]:
         if spin is not None and spin not in LABEL_ANGLES:
             errors.append(f"{where}: label_angle must be one of "
                           + ", ".join(str(a) for a in LABEL_ANGLES))
+        errors.extend(origin_errors(st, where))
 
     junctions = spec.get("junctions")
     if junctions is None:
@@ -1963,6 +1986,7 @@ def validate_spec(spec: object) -> List[str]:
                               "zone bands stops, and a junction has none to band")
             elif sid not in stations:
                 errors.append(f"{where}: unknown station '{sid}'")
+        errors.extend(origin_errors(zn, where))
         if zn.get("continues") is not None and zn["continues"] not in CONTINUES:
             errors.append(f"{where}: continues must be one of " + ", ".join(CONTINUES))
         errors.extend(onward_errors(zn, where))
@@ -2069,6 +2093,7 @@ def validate_spec(spec: object) -> List[str]:
         if ln.get("continues") is not None and ln["continues"] not in CONTINUES:
             errors.append(f"{where}: continues must be one of " + ", ".join(CONTINUES))
         errors.extend(onward_errors(ln, where))
+        errors.extend(origin_errors(ln, where))
         if ln.get("status") is not None and ln["status"] not in STATUS_CLASS:
             errors.append(f"{where}: status must be one of "
                           + ", ".join(sorted(STATUS_CLASS)))
@@ -2166,6 +2191,18 @@ def spec_warnings(spec: dict) -> List[str]:
     for sid in spec.get("stations", {}):
         if sid not in used:
             out.append(f"station '{sid}': on no line — drawn without a route")
+    seen_origin: Dict[str, str] = {}
+    for sid, st in (spec.get("stations") or {}).items():
+        origin = isinstance(st, dict) and st.get("origin")
+        if not origin:
+            continue
+        if origin in seen_origin:
+            out.append(f"stations '{seen_origin[origin]}' and '{sid}' both claim "
+                       f"to be {origin} — a re-sync will update the first and "
+                       "treat the other as hand-drawn")
+        else:
+            seen_origin[origin] = sid
+
     for jid in spec.get("junctions") or {}:
         if jid not in used:
             out.append(f"junction '{jid}': on no line — a junction with no track "
@@ -2289,6 +2326,92 @@ PALETTE: List[Tuple[str, str]] = [
 
 # ----------------------------------------------------------------- cli ----
 
+def write_json(path: Path, spec: dict) -> None:
+    """Save a spec, replacing the file only once it is written whole.
+
+    A re-sync reads and writes the same file, and that file holds someone's
+    layout — a half-written one would lose it.
+    """
+    tmp = path.with_name(path.name + ".part")
+    tmp.write_text(json.dumps(spec, ensure_ascii=False, indent=2) + "\n",
+                   encoding="utf-8")
+    tmp.replace(path)
+
+
+def list_sources() -> int:
+    """Print the importers available, and say which ones failed to load."""
+    from .sources import broken, catalogue, env_status
+    for name, src in sorted(catalogue().items()):
+        print(f"  {name:8s} {src.summary}")
+        need = [e["name"] for e in env_status(src) if not e["present"]]
+        if need:
+            print(f"           needs: {', '.join(need)}")
+    for bad in broken():
+        print(f"  ! plugin failed to load — {bad}", file=sys.stderr)
+    print("\n  metro-map --from NAME --describe   to see what one takes")
+    return 0
+
+
+def run_source(name: str, pairs: List[str], describe: bool):
+    """Build a spec from a source. Returns (exit code or None, spec, notes)."""
+    from . import sources as S
+
+    try:
+        src = S.get(name)
+    except S.SourceError as exc:
+        print(f"  ! {exc}", file=sys.stderr)
+        return 2, None, []
+
+    if describe:
+        print(f"  {src.name} — {src.title}\n  {src.summary}\n")
+        for opt in src.all_options():
+            mark = "*" if opt.required else " "
+            shown = "" if opt.default is None else f"  (default: {opt.default})"
+            print(f"  {mark} {opt.name:12s} {opt.help}{shown}")
+        for env in S.env_status(src):
+            state = "set" if env["present"] else "NOT SET"
+            print(f"    ${env['name']:16s} {env['help']}  [{state}]")
+        return 0, None, []
+
+    raw: dict = {}
+    for pair in pairs:
+        key, sep, value = pair.partition("=")
+        # "-O prune" reads as switching it on, which is what a bare flag means
+        raw[key.strip().replace("-", "_")] = value if sep else "true"
+
+    opts, errors = S.coerce(src, raw)
+    if errors:
+        for err in errors:
+            print(f"  ! {err}", file=sys.stderr)
+        return 2, None, []
+
+    model = None
+    if opts.get("model"):
+        try:
+            model = json.loads(Path(opts["model"]).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            print(f"  ! could not read the model {opts['model']}: {exc}",
+                  file=sys.stderr)
+            return 2, None, []
+
+    try:
+        data = S.payload(src, opts, model)
+        fresh, notes = src.build(data, opts, model)
+    except S.SourceError as exc:
+        print(f"  ! {exc}", file=sys.stderr)
+        return 2, None, []
+    except OSError as exc:
+        print(f"  ! {src.name}: {exc}", file=sys.stderr)
+        return 2, None, []
+
+    from .sources.merge import merge
+    spec, more = merge(model, fresh, source=src.name, options=opts,
+                       refresh=opts.get("refresh") or list(src.refresh_default),
+                       prune=bool(opts.get("prune")),
+                       stamp=S.stamp(src, opts))
+    return None, spec, notes + more
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
 
@@ -2304,16 +2427,25 @@ def main(argv: Optional[List[str]] = None) -> int:
         description="Render a transit-map spec to SVG. "
                     "Design one in the browser with: metro-map-designer")
     ap.add_argument("spec", nargs="?", help="JSON spec file, or - for stdin")
+    ap.add_argument("--from", dest="source", metavar="SOURCE",
+                    help="build the spec from an importer instead of a file "
+                         "— see --sources")
+    ap.add_argument("--opt", "-O", dest="option", action="append", default=[],
+                    metavar="KEY=VALUE",
+                    help="an option for --from, repeatable (--describe lists them)")
+    ap.add_argument("--sources", action="store_true",
+                    help="list the importers available and what each one needs")
+    ap.add_argument("--describe", action="store_true",
+                    help="with --from, explain that importer's options and exit")
     ap.add_argument("--from-git", metavar="REPO",
-                    help="build the spec from a repository's history: a path, "
-                         "or a URL to clone")
+                    help="shorthand for --from git --opt repo=REPO")
     ap.add_argument("--model", metavar="FILE",
                     help="a branch model whose lanes, names and colours are "
                          "kept while --from-git fills in the commits")
     ap.add_argument("--branches", metavar="A,B,C",
                     help="which branches to draw, in order (default: the "
                          "default branch, then the rest)")
-    ap.add_argument("--commits", type=int, default=200, metavar="N",
+    ap.add_argument("--commits", type=int, metavar="N",
                     help="most commits to take from any one branch")
     ap.add_argument("--subjects", action="store_true",
                     help="label every commit with its subject, not just tags")
@@ -2333,23 +2465,35 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="flag every stop shared by two or more lines as an interchange")
     args = ap.parse_args(argv)
 
+    # --from-git is the original spelling and stays exactly as short. The legacy
+    # pairs go in first so that an explicit --opt of the same key still wins.
     if args.from_git:
-        from .from_git import GitError, from_git
-        try:
-            spec, notes = from_git(
-                args.from_git, args.model,
-                [b.strip() for b in args.branches.split(",")] if args.branches else None,
-                args.commits, args.subjects)
-        except GitError as exc:
-            print(f"  ! {exc}", file=sys.stderr)
-            return 2
+        args.source = args.source or "git"
+        legacy = [("repo", args.from_git), ("branches", args.branches),
+                  ("limit", args.commits),
+                  ("label_every", "true" if args.subjects else None)]
+        args.option = [f"{k}={v}" for k, v in legacy if v is not None] + args.option
+    if args.model:
+        args.option = [f"model={args.model}"] + args.option
+
+    if args.sources:
+        return list_sources()
+
+    if args.source:
+        code, spec, notes = run_source(args.source, args.option, args.describe)
+        if code is not None:
+            return code
         for note in notes:
             print(f"  · {note}", file=sys.stderr)
         if args.write_spec:
-            Path(args.write_spec).write_text(
-                json.dumps(spec, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8")
+            write_json(Path(args.write_spec), spec)
             print(f"  wrote {args.write_spec}", file=sys.stderr)
+    elif any([args.model, args.branches, args.commits, args.subjects]):
+        # silently ignoring them is how someone spends ten minutes wondering why
+        # --model did nothing
+        print("  ! --model, --branches, --commits and --subjects only mean "
+              "something with --from (or --from-git)", file=sys.stderr)
+        return 2
     elif not args.spec:
         ap.print_help()
         print("\n  no spec given — start the web designer with:  metro-map-designer",
@@ -2367,7 +2511,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     errors = validate_spec(spec)
     if errors:
-        print(f"{args.spec}: {len(errors)} problem(s)", file=sys.stderr)
+        where = args.spec or f"--from {args.source}"
+        print(f"{where}: {len(errors)} problem(s)", file=sys.stderr)
         for e in errors:
             print(f"  ! {e}", file=sys.stderr)
         return 2

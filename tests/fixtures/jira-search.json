@@ -1,0 +1,166 @@
+{
+  "project": "PAY",
+  "versions": [
+    {
+      "id": "1001",
+      "name": "R1.0",
+      "releaseDate": "2026-03-31"
+    },
+    {
+      "id": "1002",
+      "name": "R2.0",
+      "releaseDate": "2026-06-30"
+    }
+  ],
+  "issues": [
+    {
+      "key": "PAY-1",
+      "fields": {
+        "summary": "Card capture",
+        "duedate": "2026-02-10",
+        "status": {
+          "statusCategory": {
+            "key": "done"
+          }
+        },
+        "parent": {
+          "key": "PAY-100",
+          "fields": {
+            "summary": "Payments"
+          }
+        },
+        "fixVersions": [
+          {
+            "id": "1001",
+            "name": "R1.0"
+          }
+        ],
+        "customfield_10020": [
+          {
+            "name": "Sprint 14",
+            "startDate": "2026-02-02",
+            "endDate": "2026-02-16"
+          }
+        ]
+      }
+    },
+    {
+      "key": "PAY-2",
+      "fields": {
+        "summary": "3-D Secure",
+        "duedate": "2026-03-20",
+        "status": {
+          "statusCategory": {
+            "key": "indeterminate"
+          }
+        },
+        "parent": {
+          "key": "PAY-100",
+          "fields": {
+            "summary": "Payments"
+          }
+        },
+        "fixVersions": [
+          {
+            "id": "1001"
+          }
+        ],
+        "customfield_10020": [
+          {
+            "name": "Sprint 15",
+            "startDate": "2026-02-16",
+            "endDate": "2026-03-02"
+          }
+        ]
+      }
+    },
+    {
+      "key": "PAY-3",
+      "fields": {
+        "summary": "Ledger export",
+        "duedate": "2026-03-25",
+        "status": {
+          "statusCategory": {
+            "key": "new"
+          }
+        },
+        "parent": {
+          "key": "PAY-200",
+          "fields": {
+            "summary": "Reporting"
+          }
+        },
+        "fixVersions": [
+          {
+            "id": "1001"
+          }
+        ]
+      }
+    },
+    {
+      "key": "PAY-4",
+      "fields": {
+        "summary": "Tax rules",
+        "duedate": "2026-06-01",
+        "status": {
+          "statusCategory": {
+            "key": "new"
+          }
+        },
+        "parent": {
+          "key": "PAY-200",
+          "fields": {
+            "summary": "Reporting"
+          }
+        },
+        "fixVersions": [
+          {
+            "id": "1002"
+          }
+        ]
+      }
+    },
+    {
+      "key": "PAY-5",
+      "fields": {
+        "summary": "Refund flow",
+        "duedate": "2026-06-10",
+        "status": {
+          "statusCategory": {
+            "key": "new"
+          }
+        },
+        "parent": {
+          "key": "PAY-100",
+          "fields": {
+            "summary": "Payments"
+          }
+        },
+        "fixVersions": [
+          {
+            "id": "1002"
+          }
+        ]
+      }
+    },
+    {
+      "key": "PAY-6",
+      "fields": {
+        "summary": "Nobody scheduled this",
+        "status": {
+          "statusCategory": {
+            "key": "new"
+          }
+        },
+        "duedate": null,
+        "parent": {
+          "key": "PAY-300",
+          "fields": {
+            "summary": "Ops"
+          }
+        },
+        "fixVersions": []
+      }
+    }
+  ]
+}

@@ -78,6 +78,7 @@ canvas within a couple of seconds.
 | zone `continues` / `onward` | A zone takes the same two fields a line does. A band that was already running before the map begins, or goes on after it ends, is drawn out to the edge and left **open** on that side rather than closed as if it stopped — with the `onward` text written just past the open edge. |
 | `junctions` | A top-level `{"<id>": {"gx": num, "gy": num}}`. A junction is a bend in the track with **no platform**: a line routes through it, but nothing draws a marker or a label for it, and no zone can hold one. It is where a branch splits off or rejoins when there is no station at that spot. |
 | `branches` | On a line: `[{"name": str?, "stations": [ids], "continues"?, "onward"?}]`. A branch is **the same line going two ways** — same colour, same service, one legend entry — not a second line of the same colour. Start it on a point the line's route already passes through and end it on one too, and the fork and the rejoin draw themselves. This is how to draw a Helsinki-style split. Notes stay on the trunk, addressed by its hop index. |
+| `origin` | On a station, line, zone or interchange an importer made: `"<source>:<id>"` — `jira:ACME-231`, `github:issue/owner/repo#12`. **Leave it alone.** It is how a re-sync recognises what it made last time and keeps the position, colour and wording a human gave it. A spec that came from an importer also carries a top-level `source` recording which one, and with what options. Neither changes anything that is drawn, so neither raises the `format`. |
 | `color` | `#rrggbb`. `spec_reference` returns the ten-colour palette the designer offers; stay inside it unless the diagram has its own brand colours. |
 
 **Line states.** `out-of-service` draws dashed and faded, and caps the route
@@ -201,6 +202,30 @@ period name sits centred in the band between two lines, and the coarser period
 - Switching a map to `metro` keeps the `timeline` block but stops drawing it,
   so a mode flip is free.
 
+## Importing a plan
+
+A map is worth drawing once; keeping it current is what makes it worth keeping.
+`list_sources` says what can be imported from and what each one needs;
+`import_map(source, options)` builds a spec and hands it back **without saving**,
+so read it, adjust it, then `save_map` it.
+
+| import idea | how to draw it |
+|---|---|
+| a Jira epic, or a GitHub `area:` label | a line |
+| an issue | a station at its due date |
+| a fix version or milestone | an `interchanges` capsule across the lanes it lands on |
+| a sprint | a `phases` band |
+
+Pass `into` the name of a map that source imported before and it **re-syncs**:
+what changed upstream comes in, and the layout, colours and wording already in
+the map survive. Prefer that to importing again — a fresh import throws away
+everything anyone arranged.
+
+Two rules worth carrying: something that vanished upstream is kept and reported
+rather than deleted (`prune` is how you actually remove it), and credentials
+live only in the server's environment, so never ask a human to paste a token to
+you and never put one in a spec.
+
 ## Working through MCP
 
 The `metro-map` server (`.mcp.json` in the repo) starts the designer on demand.
@@ -215,6 +240,8 @@ The `metro-map` server (`.mcp.json` in the repo) starts the designer on demand.
 | `resolve_timeline(timeline)` | a roadmap's columns: snapped start, count, and the gx, date and name of each — use it to place milestones on dates |
 | `spec_reference` | palette, label sides and angles, line states, modes, intervals, legend positions, style defaults |
 | `designer_url` | hand the human a link to take over in the browser |
+| `list_sources` | the importers available, their options, and which credentials each needs |
+| `import_map(source, options, into="")` | build a spec from git, GitHub or Jira; `into` re-syncs a map instead of starting over |
 | `stop_designer` | shut the local server down |
 
 Read → modify → `validate_map` → `save_map`. Never hand-write a spec and save it

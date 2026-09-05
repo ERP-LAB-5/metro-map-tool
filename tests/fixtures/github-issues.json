@@ -1,0 +1,126 @@
+{
+  "repo": "acme/platform",
+  "milestones": [
+    {
+      "number": 1,
+      "title": "Beta",
+      "due_on": "2026-03-31T00:00:00Z"
+    },
+    {
+      "number": 2,
+      "title": "GA",
+      "due_on": "2026-06-30T00:00:00Z"
+    },
+    {
+      "number": 3,
+      "title": "Someday",
+      "due_on": null
+    }
+  ],
+  "issues": [
+    {
+      "number": 101,
+      "title": "Password reset",
+      "state": "closed",
+      "labels": [
+        {
+          "name": "area:auth"
+        }
+      ],
+      "milestone": {
+        "number": 1
+      }
+    },
+    {
+      "number": 102,
+      "title": "SSO with Okta",
+      "state": "open",
+      "labels": [
+        {
+          "name": "area:auth"
+        },
+        {
+          "name": "size:L"
+        }
+      ],
+      "milestone": {
+        "number": 2
+      }
+    },
+    {
+      "number": 103,
+      "title": "Invoice PDF",
+      "state": "open",
+      "labels": [
+        {
+          "name": "area:billing"
+        }
+      ],
+      "milestone": {
+        "number": 1
+      }
+    },
+    {
+      "number": 104,
+      "title": "Dunning emails",
+      "state": "open",
+      "labels": [
+        {
+          "name": "area:billing"
+        }
+      ],
+      "milestone": {
+        "number": 2
+      }
+    },
+    {
+      "number": 105,
+      "title": "Audit log",
+      "state": "open",
+      "labels": [
+        {
+          "name": "area:platform"
+        }
+      ],
+      "milestone": {
+        "number": 2
+      }
+    },
+    {
+      "number": 106,
+      "title": "Tidy the README",
+      "state": "open",
+      "labels": [],
+      "milestone": {
+        "number": 1
+      }
+    },
+    {
+      "number": 107,
+      "title": "No milestone at all",
+      "state": "open",
+      "labels": [
+        {
+          "name": "area:auth"
+        }
+      ],
+      "milestone": null
+    },
+    {
+      "number": 108,
+      "title": "Bump deps",
+      "state": "open",
+      "labels": [
+        {
+          "name": "area:platform"
+        }
+      ],
+      "pull_request": {
+        "url": "..."
+      },
+      "milestone": {
+        "number": 1
+      }
+    }
+  ]
+}
