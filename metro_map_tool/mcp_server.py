@@ -249,6 +249,10 @@ def spec_reference() -> dict:
                          '"both" — an arrowhead just past that terminal stop, '
                          "saying the line runs on beyond what the map shows. "
                          "Do not put it on a stop that is also a dead_end",
+            "zone continues": 'a zone takes the same "continues" and "onward" '
+                              "as a line: a band that was already running before "
+                              "the map begins is drawn out to the edge and left "
+                              "open there, rather than closed as if it stopped",
             "onward": 'beside "continues", a line may carry "onward": '
                       '{"start": str?, "end": str?} — what is written beyond '
                       'that arrow, the "to Cockfosters" of a transit map. Use '
@@ -256,6 +260,21 @@ def spec_reference() -> dict:
                       '("since 2019"), a destination, or a phase. Style '
                       '"onward_reach" (in cells, default 0) runs the arrows '
                       "further out from the ends when the labels need room",
+            "junctions": 'an optional top-level {"<id>": {"gx": num, "gy": num}}. '
+                         "A junction is a bend in the track with no platform: a "
+                         "line can be routed through it, but nothing draws a "
+                         "marker or a label for it and no zone can hold one. It "
+                         "is what a branch splits off at, or rejoins on, when "
+                         "there is no station at that spot",
+            "branches": 'a line may carry "branches": [{"name": str?, '
+                        '"stations": [ids], "continues"?, "onward"?}]. A branch '
+                        "is the same line going two ways — same colour, same "
+                        "service, one legend entry — not a second line. Start it "
+                        "on a point the line's route already passes through and "
+                        "end it on one too, and it forks and rejoins by itself. "
+                        "Use this for a Helsinki-style split, not two lines of "
+                        "the same colour. Notes stay on the trunk, addressed by "
+                        "its hop index",
             "interchanges": 'a stretched interchange: {"stations": [ids], '
                             '"label"?, "label_at"?, "label_angle"?}. One capsule '
                             "covers the stops listed, replacing their own "

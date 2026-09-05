@@ -292,9 +292,12 @@ def put_map(name: str):
 
     if data.get("auto_interchange", True):
         mm.auto_interchanges(spec)
-    # stamp on the way out, so anything that saves through this server — the
-    # designer, the MCP tools, a script — leaves a file that can be told apart
-    spec["format"] = mm.SPEC_FORMAT
+    # Stamp on the way out, so anything that saves through this server — the
+    # designer, the MCP tools, a script — leaves a file that can be told apart.
+    # The number is the oldest format that can still draw this map, not the
+    # newest the tool knows: stamping every save with the newest would lock
+    # ordinary maps out of older copies for features they never use.
+    spec["format"] = mm.needs_format(spec)
     try:
         write_spec(path, spec)
     except OSError as exc:

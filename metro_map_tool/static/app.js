@@ -40,7 +40,7 @@ async function api(method, path, payload) {
 const S = {
   name: null,                              // saved map name, null while untitled
   folder: null,                            // which folder it came from, null while untitled
-  spec: { stations: {}, lines: [], zones: [], scenarios: [], interchanges: [] },
+  spec: { stations: {}, junctions: {}, lines: [], zones: [], scenarios: [], interchanges: [] },
   style: { cell: 120, stroke: 10, corner: 22, bundle_gap: 13, label_size: 16 },
   autoIx: true,
   theme: "auto",                           // designer chrome and preview only
@@ -48,7 +48,9 @@ const S = {
   ridesPlaying: true,                      // the travellers run on their own
   snap: 1,                                 // grid step when dragging or nudging
 
-  sel: { kind: null, id: null },           // "station" | "line"
+  sel: { kind: null, id: null },           // "station" | "junction" | "line" | ...
+  branch: null,                            // index into the open line's branches,
+                                           // or null while its trunk is being edited
   dirty: false,
   version: null,                           // content hash of the map as loaded
   ignoreVersion: null,                     // an external change we chose to keep out
@@ -199,6 +201,7 @@ function snapTo(v) {
 /** Every spec the editor touches carries the keys the panels expect. */
 function normalise(spec) {
   spec.stations = spec.stations || {};
+  spec.junctions = spec.junctions || {};
   spec.lines = spec.lines || [];
   spec.zones = spec.zones || [];
   spec.scenarios = spec.scenarios || [];
@@ -342,6 +345,7 @@ function decorate() {
   if (!svg) return;
 
   svg.querySelectorAll(".sel-halo, .ghost").forEach((n) => n.remove());
+  svg.querySelectorAll(".junction.is-sel").forEach((n) => n.classList.remove("is-sel"));
   svg.querySelectorAll("#routes .route").forEach((p) => (p.style.opacity = ""));
   svg.querySelectorAll("#zones .zone").forEach((g) => (g.style.opacity = ""));
 
@@ -355,9 +359,23 @@ function decorate() {
       halo.setAttribute("r", Number(marker.getAttribute("r")) + 7);
       svg.appendChild(halo);
     }
+  } else if (S.sel.kind === "junction") {
+    const handle = svg.querySelector(`.junction[data-junction="${cssEsc(S.sel.id)}"]`);
+    if (handle) {
+      handle.classList.add("is-sel");
+      const halo = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      halo.setAttribute("class", "sel-halo");
+      halo.setAttribute("cx", handle.getAttribute("cx"));
+      halo.setAttribute("cy", handle.getAttribute("cy"));
+      halo.setAttribute("r", Number(handle.getAttribute("r")) + 7);
+      svg.appendChild(halo);
+    }
   } else if (S.sel.kind === "line") {
-    const routes = svg.querySelectorAll("#routes .route");
-    routes.forEach((p, i) => { if (i !== S.sel.id) p.style.opacity = "0.22"; });
+    // a line draws one path per strand now, so the path's index is no longer
+    // its line's — the l{i} class is what actually says which line it is
+    svg.querySelectorAll("#routes .route").forEach((p) => {
+      if (!p.classList.contains(`l${S.sel.id}`)) p.style.opacity = "0.22";
+    });
   } else if (S.sel.kind === "zone") {
     const drawn = drawnZoneIndexes();
     svg.querySelectorAll("#zones .zone").forEach((g, k) => {
@@ -440,11 +458,12 @@ function initCanvas() {
 
   canvas.addEventListener("pointerdown", (ev) => {
     if (ev.button !== 0) return;
-    const hit = ev.target.closest("[data-station]");
-    if (hit && S.spec.stations[hit.dataset.station]) {
-      const id = hit.dataset.station;
+    const hit = ev.target.closest("[data-station], [data-junction]");
+    const hitId = hit && (hit.dataset.station || hit.dataset.junction);
+    if (hit && waypoint(hitId)) {
+      const id = hitId;
       const g = gridAt(ev);
-      const st = S.spec.stations[id];
+      const st = waypoint(id);
       if (!g) return;
       drag = { id, offGX: st.gx - g.gx, offGY: st.gy - g.gy, gx: st.gx, gy: st.gy, moved: false };
       pushUndo();                       // dropped again on pointerup if nothing moved
@@ -463,7 +482,7 @@ function initCanvas() {
       const gy = snapTo(g.gy + drag.offGY);
       drag.gx = gx; drag.gy = gy;
       drawGhost(gx, gy);
-      const st = S.spec.stations[drag.id];
+      const st = waypoint(drag.id);
       if (st.gx !== gx || st.gy !== gy) {
         st.gx = gx; st.gy = gy;
         drag.moved = true;
@@ -509,8 +528,20 @@ function initCanvas() {
 /** A click on a station: append it to the open route, else select it. */
 function onStationClick(id) {
   const tab = currentTab();
+  const isJunction = !!(S.spec.junctions || {})[id];
   if (tab === "lines" && S.sel.kind === "line" && S.spec.lines[S.sel.id]) {
-    applyChange(() => S.spec.lines[S.sel.id].stations.push(id));
+    applyChange(() => routeBeingEdited(S.spec.lines[S.sel.id]).push(id));
+    return;
+  }
+  // a junction has no platform, so nothing that bands or visits stops can hold
+  // one — say so rather than letting the click quietly do nothing
+  if (isJunction) {
+    if (tab !== "stations") {
+      $("#hint").textContent =
+        `“${id}” is a junction — only a line's route can run through it`;
+      return;
+    }
+    select("junction", id);
     return;
   }
   if (tab === "zones" && S.sel.kind === "zone" && S.spec.zones[S.sel.id]) {
@@ -539,6 +570,7 @@ function onStationClick(id) {
 let lastRevealed = "";
 
 function select(kind, id) {
+  if (kind !== S.sel.kind || id !== S.sel.id) S.branch = null;
   S.sel = { kind, id };
   refreshPanels();
   decorate();
@@ -577,7 +609,11 @@ function setHint() {
   if (tab === "stations") {
     text = "Drag a station on the canvas to move it · arrows nudge · Delete removes";
   } else if (tab === "lines" && S.sel.kind === "line" && S.spec.lines[S.sel.id]) {
-    text = `Adding to “${S.spec.lines[S.sel.id].name}” — click stations on the canvas in order`;
+    const ln = S.spec.lines[S.sel.id];
+    const br = (ln.branches || [])[S.branch];
+    text = br
+      ? `Adding to branch “${br.name || `${ln.name} branch ${S.branch + 1}`}” — click stops and junctions on the canvas in order`
+      : `Adding to “${ln.name}” — click stations on the canvas in order`;
   } else if (tab === "lines") {
     text = "Pick a line to edit its route";
   } else if (tab === "zones" && S.sel.kind === "zone" && S.spec.zones[S.sel.id]) {
@@ -618,7 +654,9 @@ function refreshPanels() {
 }
 
 function linesUsing(sid) {
-  return S.spec.lines.filter((ln) => ln.stations.includes(sid));
+  // a branch is the same line, so a stop it alone reaches still counts as on it
+  return S.spec.lines.filter((ln) =>
+    strandsOf(ln).some((st) => st.ids.includes(sid)));
 }
 
 function zonesHolding(sid) {
@@ -664,6 +702,114 @@ function renderStations() {
       row.addEventListener("click", () => select("station", row.dataset.sid)));
   }
   renderStationEditor();
+  renderJunctions();
+}
+
+/** The junction list: id, where it sits, and which lines run through it. */
+function renderJunctions() {
+  const list = $("#junction-list");
+  if (!list) return;
+  const table = S.spec.junctions || {};
+  const ids = Object.keys(table).sort((a, b) =>
+    table[a].gy - table[b].gy || table[a].gx - table[b].gx || a.localeCompare(b));
+  if (!ids.length) {
+    list.innerHTML = `<li class="note">None. Add one where a line should split
+      or rejoin between stops.</li>`;
+    return;
+  }
+  list.innerHTML = ids.map((jid) => {
+    const open = S.sel.kind === "junction" && S.sel.id === jid;
+    const jn = table[jid];
+    const used = linesUsing(jid);
+    const chips = used.length
+      ? used.map((ln) => `<span class="chip" style="color:${esc(ln.color)}">${esc(ln.name)}</span>`).join("")
+      : `<span class="chip unused">on no line</span>`;
+    return `<li class="row ${open ? "is-on" : ""}" data-jid="${esc(jid)}">
+      <span class="dot junction-dot"></span>
+      <span class="grow">
+        <span class="lbl">${esc(jid)}</span>
+        <span class="at">(${jn.gx},${jn.gy})</span>
+        <span class="chips">${chips}</span>
+      </span>
+      <span class="caret">${open ? "▾" : "▸"}</span>
+    </li>` + (open ? `<li class="edit-host"><div id="junction-editor" class="editor"></div></li>` : "");
+  }).join("");
+  list.querySelectorAll("[data-jid]").forEach((row) =>
+    row.addEventListener("click", () => select("junction", row.dataset.jid)));
+  renderJunctionEditor();
+}
+
+function renderJunctionEditor() {
+  const box = $("#junction-editor");
+  if (!box) return;
+  const jid = S.sel.id;
+  const jn = (S.spec.junctions || {})[jid];
+  if (!jn) { box.innerHTML = ""; return; }
+  const used = linesUsing(jid);
+  box.innerHTML = `<div class="card">
+    <div class="row-fields">
+      <label class="field"><span>Grid x</span>
+        <input type="number" id="j-gx" step="${S.snap}" value="${jn.gx}"></label>
+      <label class="field"><span>Grid y</span>
+        <input type="number" id="j-gy" step="${S.snap}" value="${jn.gy}"></label>
+    </div>
+    <p class="note">${used.length
+      ? `On ${used.map((ln) => esc(ln.name)).join(", ")}.`
+      : "On no line yet — add it to a route in the Lines tab, or click it on the canvas while a line is open."}</p>
+    <div><button id="j-del" class="danger">Delete junction</button></div>
+  </div>`;
+  const move = (axis, input) => {
+    input.addEventListener("focus", pushUndo);
+    input.addEventListener("input", () => {
+      const v = Number(input.value);
+      if (!Number.isFinite(v)) return;
+      jn[axis] = v;
+      markDirty();
+      scheduleRender();
+    });
+  };
+  move("gx", $("#j-gx"));
+  move("gy", $("#j-gy"));
+  $("#j-del").addEventListener("click", () => applyChange(() => {
+    // a route still listing it would fail validation on the next save
+    for (const ln of S.spec.lines) {
+      for (const st of strandsOf(ln)) {
+        for (let k = st.ids.length - 1; k >= 0; k -= 1) {
+          if (st.ids[k] === jid) st.ids.splice(k, 1);
+        }
+      }
+      if (S.spec.lines.includes(ln)) pruneNotes(ln);
+    }
+    delete S.spec.junctions[jid];
+    S.sel = { kind: null, id: null };
+  }));
+}
+
+function addJunction() {
+  const table = (S.spec.junctions = S.spec.junctions || {});
+  let n = Object.keys(table).length + 1;
+  while (table[`j${n}`]) n += 1;
+  const jid = `j${n}`;
+  // land it between the two stops of whatever route is open, which is almost
+  // always where a junction is wanted
+  const ln = S.sel.kind === "line" ? S.spec.lines[S.sel.id] : null;
+  const route = ln ? routeBeingEdited(ln).filter((id) => waypoint(id)) : [];
+  let gx = 0, gy = 0;
+  if (route.length >= 2) {
+    const a = waypoint(route[route.length - 2]), b = waypoint(route[route.length - 1]);
+    gx = Math.round((a.gx + b.gx) / 2);
+    gy = Math.round((a.gy + b.gy) / 2);
+  } else {
+    const all = Object.values(S.spec.stations);
+    if (all.length) {
+      gx = Math.round(all.reduce((t, st) => t + st.gx, 0) / all.length);
+      gy = Math.round(all.reduce((t, st) => t + st.gy, 0) / all.length);
+    }
+  }
+  applyChange(() => {
+    table[jid] = { gx, gy };
+    S.sel = { kind: "junction", id: jid };
+  });
 }
 
 function renderStationEditor() {
@@ -863,6 +1009,35 @@ function renderLines() {
 }
 
 /** A stop's label for the notes editor, falling back to its id. */
+/** The route a click on the canvas appends to: the trunk, or the open branch. */
+function routeBeingEdited(ln) {
+  const br = (ln.branches || [])[S.branch];
+  if (!br) return ln.stations;
+  br.stations = br.stations || [];
+  return br.stations;
+}
+
+/** A point on the grid the author can move: a station, or a junction. */
+function waypoint(id) {
+  return (S.spec.stations || {})[id] || (S.spec.junctions || {})[id] || null;
+}
+
+/** Every stop a line reaches, down its trunk and all its branches. */
+function strandsOf(ln) {
+  const out = [{ ids: ln.stations || [], owner: ln, name: ln.name || "" }];
+  (ln.branches || []).forEach((br, i) => out.push({
+    ids: br.stations || [], owner: br,
+    name: br.name || `${ln.name || ""} branch ${i + 1}`,
+  }));
+  return out;
+}
+
+/** A readable name for a route point, station or junction. */
+function pointName(id) {
+  const st = (S.spec.stations || {})[id];
+  return st ? (st.label || id) : id;
+}
+
 function stopName(sid) {
   return (S.spec.stations[sid] || {}).label || sid;
 }
@@ -950,10 +1125,12 @@ function renderLineEditor() {
   if (S.sel.kind !== "line" || !S.spec.lines[S.sel.id]) { box.innerHTML = ""; return; }
   const i = S.sel.id;
   const ln = S.spec.lines[i];
-  const stationIds = Object.keys(S.spec.stations).sort((a, b) => {
-    const A = S.spec.stations[a], B = S.spec.stations[b];
-    return A.gy - B.gy || A.gx - B.gx;
-  });
+  const byPlace = (t) => (a, b) => (t[a].gy - t[b].gy) || (t[a].gx - t[b].gx);
+  const stationIds = Object.keys(S.spec.stations).sort(byPlace(S.spec.stations));
+  const junctionIds = Object.keys(S.spec.junctions || {})
+    .sort(byPlace(S.spec.junctions || {}));
+  if (S.branch !== null && !(ln.branches || [])[S.branch]) S.branch = null;
+  const route = routeBeingEdited(ln);
 
   box.innerHTML = `<div class="card">
     <h3>Line</h3>
@@ -987,19 +1164,42 @@ function renderLineEditor() {
     ${(ln.status || "live") === "out-of-service"
       ? `<p class="note">Drawn dashed and faded, with a dead-end bar wherever the route ends on a stop no line in service reaches.</p>` : ""}
 
-    <h3>Route — ${ln.stations.length} stop${ln.stations.length === 1 ? "" : "s"}</h3>
-    ${ln.stations.length < 2 ? `<p class="warn">A line needs at least two stops to render.</p>` : ""}
+    <h3>Route</h3>
+    <p class="note">A branch is the same line going two ways — same colour, one
+      legend entry. Start it on a stop or junction the route already passes
+      through, and end it on one too, and it forks and rejoins by itself.</p>
+    <div class="strands" id="l-strands">
+      ${strandsOf(ln).map((st, k) => `
+        <button type="button" data-strand="${k - 1}"
+          class="${(k - 1) === (S.branch === null ? -1 : S.branch) ? "is-on" : ""}"
+        >${k === 0 ? "Trunk" : esc(st.name)} <span class="id">${st.ids.length}</span></button>`).join("")}
+      <button type="button" id="l-branch-add" class="ghost">+ Branch</button>
+    </div>
+    ${S.branch !== null && (ln.branches || [])[S.branch] ? `
+    <label class="field"><span>Branch name</span>
+      <input type="text" id="l-branch-name"
+             value="${esc((ln.branches[S.branch].name) || "")}"
+             placeholder="${esc(ln.name)} branch ${S.branch + 1}"></label>
+    <label class="field"><span>Runs on past the map</span><select id="l-branch-onward">
+      ${CONTINUES.map((c) => `<option value="${esc(c.value)}" ${(ln.branches[S.branch].continues || "none") === c.value ? "selected" : ""}>${esc(c.label)}</option>`).join("")}
+    </select></label>` : ""}
+
+    <h3>${S.branch === null ? "Stops" : "Branch stops"} — ${route.length} point${route.length === 1 ? "" : "s"}</h3>
+    ${route.length < 2 ? `<p class="warn">${S.branch === null
+        ? "A line needs at least two stops to render."
+        : "A branch needs at least two points — where it leaves the line, and where it goes."}</p>` : ""}
     <div class="route" id="l-route">
-      ${ln.stations.map((sid, k) => `
+      ${route.map((sid, k) => `
         <div class="stop-row" draggable="true" data-pos="${k}">
           <span class="n">${k + 1}</span>
-          <span class="grow">${esc((S.spec.stations[sid] || {}).label || sid)}
+          <span class="grow">${esc(pointName(sid))}
             <span class="id">${esc(sid)}</span></span>
           <button class="ghost" data-drop="${k}" title="remove from route">×</button>
-        </div>`).join("") || `<p class="note">Empty — pick stations below, or click them on the canvas.</p>`}
+        </div>`).join("") || `<p class="note">Empty — pick points below, or click them on the canvas.</p>`}
     </div>
+    ${S.branch !== null ? `<div><button id="l-branch-del" class="danger">Delete branch</button></div>` : ""}
 
-    ${ln.stations.length > 1 ? `<h3>Between stops</h3>
+    ${S.branch === null && ln.stations.length > 1 ? `<h3>Between stops</h3>
     <p class="note">A short label riding the track — “6 weeks”, “nightly batch”. Leave one blank to remove it.</p>
     <div class="hops" id="l-notes">
       ${ln.stations.slice(0, -1).map((sid, k) => `
@@ -1014,11 +1214,19 @@ function renderLineEditor() {
     <div class="pick" id="l-pick">
       ${stationIds.length ? stationIds.map((sid) =>
         `<button type="button" data-add="${esc(sid)}"
-           class="${ln.stations.includes(sid) ? "on-route" : ""}"
-           title="${ln.stations.includes(sid) ? "already on this route — adding again makes it a repeat stop" : "append to the route"}"
+           class="${route.includes(sid) ? "on-route" : ""}"
+           title="${route.includes(sid) ? "already on this route — adding again makes it a repeat stop" : "append to the route"}"
          >${esc(S.spec.stations[sid].label)}</button>`).join("")
         : `<p class="note">No stations yet — add them in the Stations tab first.</p>`}
     </div>
+    ${junctionIds.length ? `<h3>Junctions</h3>
+    <p class="note">Bends with no platform — where a branch splits or rejoins.</p>
+    <div class="pick" id="l-pick-j">
+      ${junctionIds.map((jid) =>
+        `<button type="button" data-add="${esc(jid)}"
+           class="junction-pick ${route.includes(jid) ? "on-route" : ""}"
+         >${esc(jid)}</button>`).join("")}
+    </div>` : ""}
 
     <div><button id="l-del" class="danger">Delete line</button></div>
   </div>`;
@@ -1059,12 +1267,52 @@ function renderLineEditor() {
     });
   });
   box.querySelectorAll("[data-add]").forEach((btn) =>
-    btn.addEventListener("click", () => applyChange(() => ln.stations.push(btn.dataset.add))));
+    btn.addEventListener("click", () => applyChange(() =>
+      routeBeingEdited(ln).push(btn.dataset.add))));
   box.querySelectorAll("[data-drop]").forEach((btn) =>
     btn.addEventListener("click", () => applyChange(() => {
-      ln.stations.splice(Number(btn.dataset.drop), 1);
-      pruneNotes(ln);
+      routeBeingEdited(ln).splice(Number(btn.dataset.drop), 1);
+      if (S.branch === null) pruneNotes(ln);   // notes ride the trunk's hops
     })));
+
+  box.querySelectorAll("[data-strand]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const k = Number(btn.dataset.strand);
+      S.branch = k < 0 ? null : k;
+      refreshPanels();
+      setHint();
+    }));
+  const addBranch = $("#l-branch-add");
+  if (addBranch) addBranch.addEventListener("click", () => applyChange(() => {
+    ln.branches = ln.branches || [];
+    ln.branches.push({ name: `${ln.name} branch ${ln.branches.length + 1}`,
+                       stations: [] });
+    S.branch = ln.branches.length - 1;
+  }));
+  const brName = $("#l-branch-name");
+  if (brName) {
+    brName.addEventListener("focus", pushUndo);
+    brName.addEventListener("input", () => {
+      const br = ln.branches[S.branch];
+      const said = brName.value.trim();
+      if (said) br.name = said; else delete br.name;   // the default stays implicit
+      markDirty();
+      scheduleRender();
+    });
+    brName.addEventListener("change", refreshPanels);
+  }
+  const brOnward = $("#l-branch-onward");
+  if (brOnward) brOnward.addEventListener("change", (ev) => applyChange(() => {
+    const br = ln.branches[S.branch];
+    if (ev.target.value === "none") { delete br.continues; delete br.onward; }
+    else { br.continues = ev.target.value; pruneSays(br); }
+  }));
+  const brDel = $("#l-branch-del");
+  if (brDel) brDel.addEventListener("click", () => applyChange(() => {
+    ln.branches.splice(S.branch, 1);
+    if (!ln.branches.length) delete ln.branches;
+    S.branch = null;
+  }));
 
   box.querySelectorAll("[data-note]").forEach((input) => {
     input.addEventListener("focus", pushUndo);
@@ -1096,9 +1344,10 @@ function initRouteDnD(ln) {
       const to = Number(row.dataset.pos);
       if (from === null || from === to) return;
       applyChange(() => {
-        const [sid] = ln.stations.splice(from, 1);
-        ln.stations.splice(to, 0, sid);
-        pruneNotes(ln);
+        const route = routeBeingEdited(ln);
+        const [sid] = route.splice(from, 1);
+        route.splice(to, 0, sid);
+        if (S.branch === null) pruneNotes(ln);
       });
       from = null;
     });
@@ -1897,7 +2146,11 @@ function insertSpace(sid, dx, dy, withAnchor) {
   // spacing the author chose. Round only to keep float noise out of the spec.
   const shift = (v, by) => Math.round((v + by) * 1000) / 1000;
   applyChange(() => {
-    for (const st of Object.values(S.spec.stations)) {
+    // junctions move with the stations: they are points on the same grid, and
+    // leaving them behind would drag every route through them out of shape
+    const movers = Object.values(S.spec.stations)
+      .concat(Object.values(S.spec.junctions || {}));
+    for (const st of movers) {
       if (dx && past(st.gx, ax)) st.gx = shift(st.gx, dx);
       if (dy && past(st.gy, ay)) st.gy = shift(st.gy, dy);
     }
@@ -2439,6 +2692,7 @@ async function boot() {
   syncMode();
 
   $("#btn-add-station").addEventListener("click", addStation);
+  $("#btn-add-junction").addEventListener("click", addJunction);
   $("#btn-add-line").addEventListener("click", addLine);
   $("#btn-add-zone").addEventListener("click", addZone);
   $("#btn-add-scenario").addEventListener("click", addScenario);

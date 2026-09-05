@@ -399,6 +399,13 @@ the drawn track; every consecutive pair of stops needs a line between them.
 first two stops, so the last legal `at` is two less than the number of stops.
 `gx`/`gy` are grid cells, not pixels, and need not be whole numbers — `9.5`
 sits half a cell along.
+`junctions` is a top-level `{"<id>": {"gx", "gy"}}` — a bend in the track with
+no platform, drawn as nothing, that a line can be routed through. A line's
+`branches` are `[{"name"?, "stations": [ids]}]`: the same line going two ways,
+in one colour under one legend entry. Start a branch on a point the route
+already passes through and end it on one too, and the fork and the rejoin draw
+themselves — which is how to get a Helsinki-style split. A zone takes the same
+`continues` and `onward` a line does, and is left open on the side it runs off.
 `continues` on a line is `start`, `end` or `both` and arrows that end onward;
 `onward` is `{"start": str?, "end": str?}` — the "to Cockfosters" written past
 that arrow, and the `onward_reach` style (in cells) runs the ends further out.

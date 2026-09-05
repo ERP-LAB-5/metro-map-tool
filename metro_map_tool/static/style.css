@@ -455,3 +455,26 @@ body.side-hidden .side { display: none; }
 /* the line picker in the milestone dialog */
 #m-lines .toggle { gap: 7px; color: var(--ink); }
 #m-lines .swatch { flex: 0 0 auto; }
+
+/* A junction paints nothing in the SVG itself, so an exported map never shows
+   one. These rules live only in the designer, which inlines the SVG — they are
+   what makes a junction visible and grabbable while it is being placed. */
+#canvas svg .junction {
+  fill: var(--paper);
+  stroke: var(--ink);
+  stroke-width: 2;
+  stroke-dasharray: 3 3;
+  opacity: .5;
+  cursor: grab;
+}
+#canvas svg .junction:hover { opacity: 1; }
+#canvas svg .junction.is-sel { stroke: var(--accent, #0098d4); opacity: 1; stroke-dasharray: none; }
+.dot.junction-dot {
+  background: none;
+  border: 2px dashed currentColor;
+  opacity: .6;
+}
+.strands { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 10px; }
+.strands button { font-size: 12px; padding: 4px 9px; }
+.strands button.is-on { background: var(--accent, #0098d4); color: #fff; border-color: transparent; }
+.pick .junction-pick { border-style: dashed; }

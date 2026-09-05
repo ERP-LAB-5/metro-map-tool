@@ -16,11 +16,15 @@ Input JSON
              "label_angle": 0|45|90,                   # counter-clockwise tilt
              "dead_end": "buffer"|"smoke"|"fire"}      # stops here / watch out / get off
   },
+  "junctions": {"<id>": {"gx": num, "gy": num}}?,   # a bend with no platform
   "lines": [ {"name": str, "color": "#rrggbb", "stations": ["<id>", ...],
+              "branches": [{"name": str?, "stations": ["<id>", ...]}]?,
               "status": "live"|"out-of-service"|"under-construction"|"planned"?,
               "continues": "none"|"start"|"end"|"both"?,
               "onward": {"start": str?, "end": str?}?} ],   # where it goes off-map
-  "zones": [ {"name": str, "color": "#rrggbb", "stations": ["<id>", ...]} ]?,
+  "zones": [ {"name": str, "color": "#rrggbb", "stations": ["<id>", ...],
+              "continues": "none"|"start"|"end"|"both"?,
+              "onward": {"start": str?, "end": str?}?} ]?,
   "mode": "metro"|"roadmap"?,                    # metro is the default
   "timeline": {"start": "yyyy-mm-dd", "end": "yyyy-mm-dd",
                "interval": "day"|"week"|"month"|"quarter"|"year"}?,  # roadmap only
@@ -294,24 +298,34 @@ def assign_offsets(segments: List[dict], gap: float) -> None:
             clusters.append(cluster)
 
         for cl in clusters:
-            ranks = sorted({s["line"] for s in cl})
+            # a branch retracing its own trunk earns its own track, so rank
+            # by strand as well as line
+            ranks = sorted({(s["line"], s.get("strand", 0)) for s in cl})
             n = len(ranks)
             for seg in cl:
-                k = ranks.index(seg["line"])
+                k = ranks.index((seg["line"], seg.get("strand", 0)))
                 seg["offset"] = (k - (n - 1) / 2) * gap
                 seg["shift"] = scale(perp(seg["u"]), seg["offset"])
 
 
 # ---------------------------------------------------------------- model ----
 
+def sid_key(li: int, sid: str) -> Tuple[int, str]:
+    return (li, sid)
+
+
 class Map:
     def __init__(self, spec: dict, style: Style):
         self.style = style
         self.stations = spec["stations"]
         self.lines = spec["lines"]
+        # A junction is a bend in the track with no platform: it has a place on
+        # the grid so lines can be routed through it, but it is not a station,
+        # so nothing draws a marker or a label for it and no zone can hold one.
+        self.junctions = spec.get("junctions") or {}
         self.pos: Dict[str, Point] = {
             sid: (st["gx"] * style.cell, st["gy"] * style.cell)
-            for sid, st in self.stations.items()
+            for sid, st in list(self.stations.items()) + list(self.junctions.items())
         }
         self.segments: List[dict] = []
         self.stop_seg: Dict[Tuple[int, str], dict] = {}   # (line index, station) -> touching segment
@@ -335,54 +349,63 @@ class Map:
         xs = [p[0] for p in self.pos.values()]
         return (min(xs), max(xs))
 
-    def _leg(self, li: int, hop: int, p: Point, q: Point) -> dict:
-        return {"line": li, "hop": hop, "p": p, "q": q,
+    def _leg(self, li: int, si: int, hop: int, p: Point, q: Point) -> dict:
+        return {"line": li, "strand": si, "hop": hop, "p": p, "q": q,
                 "offset": 0.0, "shift": (0.0, 0.0)}
 
     def _build_segments(self) -> None:
+        reach = self.style.onward_reach * self.style.cell
         for li, line in enumerate(self.lines):
-            ids = line["stations"]
-            at = line_continues(line)
+            for si, strand in enumerate(line_strands(line)):
+                ids, at = strand["ids"], strand["at"]
+                ids = [sid for sid in ids if sid in self.pos]
+                trunk = si == 0        # the trunk owns the per-stop lookups; a
+                                       # branch only fills in what it alone reaches
 
-            # A line that carries on is drawn out to the edge, not merely
-            # arrowed beside its last stop. The hop sentinels keep these legs
-            # out of the station-pair lookups notes and rides do: they belong to
-            # no pair of stations, because one of their ends is not a station.
-            reach = self.style.onward_reach * self.style.cell
-            if at in ("start", "both") and ids and self.edges:
-                here = self.pos[ids[0]]
-                out = (self.edges[0] - reach, here[1])
-                if abs(out[0] - here[0]) > 0.5:
-                    self.segments.append(self._leg(li, -1, out, here))
+                def remember(sid: str, seg: Optional[dict]) -> None:
+                    if trunk and seg is not None:
+                        self.stop_seg[sid_key(li, sid)] = seg
+                    elif seg is not None:
+                        self.stop_seg.setdefault(sid_key(li, sid), seg)
 
-            # "hop" is the index of the station pair a leg belongs to, so a note
-            # written against hop k can find the legs that carry it — one leg
-            # when the pair is octilinear already, two when it bends
-            for hop, (a, b) in enumerate(zip(ids, ids[1:])):
-                pa = self.pos[a]
-                first = None
-                for q in octilinear(pa, self.pos[b]):
-                    seg = {"line": li, "hop": hop, "p": pa, "q": q,
-                           "offset": 0.0, "shift": (0.0, 0.0)}
-                    self.segments.append(seg)
-                    first = first or seg
-                    pa = q
-                self.stop_seg[(li, a)] = first                     # segment leaving a
-                self.stop_seg.setdefault((li, b), self.segments[-1])
-            if len(ids) >= 2:
-                self.stop_seg[(li, ids[-1])] = self.segments[-1]   # terminus
+                # A line that carries on is drawn out to the edge, not merely
+                # arrowed beside its last stop. The hop sentinels keep these legs
+                # out of the station-pair lookups notes and rides do: they belong
+                # to no pair of stations, because one end is not a station.
+                if at in ("start", "both") and ids and self.edges:
+                    here = self.pos[ids[0]]
+                    out = (self.edges[0] - reach, here[1])
+                    if abs(out[0] - here[0]) > 0.5:
+                        self.segments.append(self._leg(li, si, -1, out, here))
 
-            if at in ("end", "both") and ids and self.edges:
-                here = self.pos[ids[-1]]
-                out = (self.edges[1] + reach, here[1])
-                if abs(out[0] - here[0]) > 0.5:
-                    self.segments.append(self._leg(li, -2, here, out))
+                # "hop" is the index of the pair a leg belongs to, so a note
+                # written against hop k can find the legs that carry it — one leg
+                # when the pair is octilinear already, two when it bends
+                for hop, (a, b) in enumerate(zip(ids, ids[1:])):
+                    pa = self.pos[a]
+                    first = None
+                    for q in octilinear(pa, self.pos[b]):
+                        seg = self._leg(li, si, hop, pa, q)
+                        self.segments.append(seg)
+                        first = first or seg
+                        pa = q
+                    remember(a, first)                          # segment leaving a
+                    self.stop_seg.setdefault(sid_key(li, b), self.segments[-1])
+                if len(ids) >= 2:
+                    remember(ids[-1], self.segments[-1])        # terminus
+
+                if at in ("end", "both") and ids and self.edges:
+                    here = self.pos[ids[-1]]
+                    out = (self.edges[1] + reach, here[1])
+                    if abs(out[0] - here[0]) > 0.5:
+                        self.segments.append(self._leg(li, si, -2, here, out))
 
     # -- routes ------------------------------------------------------------
 
-    def polyline(self, line_index: int) -> List[Point]:
-        """Offset legs of one line, re-joined at their intersections."""
-        segs = [s for s in self.segments if s["line"] == line_index]
+    def polyline(self, line_index: int, strand: int = 0) -> List[Point]:
+        """Offset legs of one strand of one line, re-joined at intersections."""
+        segs = [s for s in self.segments
+                if s["line"] == line_index and s["strand"] == strand]
         return join_legs([(add(s["p"], s["shift"]), add(s["q"], s["shift"]))
                           for s in segs])
 
@@ -395,18 +418,19 @@ class Map:
         asking to walk across open ground.
         """
         for li, line in enumerate(self.lines):
-            ids = line["stations"]
-            for k in range(len(ids) - 1):
-                pair = (ids[k], ids[k + 1])
-                if pair not in ((a, b), (b, a)):
-                    continue
-                segs = [g for g in self.segments
-                        if g["line"] == li and g["hop"] == k]
-                legs = [(add(g["p"], g["shift"]), add(g["q"], g["shift"]))
-                        for g in segs]
-                if pair == (a, b):
-                    return legs
-                return [(q, p) for p, q in reversed(legs)]
+            for si, strand in enumerate(line_strands(line)):
+                ids = strand["ids"]
+                for k in range(len(ids) - 1):
+                    pair = (ids[k], ids[k + 1])
+                    if pair not in ((a, b), (b, a)):
+                        continue
+                    segs = [g for g in self.segments if g["line"] == li
+                            and g["strand"] == si and g["hop"] == k]
+                    legs = [(add(g["p"], g["shift"]), add(g["q"], g["shift"]))
+                            for g in segs]
+                    if pair == (a, b):
+                        return legs
+                    return [(q, p) for p, q in reversed(legs)]
         return None
 
     def journey(self, stations: Sequence[str]) -> Optional[List[Point]]:
@@ -433,16 +457,17 @@ class Map:
         Prefers a line that ends here, so the bar sits across the track the
         route actually arrives on rather than one merely passing through.
         """
-        touching = [self.stop_seg.get((li, sid)) for li in self.lines_through(sid)]
-        ending = [self.stop_seg.get((li, sid)) for li in self.lines_through(sid)
-                  if self.lines[li]["stations"][-1] == sid
-                  or self.lines[li]["stations"][0] == sid]
+        touching = [self.stop_seg.get(sid_key(li, sid)) for li in self.lines_through(sid)]
+        ending = [self.stop_seg.get(sid_key(li, sid)) for li in self.lines_through(sid)
+                  if any(st["ids"] and (st["ids"][0] == sid or st["ids"][-1] == sid)
+                         for st in line_strands(self.lines[li]))]
         for seg in ending + touching:
             if seg:
                 return seg
         return None
 
-    def hop_midpoint(self, line_index: int, hop: int) -> Optional[Tuple[Point, Point]]:
+    def hop_midpoint(self, line_index: int, hop: int,
+                     strand: int = 0) -> Optional[Tuple[Point, Point]]:
         """The middle of one station-to-station hop, and the way the track runs.
 
         Measured along the legs *after* bundling, so a note on a line sharing a
@@ -452,7 +477,8 @@ class Map:
         """
         legs = [(add(g["p"], g["shift"]), add(g["q"], g["shift"]))
                 for g in self.segments
-                if g["line"] == line_index and g["hop"] == hop]
+                if g["line"] == line_index and g["strand"] == strand
+                and g["hop"] == hop]
         if not legs:
             return None
         spans = [dist(a, b) for a, b in legs]
@@ -465,7 +491,8 @@ class Map:
         return None
 
     def lines_through(self, sid: str) -> List[int]:
-        return [i for i, ln in enumerate(self.lines) if sid in ln["stations"]]
+        return [i for i, ln in enumerate(self.lines)
+                if any(sid in st["ids"] for st in line_strands(ln))]
 
     def directions_at(self, sid: str) -> List[Point]:
         """Unit vectors of every track leaving this station."""
@@ -482,7 +509,7 @@ class Map:
         if not st.get("interchange"):
             return self.style.stop_r + self.style.stop_ring / 2
         # an interchange ring must cover the whole bundle passing through it
-        touching = [self.stop_seg.get((li, sid)) for li in self.lines_through(sid)]
+        touching = [self.stop_seg.get(sid_key(li, sid)) for li in self.lines_through(sid)]
         spread = max((abs(seg["offset"]) for seg in touching if seg), default=0.0)
         return max(self.style.inter_r, spread + self.style.stroke / 2 + 1)
 
@@ -797,6 +824,99 @@ def line_continues(line: dict) -> str:
     at = line.get("continues") or "none"
     return at if at in CONTINUES else "none"
 
+def line_strands(line: dict) -> List[dict]:
+    """Every separate run of track a line draws: its trunk, then each branch.
+
+    A branch is not another line — same colour, same service, same legend entry
+    — it is the same line going two ways. Modelling it as an extra strand is
+    what makes splitting and rejoining free: a branch whose first and last
+    points are ones the trunk also passes through forks and rejoins by simply
+    being drawn, with no junction logic anywhere.
+    """
+    out = [{"ids": line.get("stations") or [], "at": line_continues(line),
+            "owner": line, "name": line.get("name", "")}]
+    for bi, br in enumerate(line.get("branches") or [], 1):
+        if not isinstance(br, dict):
+            continue
+        out.append({"ids": br.get("stations") or [], "at": line_continues(br),
+                    "owner": br,
+                    "name": br.get("name") or f'{line.get("name", "")} branch {bi}'})
+    return out
+
+
+def onward_errors(owner: dict, where: str) -> List[str]:
+    """Check an onward label block, which lines and zones share."""
+    said = owner.get("onward")
+    if said is None:
+        return []
+    if not isinstance(said, dict):
+        return [f"{where}: onward must be an object of start and/or end to text"]
+    out = []
+    for key, value in said.items():
+        if key not in ("start", "end"):
+            out.append(f"{where}: onward has no '{key}' — only start and end")
+        elif not isinstance(value, str):
+            out.append(f"{where}: onward.{key} must be text")
+    return out
+
+
+def zone_continues(zone: dict) -> str:
+    """Which sides of a zone run off the map."""
+    at = zone.get("continues") or "none"
+    return at if at in CONTINUES else "none"
+
+
+def box_path(x0: float, y0: float, x1: float, y1: float, r: float,
+             square_left: bool = False, square_right: bool = False) -> str:
+    """A closed rounded box, with either vertical side left square.
+
+    A band that runs off the map has no corner on that side to round — the
+    shape is cut by the edge of the paper, not finished there.
+    """
+    r = max(0.0, min(r, (x1 - x0) / 2, (y1 - y0) / 2))
+    rl = 0.0 if square_left else r
+    rr = 0.0 if square_right else r
+
+    def corner(cx, cy, tx, ty, rad):
+        return f"L {tx:.1f} {ty:.1f}" if rad <= 0 else \
+            f"Q {cx:.1f} {cy:.1f} {tx:.1f} {ty:.1f}"
+
+    return (f"M {x0 + rl:.1f} {y0:.1f} L {x1 - rr:.1f} {y0:.1f} "
+            + corner(x1, y0, x1, y0 + rr, rr)
+            + f" L {x1:.1f} {y1 - rr:.1f} "
+            + corner(x1, y1, x1 - rr, y1, rr)
+            + f" L {x0 + rl:.1f} {y1:.1f} "
+            + corner(x0, y1, x0, y1 - rl, rl)
+            + f" L {x0:.1f} {y0 + rl:.1f} "
+            + corner(x0, y0, x0 + rl, y0, rl) + " Z")
+
+
+def open_outline(x0: float, y0: float, x1: float, y1: float, r: float,
+                 open_left: bool, open_right: bool) -> str:
+    """The same box's outline, leaving out the sides it runs off through.
+
+    Drawing the open side would close the band and say the opposite of what is
+    meant, so the stroke simply stops there and the fill runs on past it.
+    """
+    if not open_left and not open_right:
+        return box_path(x0, y0, x1, y1, r)
+    r = max(0.0, min(r, (x1 - x0) / 2, (y1 - y0) / 2))
+    if open_left and open_right:                     # a corridor, top and bottom
+        return (f"M {x0:.1f} {y0:.1f} L {x1:.1f} {y0:.1f} "
+                f"M {x0:.1f} {y1:.1f} L {x1:.1f} {y1:.1f}")
+    if open_left:                                    # rounded on the right only
+        return (f"M {x0:.1f} {y0:.1f} L {x1 - r:.1f} {y0:.1f} "
+                f"Q {x1:.1f} {y0:.1f} {x1:.1f} {y0 + r:.1f} "
+                f"L {x1:.1f} {y1 - r:.1f} "
+                f"Q {x1:.1f} {y1:.1f} {x1 - r:.1f} {y1:.1f} "
+                f"L {x0:.1f} {y1:.1f}")
+    return (f"M {x1:.1f} {y0:.1f} L {x0 + r:.1f} {y0:.1f} "
+            f"Q {x0:.1f} {y0:.1f} {x0:.1f} {y0 + r:.1f} "
+            f"L {x0:.1f} {y1 - r:.1f} "
+            f"Q {x0:.1f} {y1:.1f} {x0 + r:.1f} {y1:.1f} "
+            f"L {x1:.1f} {y1:.1f}")
+
+
 LEGEND_AT = ("hide", "top", "left", "bottom", "right")
 DEFAULT_LEGEND = "bottom"
 
@@ -1050,24 +1170,30 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
     for i, line in enumerate(m.lines):
         state = line_status(line)
         cls = f"route{STATUS_CLASS[state]}"
-        title = esc(line["name"]) + STATUS_LABEL.get(state, "")
-        if not any(g["line"] == i for g in m.segments):   # nothing to draw yet
-            routes.append(f'    <path class="{cls} l{i}" d="" stroke="{line["color"]}">'
-                          f'<title>{title}</title></path>')
-            continue
-        pts = m.polyline(i)
-        for p in pts:
-            grow(p[0] - s.stroke / 2, p[1] - s.stroke / 2,
-                 p[0] + s.stroke / 2, p[1] + s.stroke / 2)
-        routes.append(
-            f'    <path class="{cls} l{i}" d="{rounded_path(pts, s.corner)}" '
-            f'stroke="{line["color"]}"><title>{title}</title></path>'
-        )
+        # every strand of a line is the same line: same colour, same service,
+        # same l{i} class, so dark mode and the legend need to know nothing
+        for si, strand in enumerate(line_strands(line)):
+            title = esc(strand["name"]) + STATUS_LABEL.get(state, "")
+            if not any(g["line"] == i and g["strand"] == si for g in m.segments):
+                if si == 0:                               # nothing to draw yet
+                    routes.append(f'    <path class="{cls} l{i}" d="" '
+                                  f'stroke="{line["color"]}">'
+                                  f'<title>{title}</title></path>')
+                continue
+            pts = m.polyline(i, si)
+            for p in pts:
+                grow(p[0] - s.stroke / 2, p[1] - s.stroke / 2,
+                     p[0] + s.stroke / 2, p[1] + s.stroke / 2)
+            routes.append(
+                f'    <path class="{cls} l{i}" d="{rounded_path(pts, s.corner)}" '
+                f'stroke="{line["color"]}"><title>{title}</title></path>'
+            )
 
     # Dead ends. A stop marked "dead_end" says so outright, whatever its lines
     # are doing; otherwise an out-of-service line still earns a bar wherever it
     # runs out on a stop the network no longer reaches in service.
-    live = {sid for ln in m.lines if line_status(ln) == "live" for sid in ln["stations"]}
+    live = {sid for ln in m.lines if line_status(ln) == "live"
+            for st in line_strands(ln) for sid in st["ids"]}
     dead_ends = []
     marked: Dict[str, Tuple[str, str]] = {}          # station -> (style, why)
 
@@ -1080,11 +1206,15 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
             marked[sid] = (kind, f'{st["label"]} — {why_text[kind]}')
 
     for i, line in enumerate(m.lines):
-        ids = line["stations"]
-        if line_status(line) != "out-of-service" or len(ids) < 2:
+        if line_status(line) != "out-of-service":
             continue
-        for sid in sorted({ids[0], ids[-1]} - live):
-            marked.setdefault(sid, ("buffer", f'{line["name"]} ends here'))
+        for strand in line_strands(line):
+            ids = strand["ids"]
+            if len(ids) < 2:
+                continue
+            for sid in sorted({ids[0], ids[-1]} - live):
+                if sid in m.stations:      # a junction has no platform to buffer
+                    marked.setdefault(sid, ("buffer", f'{strand["name"]} ends here'))
 
     for sid, (kind, why) in marked.items():
         seg = m.end_segment(sid)
@@ -1140,71 +1270,72 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
     onward = []
     said_any = False
     for li, line in enumerate(m.lines):
-        at = line_continues(line)
-        ids = line["stations"]
-        if at == "none" or not ids:
-            continue
-        wanted = ([(ids[0], "start", -1)] if at in ("start", "both") else []) \
-            + ([(ids[-1], "end", -2)] if at in ("end", "both") else [])
-        for sid, which, tag in wanted:
-            run = [g for g in m.segments if g["line"] == li and g["hop"] == tag]
-            if run:
-                # the line was drawn out to the edge; the arrow caps it there
-                leg = run[0]
-                far = leg["p"] if which == "start" else leg["q"]
-                near = leg["q"] if which == "start" else leg["p"]
-                d = norm(sub(far, near))
-                base = add(add(far, leg["shift"]), scale(d, s.stroke * 0.5))
-            else:
-                # nothing to extend — the stop already sits on the edge, or
-                # there is no calendar and no other station to reach towards
-                seg = m.stop_seg.get((li, sid))
-                here = m.pos[sid]
-                if seg:
-                    away = (sub(seg["p"], seg["q"])
-                            if dist(seg["p"], here) < dist(seg["q"], here)
-                            else sub(seg["q"], seg["p"]))
-                    d, shift = norm(away), seg["shift"]
+        for si, strand in enumerate(line_strands(line)):
+            at, ids = strand["at"], [x for x in strand["ids"] if x in m.pos]
+            if at == "none" or not ids:
+                continue
+            wanted = ([(ids[0], "start", -1)] if at in ("start", "both") else []) \
+                + ([(ids[-1], "end", -2)] if at in ("end", "both") else [])
+            for sid, which, tag in wanted:
+                run = [g for g in m.segments if g["line"] == li
+                       and g["strand"] == si and g["hop"] == tag]
+                if run:
+                    # the line was drawn out to the edge; the arrow caps it there
+                    leg = run[0]
+                    far = leg["p"] if which == "start" else leg["q"]
+                    near = leg["q"] if which == "start" else leg["p"]
+                    d = norm(sub(far, near))
+                    base = add(add(far, leg["shift"]), scale(d, s.stroke * 0.5))
                 else:
-                    d, shift = ((-1.0, 0.0) if which == "start" else (1.0, 0.0)), (0.0, 0.0)
-                base = add(add(here, shift),
-                           scale(d, m.marker_radius(sid) + s.stroke * 0.5))
-            mark, reach = chevron(base, d, s, li)
-            far_pt = add(base, scale(d, reach))
+                    # nothing to extend — the stop already sits on the edge, or
+                    # there is no calendar and no other station to reach towards
+                    seg = m.stop_seg.get(sid_key(li, sid))
+                    here = m.pos[sid]
+                    if seg:
+                        away = (sub(seg["p"], seg["q"])
+                                if dist(seg["p"], here) < dist(seg["q"], here)
+                                else sub(seg["q"], seg["p"]))
+                        d, shift = norm(away), seg["shift"]
+                    else:
+                        d, shift = ((-1.0, 0.0) if which == "start" else (1.0, 0.0)), (0.0, 0.0)
+                    base = add(add(here, shift),
+                               scale(d, m.marker_radius(sid) + s.stroke * 0.5))
+                mark, reach = chevron(base, d, s, li)
+                far_pt = add(base, scale(d, reach))
 
-            # "to Cockfosters": where the line goes once it is off the page.
-            # Written beyond the arrow, reading outward, so it belongs to the
-            # end of the line rather than to the last stop before it.
-            said = (line.get("onward") or {}).get(which) if isinstance(
-                line.get("onward"), dict) else None
-            said = said.strip() if isinstance(said, str) else ""
-            text = ""
-            if said:
-                said_any = True
-                anchor = add(far_pt, scale(d, s.stroke * 0.7))
-                width = len(said) * s.onward_size * 0.56 + s.stroke
-                # a line leaving sideways reads outward from the arrow; one
-                # leaving up or down has no side to read from, so it centres
-                # under its own tip instead
-                upright = abs(d[0]) < 0.35
-                align = "middle" if upright else ("start" if d[0] > 0 else "end")
-                dy = s.onward_size * (0.9 if d[1] > 0 else -0.3) if upright \
-                    else s.onward_size * 0.36
-                text = (f'<text class="onward-say" x="{anchor[0]:.1f}" '
-                        f'y="{anchor[1] + dy:.1f}" '
-                        f'text-anchor="{align}">{esc(said)}</text>')
-                x0 = anchor[0] - (width / 2 if upright else
-                                  (0 if d[0] > 0 else width))
-                grow(x0, anchor[1] + dy - s.onward_size,
-                     x0 + width, anchor[1] + dy + s.onward_size * 0.4)
+                # "to Cockfosters": where the line goes once it is off the page.
+                # Written beyond the arrow, reading outward, so it belongs to the
+                # end of the line rather than to the last stop before it.
+                said = (strand["owner"].get("onward") or {}).get(which) \
+                    if isinstance(strand["owner"].get("onward"), dict) else None
+                said = said.strip() if isinstance(said, str) else ""
+                text = ""
+                if said:
+                    said_any = True
+                    anchor = add(far_pt, scale(d, s.stroke * 0.7))
+                    width = len(said) * s.onward_size * 0.56 + s.stroke
+                    # a line leaving sideways reads outward from the arrow; one
+                    # leaving up or down has no side to read from, so it centres
+                    # under its own tip instead
+                    upright = abs(d[0]) < 0.35
+                    align = "middle" if upright else ("start" if d[0] > 0 else "end")
+                    dy = s.onward_size * (0.9 if d[1] > 0 else -0.3) if upright \
+                        else s.onward_size * 0.36
+                    text = (f'<text class="onward-say" x="{anchor[0]:.1f}" '
+                            f'y="{anchor[1] + dy:.1f}" '
+                            f'text-anchor="{align}">{esc(said)}</text>')
+                    x0 = anchor[0] - (width / 2 if upright else
+                                      (0 if d[0] > 0 else width))
+                    grow(x0, anchor[1] + dy - s.onward_size,
+                         x0 + width, anchor[1] + dy + s.onward_size * 0.4)
 
-            onward.append(
-                f'    <g class="onward-mark" stroke="{line["color"]}">'
-                f'<title>{esc(line["name"])} continues'
-                f'{" — " + esc(said) if said else ""}</title>{mark}{text}</g>')
-            pad = s.stroke
-            grow(min(base[0], far_pt[0]) - pad, min(base[1], far_pt[1]) - pad,
-                 max(base[0], far_pt[0]) + pad, max(base[1], far_pt[1]) + pad)
+                onward.append(
+                    f'    <g class="onward-mark" stroke="{line["color"]}">'
+                    f'<title>{esc(strand["name"])} continues'
+                    f'{" — " + esc(said) if said else ""}</title>{mark}{text}</g>')
+                pad = s.stroke
+                grow(min(base[0], far_pt[0]) - pad, min(base[1], far_pt[1]) - pad,
+                     max(base[0], far_pt[0]) + pad, max(base[1], far_pt[1]) + pad)
 
     # notes riding the track between two stations — "6 weeks", "nightly batch"
     notes = []
@@ -1362,6 +1493,7 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
 
     # zones — tinted bands behind the network, wrapping their stations and labels
     zones = []
+    zone_open = False
     for zi, zone in enumerate(spec.get("zones", []) or []):
         boxes = [extent[sid] for sid in zone.get("stations", []) if sid in extent]
         if not boxes:
@@ -1371,19 +1503,71 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
         zy0 = min(b[1] for b in boxes) - pad
         zx1 = max(b[2] for b in boxes) + pad
         zy1 = max(b[3] for b in boxes) + pad
+
+        # a band that was already running before the map begins, or goes on
+        # after it ends, is drawn out to the edge and left open there
+        at = zone_continues(zone)
+        reach = s.onward_reach * s.cell
+        open_left = at in ("start", "both") and m.edges is not None
+        open_right = at in ("end", "both") and m.edges is not None
+        if open_left:
+            zx0 = min(zx0, m.edges[0] - reach)
+        if open_right:
+            zx1 = max(zx1, m.edges[1] + reach)
+
         # the label sits just above the band: inside, it would land on the
         # station labels that hug the top edge
         ty = zy0 - 7
+        if not open_left and not open_right:
+            shape = (f'      <rect class="zone-band" x="{zx0:.1f}" y="{zy0:.1f}" '
+                     f'width="{zx1 - zx0:.1f}" height="{zy1 - zy0:.1f}" '
+                     f'rx="{s.zone_radius:.1f}">'
+                     f'<title>{esc(zone["name"])}</title></rect>')
+        else:
+            zone_open = True
+            shape = (
+                f'      <path class="zone-wash" '
+                f'd="{box_path(zx0, zy0, zx1, zy1, s.zone_radius, open_left, open_right)}">'
+                f'<title>{esc(zone["name"])}</title></path>\n'
+                f'      <path class="zone-edge" fill="none" '
+                f'd="{open_outline(zx0, zy0, zx1, zy1, s.zone_radius, open_left, open_right)}"/>')
+
+        says = ""
+        for which, is_open, side in (("start", open_left, -1), ("end", open_right, 1)):
+            text = (zone.get("onward") or {}).get(which) if isinstance(
+                zone.get("onward"), dict) else None
+            text = text.strip() if isinstance(text, str) and is_open else ""
+            if not text:
+                continue
+            said_any = True
+            ax = (zx0 - s.stroke * 1.4) if side < 0 else (zx1 + s.stroke * 1.4)
+            ay = (zy0 + zy1) / 2 + s.onward_size * 0.36
+            says += (f'\n      <text class="onward-say" x="{ax:.1f}" y="{ay:.1f}" '
+                     f'text-anchor="{"end" if side < 0 else "start"}">{esc(text)}</text>')
+            width = len(text) * s.onward_size * 0.56 + s.stroke
+            grow(ax - (width if side < 0 else 0), ay - s.onward_size,
+                 ax + (0 if side < 0 else width), ay + s.onward_size * 0.4)
+
         zones.append(
             f'    <g class="zone z{zi}" style="--zc: {zone["color"]}">\n'
-            f'      <rect class="zone-band" x="{zx0:.1f}" y="{zy0:.1f}" '
-            f'width="{zx1 - zx0:.1f}" height="{zy1 - zy0:.1f}" '
-            f'rx="{s.zone_radius:.1f}"><title>{esc(zone["name"])}</title></rect>\n'
+            f'{shape}\n'
             f'      <text class="zone-label" x="{zx0 + 4:.1f}" y="{ty:.1f}">'
-            f'{esc(zone["name"])}</text>\n'
+            f'{esc(zone["name"])}</text>{says}\n'
             f'    </g>'
         )
         grow(zx0, ty - s.zone_label_size, zx1, zy1)
+
+    # A junction draws no track of its own and must not show on the finished
+    # map, but the designer needs something to grab. This handle paints nothing
+    # and only catches the pointer; the designer's stylesheet makes it visible,
+    # and an exported SVG, having no such rule, shows nothing at all.
+    handles = [
+        f'    <circle class="junction" data-junction="{attr(jid)}" '
+        f'cx="{m.pos[jid][0]:.1f}" cy="{m.pos[jid][1]:.1f}" '
+        f'r="{s.stroke * 0.85:.1f}" fill="none" stroke="none" pointer-events="all">'
+        f'<title>junction {esc(jid)}</title></circle>'
+        for jid in m.junctions if jid in m.pos
+    ]
 
     # the drawing's own extent, before the roadmap ruler claims room around it
     cx0 = min(b[0] for b in bounds)
@@ -1498,10 +1682,19 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
   </g>
 """
 
+    open_zone_css = "" if not zone_open else (
+        f'    .zone-wash {{ fill: var(--zc); fill-opacity: {s.zone_fill};\n'
+        f'                 stroke: none; opacity: .9; }}\n'
+        f'    .zone-edge {{ stroke: var(--zc); stroke-width: 2;\n'
+        f'                 stroke-dasharray: 7 6; opacity: .9; }}\n')
     says_css = "" if not said_any else (
         f'    .onward-say {{ font-family: {s.font}; font-size: {s.onward_size}px;\n'
         f'                  font-weight: 600; fill: var(--ink); stroke: none;\n'
         f'                  opacity: .75; }}\n')
+    junction_group = f"""  <g id="junctions">
+{chr(10).join(handles)}
+  </g>
+""" if handles else ""
     onward_group = ""
     if onward:
         onward_group = f"""  <g id="onward">
@@ -1577,7 +1770,7 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
     .muted {{ opacity: {s.status_fade + 0.15:.2f}; }}
     .zone-band {{ fill: var(--zc); fill-opacity: {s.zone_fill}; stroke: var(--zc);
                  stroke-width: 2; stroke-dasharray: 7 6; opacity: .9; }}
-    .zone-label {{ font-family: {s.font}; font-size: {s.zone_label_size}px; font-weight: 700;
+{open_zone_css}    .zone-label {{ font-family: {s.font}; font-size: {s.zone_label_size}px; font-weight: 700;
                   letter-spacing: .09em; text-transform: uppercase; fill: var(--zc); }}
 {timeline_css}    .stop {{ fill: var(--paper); stroke-width: {s.stop_ring}; }}
     .interchange {{ fill: var(--paper); stroke: var(--ink); stroke-width: {s.stop_ring}; }}
@@ -1588,7 +1781,7 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
 {timeline_group}{zone_group}  <g id="routes">
 {chr(10).join(routes)}
   </g>
-{note_group}  <g id="stations">
+{junction_group}{note_group}  <g id="stations">
 {chr(10).join(capsules + stops)}
   </g>
   <g id="labels">
@@ -1610,7 +1803,7 @@ MODES = ("metro", "roadmap")
 # apart later; a file without it predates the stamp, which is unambiguous only
 # because the stamping started before any migration was needed. Raise this when
 # a change cannot be read by the old code, and add the step to migrate().
-SPEC_FORMAT = 1
+SPEC_FORMAT = 2
 
 
 def spec_format(spec: dict) -> int:
@@ -1634,9 +1827,25 @@ def migrate(spec: dict) -> List[str]:
     if spec_format(spec) > SPEC_FORMAT:
         return notes
     # future migrations go here, in order, each guarded by the format it lifts:
-    #   if spec_format(spec) < 2: ...  ; spec["format"] = 2
-    spec["format"] = SPEC_FORMAT
+    #   if spec_format(spec) < 3: ...  ; spec["format"] = 3
+    spec["format"] = needs_format(spec)
     return notes
+
+
+def needs_format(spec: dict) -> int:
+    """The oldest format that can draw this spec without losing anything.
+
+    Stamping every save with the newest number would lock maps out of older
+    copies of the tool for features they do not use. A map earns format 2 by
+    actually having a junction or a branch — which an older renderer would drop
+    silently, drawing a different network and saying nothing.
+    """
+    if spec.get("junctions"):
+        return 2
+    for ln in spec.get("lines") or []:
+        if isinstance(ln, dict) and ln.get("branches"):
+            return 2
+    return 1
 
 # A line is in service unless it says otherwise. Only "out-of-service" ends in a
 # dead end: the other two are lines the network does not reach *yet*.
@@ -1710,6 +1919,26 @@ def validate_spec(spec: object) -> List[str]:
             errors.append(f"{where}: label_angle must be one of "
                           + ", ".join(str(a) for a in LABEL_ANGLES))
 
+    junctions = spec.get("junctions")
+    if junctions is None:
+        junctions = {}
+    elif not isinstance(junctions, dict):
+        errors.append("spec.junctions must be an object of id -> {gx, gy}")
+        junctions = {}
+    else:
+        for jid, jn in junctions.items():
+            where = f"junction '{jid}'"
+            if jid in stations:
+                errors.append(f"{where}: '{jid}' is already a station — a junction "
+                              "is a bend with no platform, so it needs its own id")
+            if not isinstance(jn, dict):
+                errors.append(f"{where}: must be an object with gx and gy")
+                continue
+            for axis in ("gx", "gy"):
+                if not isinstance(jn.get(axis), (int, float)) or isinstance(jn.get(axis), bool):
+                    errors.append(f"{where}: {axis} must be a number")
+    waypoints = {**stations, **junctions}
+
     zones = spec.get("zones", []) or []
     if not isinstance(zones, list):
         errors.append("spec.zones must be a list")
@@ -1729,8 +1958,14 @@ def validate_spec(spec: object) -> List[str]:
             errors.append(f"{where}: stations must be a list of ids")
             continue
         for sid in members:
-            if sid not in stations:
+            if sid in junctions:
+                errors.append(f"{where}: '{sid}' is a junction, not a station — a "
+                              "zone bands stops, and a junction has none to band")
+            elif sid not in stations:
                 errors.append(f"{where}: unknown station '{sid}'")
+        if zn.get("continues") is not None and zn["continues"] not in CONTINUES:
+            errors.append(f"{where}: continues must be one of " + ", ".join(CONTINUES))
+        errors.extend(onward_errors(zn, where))
 
     editor = spec.get("editor")
     if editor is not None:
@@ -1833,18 +2068,7 @@ def validate_spec(spec: object) -> List[str]:
             errors.append(f"{where}: colour must be #rrggbb")
         if ln.get("continues") is not None and ln["continues"] not in CONTINUES:
             errors.append(f"{where}: continues must be one of " + ", ".join(CONTINUES))
-        said = ln.get("onward")
-        if said is not None:
-            if not isinstance(said, dict):
-                errors.append(f"{where}: onward must be an object of "
-                              "start and/or end to text")
-            else:
-                for key, value in said.items():
-                    if key not in ("start", "end"):
-                        errors.append(f"{where}: onward has no '{key}' — "
-                                      "only start and end")
-                    elif not isinstance(value, str):
-                        errors.append(f"{where}: onward.{key} must be text")
+        errors.extend(onward_errors(ln, where))
         if ln.get("status") is not None and ln["status"] not in STATUS_CLASS:
             errors.append(f"{where}: status must be one of "
                           + ", ".join(sorted(STATUS_CLASS)))
@@ -1853,8 +2077,45 @@ def validate_spec(spec: object) -> List[str]:
             errors.append(f"{where}: stations must be a list of ids")
             continue
         for sid in route:
-            if sid not in stations:
-                errors.append(f"{where}: unknown station '{sid}'")
+            if sid not in waypoints:
+                errors.append(f"{where}: unknown station or junction '{sid}'")
+
+        branches = ln.get("branches")
+        if branches is not None:
+            if not isinstance(branches, list):
+                errors.append(f"{where}: branches must be a list")
+            else:
+                for bi, br in enumerate(branches, 1):
+                    at = f"{where}: branch {bi}"
+                    if not isinstance(br, dict):
+                        errors.append(f"{at} must be an object")
+                        continue
+                    if br.get("name") is not None and (
+                            not isinstance(br["name"], str) or not br["name"].strip()):
+                        errors.append(f"{at}: name must be non-empty text")
+                    fork = br.get("stations")
+                    if not isinstance(fork, list):
+                        errors.append(f"{at}: stations must be a list of ids")
+                        continue
+                    stray = [sid for sid in fork if sid not in waypoints]
+                    for sid in stray:
+                        errors.append(f"{at}: unknown station or junction '{sid}'")
+                    if stray:
+                        continue          # the rest would only restate that
+                    if len(fork) < 2:
+                        errors.append(f"{at}: needs at least two points — where it "
+                                      "leaves the line, and where it goes")
+                    elif fork[0] not in route and not any(
+                            fork[0] in (o.get("stations") or [])
+                            for j, o in enumerate(branches, 1)
+                            if j != bi and isinstance(o, dict)):
+                        errors.append(f"{at}: starts at '{fork[0]}', which is not on "
+                                      "this line — a branch splits off the route it "
+                                      "belongs to")
+                    if br.get("continues") is not None and br["continues"] not in CONTINUES:
+                        errors.append(f"{at}: continues must be one of "
+                                      + ", ".join(CONTINUES))
+                    errors.extend(onward_errors(br, f"{at}"))
 
         notes = ln.get("notes")
         if notes is None:
@@ -1893,15 +2154,23 @@ def spec_warnings(spec: dict) -> List[str]:
         elif len(route) < 2 and (ln.get("continues") or "none") == "none":
             out.append(f"line {i} ('{ln.get('name', '')}'): only one stop — not "
                        "drawn. Set it to run on past the map to draw it anyway")
+        for st in line_strands(ln)[1:]:
+            if len(st["ids"]) < 2 and st["at"] == "none":
+                out.append(f"line {i} ('{ln.get('name', '')}'): branch "
+                           f"'{st['name']}' has fewer than two points — not drawn")
     for i, zn in enumerate(spec.get("zones", []) or [], 1):
         if not (zn.get("stations") or []):
             out.append(f"zone {i} ('{zn.get('name', '')}'): no stations in it — not drawn")
-    used = {sid for ln in spec.get("lines", []) for sid in (ln.get("stations") or [])}
+    used = {sid for ln in spec.get("lines", []) if isinstance(ln, dict)
+            for st in line_strands(ln) for sid in st["ids"]}
     for sid in spec.get("stations", {}):
         if sid not in used:
             out.append(f"station '{sid}': on no line — drawn without a route")
-    on_a_line = {sid for ln in spec.get("lines", [])
-                 for sid in (ln.get("stations") or [])}
+    for jid in spec.get("junctions") or {}:
+        if jid not in used:
+            out.append(f"junction '{jid}': on no line — a junction with no track "
+                       "through it draws nothing at all")
+    on_a_line = used
     for sid, st in spec.get("stations", {}).items():
         if isinstance(st, dict) and st.get("dead_end") in DEAD_ENDS[1:] \
                 and sid not in on_a_line:
@@ -1915,18 +2184,19 @@ def spec_warnings(spec: dict) -> List[str]:
     for i, ln in enumerate(spec.get("lines", []) or [], 1):
         if not isinstance(ln, dict):
             continue
-        at = ln.get("continues") or "none"
-        route = ln.get("stations") or []
-        if at == "none" or len(route) < 2:
-            continue
-        ends = ([route[0]] if at in ("start", "both") else []) \
-            + ([route[-1]] if at in ("end", "both") else [])
-        for sid in ends:
-            st = spec.get("stations", {}).get(sid)
-            if isinstance(st, dict) and st.get("dead_end") in DEAD_ENDS[1:]:
-                out.append(f"line {i} ('{ln.get('name', '')}'): carries on past "
-                           f"'{sid}', but that stop is also marked a dead end — "
-                           "the arrow and the buffer sit in the same place")
+        for strand in line_strands(ln):
+            at, route = strand["at"], strand["ids"]
+            if at == "none" or len(route) < 2:
+                continue
+            ends = ([route[0]] if at in ("start", "both") else []) \
+                + ([route[-1]] if at in ("end", "both") else [])
+            for sid in ends:
+                st = spec.get("stations", {}).get(sid)
+                if isinstance(st, dict) and st.get("dead_end") in DEAD_ENDS[1:]:
+                    out.append(f"line {i} ('{ln.get('name', '')}'): "
+                               f"{strand['name']} carries on past '{sid}', but that "
+                               "stop is also marked a dead end — the arrow and the "
+                               "buffer sit in the same place")
 
     if (spec.get("phases") or []) and not spec_timeline(spec):
         out.append("phases are placed by date, so they only draw on a roadmap — "
@@ -1940,9 +2210,10 @@ def spec_warnings(spec: dict) -> List[str]:
         if len(route) < 2:
             out.append(f"scenario {i} ('{name}'): needs at least two stops — not drawn")
             continue
-        pairs = {(ln["stations"][k], ln["stations"][k + 1])
-                 for ln in spec.get("lines", []) if isinstance(ln.get("stations"), list)
-                 for k in range(len(ln["stations"]) - 1)}
+        pairs = {(st["ids"][k], st["ids"][k + 1])
+                 for ln in spec.get("lines", []) if isinstance(ln, dict)
+                 for st in line_strands(ln)
+                 for k in range(len(st["ids"]) - 1)}
         for a, b in zip(route, route[1:]):
             if (a, b) not in pairs and (b, a) not in pairs:
                 out.append(f"scenario {i} ('{name}'): no line runs between "
@@ -1991,7 +2262,9 @@ def auto_interchanges(spec: dict) -> int:
     """Mark every station used by two or more lines as an interchange."""
     count: Dict[str, int] = {}
     for ln in spec["lines"]:
-        for sid in set(ln["stations"]):
+        # a stop on two branches of one line is not an interchange: it is one
+        # line, twice — so the whole line contributes a single count
+        for sid in {sid for st in line_strands(ln) for sid in st["ids"]}:
             count[sid] = count.get(sid, 0) + 1
     changed = 0
     for sid, st in spec["stations"].items():
