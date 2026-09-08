@@ -780,6 +780,41 @@ def warn_legacy_maps() -> None:
           f"{FOLDERS[DEFAULT_FOLDER]} to see them again")
 
 
+def on_a_network(host: str) -> bool:
+    """Whether this host makes the designer reachable from another machine."""
+    if host in ("", "0.0.0.0", "::"):
+        return True
+    try:
+        return not ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return True                 # a name we cannot judge: assume the worst
+
+
+def quiet_the_dev_banner() -> None:
+    """Werkzeug's startup warning says the wrong thing here, so it is replaced.
+
+    "This is a development server. Do not use it in a production deployment" is
+    sound advice about Werkzeug and beside the point for a one-person design
+    tool bound to loopback: there is no deployment. Printing it every single
+    time teaches the reader that warnings from this program are noise, which is
+    the opposite of what a warning is for — so it goes, and main() prints one
+    only in the case that is actually dangerous, when --host has put the
+    designer on a network.
+    """
+    try:
+        from werkzeug.serving import BaseWSGIServer
+        BaseWSGIServer.log_startup = lambda self: None
+    except Exception:               # a newer Werkzeug that moved it: no harm
+        pass
+    try:
+        # and Flask's own three lines, which say the app is called "app", that
+        # debug is off, and how to quit — all of which this already said better
+        import flask.cli
+        flask.cli.show_server_banner = lambda *a, **k: None
+    except Exception:
+        pass
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("--host", default="127.0.0.1")
@@ -806,7 +841,22 @@ def main() -> int:
     warn_legacy_maps()
     print(f"  version:        {mm.__version__}"
           + ("" if UPDATE_CHECK else "  (update check off)"))
-    print(f"  designer:       http://{args.host}:{args.port}")
+    where = "localhost" if args.host in ("", "0.0.0.0", "::") else args.host
+    print(f"  designer:       http://{where}:{args.port}")
+    if not args.debug:
+        quiet_the_dev_banner()
+    # run.sh and run.cmd send this to a log file, and a redirected stdout is
+    # block-buffered — without this the startup block would sit in the buffer
+    # while the server ran, and the log would look like nothing had happened
+    sys.stdout.flush()
+    if on_a_network(args.host):
+        # the case the stock warning was drowning out
+        print(f"\n  ! --host {args.host} makes this reachable from other "
+              "machines on your network, and\n"
+              "    anyone who can reach it can read and change your maps. "
+              "Settings, browsing\n"
+              "    and shutdown stay refused to them; the maps do not.",
+              file=sys.stderr)
     app.run(host=args.host, port=args.port, debug=args.debug)
     return 0
 

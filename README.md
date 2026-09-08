@@ -1,6 +1,6 @@
 # metro-map-tool
 
-**v3.1.0** · GPL-3.0 · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
+**v3.1.2** · GPL-3.0 · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
 
 Transit-map diagrams for landscapes, pipelines and migrations: a JSON spec of
 **stations** on a grid, **lines** routed through them and **zones** banding
@@ -153,8 +153,8 @@ If it saves you an afternoon, [buy me a coffee](https://www.buymeacoffee.com/dla
 with Windows 10 and later, and with every Linux and macOS:
 
 ```bash
-curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v3.1.0.tar.gz | tar xz
-cd metro-map-tool-3.1.0
+curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v3.1.2.tar.gz | tar xz
+cd metro-map-tool-3.1.2
 ./run.sh                 # or run.cmd on Windows
 ```
 
@@ -162,7 +162,7 @@ cd metro-map-tool-3.1.0
 commands on your PATH in their own virtual environment:
 
 ```bash
-pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v3.1.0
+pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v3.1.2
 metro-map-designer                    # the browser designer
 metro-map spec.json -o map.svg        # the renderer
 metro-map-mcp                         # the MCP server, for agents
@@ -174,6 +174,31 @@ yourself. Installed like this, **`mymaps/` follows your working directory**, so
 run `metro-map-designer` from wherever you keep your maps; the maps that ship
 with the tool travel inside the package and are always available.
 
+### If the commands are not on your PATH
+
+`pip install --user` puts them somewhere your shell may not look. Every command
+has a `python -m` twin that needs no PATH at all, and runs exactly the same
+code — the named commands are only generated wrappers:
+
+| command | the same thing as a module |
+|---|---|
+| `metro-map-designer` | `python3 -m metro_map_tool.app` |
+| `metro-map` | `python3 -m metro_map_tool.metro_map` |
+| `metro-map-mcp` | `python3 -m metro_map_tool.mcp_server` |
+| `metro-map-skill` | `python3 -m metro_map_tool.skill_install` |
+
+Flags are identical either way — `python3 -m metro_map_tool.app --port 9000`.
+
+From a clone, use the virtual environment's own interpreter, since that is
+where Flask lives:
+
+```bash
+cd metro-map-tool && .venv/bin/python -m metro_map_tool.app
+```
+
+There is a **[cheat sheet](docs/cheatsheet.md)** with the commands, the spec
+fields and the keyboard shortcuts on one page.
+
 ## Updating an install
 
 **From the designer:** *About → Update and restart*. It runs pip against the
@@ -184,7 +209,7 @@ into the new version only if the install actually succeeded.
 
 ```bash
 # name the new tag — the dependable form
-pip install --upgrade git+https://github.com/ERP-LAB-5/metro-map-tool@v3.1.0
+pip install --upgrade git+https://github.com/ERP-LAB-5/metro-map-tool@v3.1.2
 
 # or drop the tag to track the default branch and always get the newest
 pip install --upgrade git+https://github.com/ERP-LAB-5/metro-map-tool
@@ -198,7 +223,7 @@ With pipx, `pipx upgrade` re-runs whatever spec you first installed and has the
 same pinned-tag problem, so name the tag and force it:
 
 ```bash
-pipx install --force git+https://github.com/ERP-LAB-5/metro-map-tool@v3.1.0
+pipx install --force git+https://github.com/ERP-LAB-5/metro-map-tool@v3.1.2
 ```
 
 **After any update**, if you use the agent skill, refresh your copy — it is a

@@ -1,0 +1,128 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-132 -52 745 521" width="745" height="521" role="img" data-cell="120" data-x0="-132" data-y0="-52">
+  <style>
+    svg { --paper: #ffffff; --ink: #101820; background: var(--paper); color: var(--ink); }
+    .route { fill: none; stroke-width: 10.0; stroke-linecap: round; stroke-linejoin: round; }
+    .status-out { stroke-dasharray: 18.0 12.0;
+                  stroke-linecap: butt; opacity: 0.5; }
+    .status-build { stroke-dasharray: 30.0 11.0;
+                    stroke-linecap: butt; opacity: .85; }
+    .status-plan { stroke-dasharray: 1.0 13.5; opacity: .62; }
+    .onward { stroke-width: 6.2; stroke-linecap: round;
+              stroke-linejoin: round; }
+    .onward-say { font-family: "Hanken Grotesk","Helvetica Neue",Helvetica,Arial,sans-serif; font-size: 13.0px;
+                  font-weight: 600; fill: var(--ink); stroke: none;
+                  opacity: .75; }
+    .buffer { stroke: var(--ink); stroke-width: 5.0;
+              stroke-linecap: butt; opacity: .7; }
+    .dead-end.fire .buffer { stroke: #7a2d0e; opacity: .9; }
+    .flame-outer { fill: #e1251b; }
+    .flame-inner { fill: #f6a821; }
+    .plume-back { fill: var(--paper); opacity: .92; }
+    .plume { fill: var(--ink); opacity: .42; }
+    .muted { opacity: 0.65; }
+    .zone-band { fill: var(--zc); fill-opacity: 0.1; stroke: var(--zc);
+                 stroke-width: 2; stroke-dasharray: 7 6; opacity: .9; }
+    .zone-label { font-family: "Hanken Grotesk","Helvetica Neue",Helvetica,Arial,sans-serif; font-size: 13.0px; font-weight: 700;
+                  letter-spacing: .09em; text-transform: uppercase; fill: var(--zc); }
+    .tl-line { stroke: var(--ink); stroke-width: 1; opacity: .16; }
+    .tl-major-rule, .tl-rule { opacity: .30; }
+    .tl-band { fill: var(--ink); opacity: .025; }
+    .phase rect { fill: var(--pc, var(--ink)); opacity: .07; }
+    .phase-name { font-family: "Hanken Grotesk","Helvetica Neue",Helvetica,Arial,sans-serif; font-size: 13.0px; font-weight: 700;
+                  letter-spacing: .09em; text-transform: uppercase;
+                  fill: var(--pc, var(--ink)); opacity: .45; }
+    .tl-minor { font-family: "Hanken Grotesk","Helvetica Neue",Helvetica,Arial,sans-serif; font-size: 12.0px; fill: var(--ink);
+                opacity: .55; text-anchor: middle; }
+    .tl-major { font-family: "Hanken Grotesk","Helvetica Neue",Helvetica,Arial,sans-serif; font-size: 13.0px; font-weight: 700;
+                letter-spacing: .06em; fill: var(--ink); opacity: .8; text-anchor: middle; }
+    .stop { fill: var(--paper); stroke-width: 4.0; }
+    .interchange { fill: var(--paper); stroke: var(--ink); stroke-width: 4.0; }
+    .capsule { fill: var(--paper); stroke: var(--ink); stroke-width: 4.0;
+               stroke-linejoin: round; }
+    .label { font-family: "Hanken Grotesk","Helvetica Neue",Helvetica,Arial,sans-serif; font-size: 16.0px; font-weight: 600; fill: var(--ink); }
+    .note { font-family: "Hanken Grotesk","Helvetica Neue",Helvetica,Arial,sans-serif; font-size: 12.0px; font-weight: 600;
+            fill: var(--ink); stroke: var(--paper); stroke-width: 3.5;
+            paint-order: stroke; opacity: .85; }
+    .traveller { stroke: var(--paper); stroke-width: 2.5;
+                 offset-rotate: 0deg; offset-distance: 0%;
+                 animation-name: ride; animation-timing-function: linear;
+                 animation-iteration-count: infinite; }
+    @keyframes ride { from { offset-distance: 0%; } to { offset-distance: 100%; } }
+    @media (prefers-reduced-motion: reduce) {
+      .traveller { animation: none; }
+    }
+    .t0 { offset-path: path("M 240.00 360.00 L 432.00 360.00"); animation-duration: 8s; fill: #101820; }
+    .legend-swatch { fill: none; stroke-width: 5.5;
+                     stroke-linecap: round; }
+    .legend-name { font-family: "Hanken Grotesk","Helvetica Neue",Helvetica,Arial,sans-serif; font-size: 13.0px;
+                   font-weight: 600; fill: var(--ink); }
+    @media (prefers-color-scheme: dark) {
+      svg { --paper: #131b21; --ink: #e8eef3; }
+      .l0 { stroke: #47b5e1; }
+      .l1 { stroke: #d05d57; }
+      .z0 { --zc: #e1479e; }
+    }
+  </style>
+  <g id="phases">
+    <g class="phase"><rect x="42.7" y="-26.5" width="18.7" height="436.6"/>
+<text class="phase-name" x="52.0" y="56.0" transform="rotate(-90 52.0 56.0)">Sprint 14</text>
+</g>
+  </g>
+  <g id="timeline">
+    <rect class="tl-band" x="120.0" y="17.5" width="120.0" height="392.6"/>
+    <rect class="tl-band" x="360.0" y="17.5" width="120.0" height="392.6"/>
+    <line class="tl-line" x1="0.0" y1="-26.5" x2="0.0" y2="410.1"/>
+    <line class="tl-line" x1="120.0" y1="-26.5" x2="120.0" y2="410.1"/>
+    <line class="tl-line" x1="240.0" y1="-26.5" x2="240.0" y2="410.1"/>
+    <line class="tl-line" x1="360.0" y1="-26.5" x2="360.0" y2="410.1"/>
+    <line class="tl-line" x1="480.0" y1="-26.5" x2="480.0" y2="410.1"/>
+    <line class="tl-line tl-rule" x1="0" y1="17.5" x2="480.0" y2="17.5"/>
+    <text class="tl-major" x="240.0" y="-11.1">2026</text>
+    <text class="tl-minor" x="60.0" y="10.9">Q1<title>2026-01-01 → 2026-03-31</title></text>
+    <text class="tl-minor" x="180.0" y="10.9">Q2<title>2026-04-01 → 2026-06-30</title></text>
+    <text class="tl-minor" x="300.0" y="10.9">Q3<title>2026-07-01 → 2026-09-30</title></text>
+    <text class="tl-minor" x="420.0" y="10.9">Q4<title>2026-10-01 → 2026-12-31</title></text>
+  </g>
+  <g id="zones">
+    <g class="zone z0" style="--zc: #9b0058">
+      <rect class="zone-band" x="-45.8" y="50.5" width="139.7" height="113.0" rx="26.0"><title>Design</title></rect>
+      <text class="zone-label" x="-41.8" y="43.5">Design</text>
+    </g>
+  </g>
+  <g id="routes">
+    <path class="route l0" d="M 0.00 120.00 L 480.00 120.00" stroke="#0098d4"><title>Core</title></path>
+    <path class="route l0" d="M 120.00 120.00 L 120.00 218.00 Q 120.00 240.00 135.56 255.56 L 224.44 344.44 Q 240.00 360.00 240.00 338.00 L 240.00 262.00 Q 240.00 240.00 255.56 224.44 L 360.00 120.00" stroke="#0098d4"><title>via Pilot</title></path>
+    <path class="route status-out l1" d="M 240.00 360.00 L 432.00 360.00" stroke="#e1251b"><title>Legacy · out of service</title></path>
+  </g>
+  <g id="junctions">
+    <circle class="junction" data-junction="jw" cx="120.0" cy="120.0" r="8.5" fill="none" stroke="none" pointer-events="all"><title>junction jw</title></circle>
+    <circle class="junction" data-junction="je" cx="360.0" cy="120.0" r="8.5" fill="none" stroke="none" pointer-events="all"><title>junction je</title></circle>
+  </g>
+  <g id="notes">
+    <text class="note" x="72.0" y="135.0" transform="rotate(0 72.0 135.0)" text-anchor="middle">6 weeks</text>
+  </g>
+  <g id="stations">
+    <rect class="capsule" data-station="live" x="419.2" y="107.2" width="25.6" height="264.1" rx="12.8"><title>R1.0</title></rect>
+    <circle class="stop" data-station="kick" cx="24.0" cy="120.0" r="7.5" stroke="#0098d4"/>
+    <circle class="stop" data-station="pilot" cx="240.0" cy="360.0" r="7.5" stroke="#0098d4"/>
+  </g>
+  <g id="labels">
+    <text class="label" data-station="kick" x="24.0" y="100.5" text-anchor="middle">Kick-off</text>
+    <text class="label" data-station="pilot" x="240.0" y="392.3" text-anchor="middle">Pilot</text>
+    <text class="label" x="432.0" y="97.2" text-anchor="middle">R1.0</text>
+  </g>
+  <g id="dead-ends">
+    <g class="dead-end fire"><title>Legacy off — burning platform — get off this train</title><line class="buffer" x1="447.0" y1="348.5" x2="447.0" y2="371.5"/><path class="flame-outer" d="M 435.1 360.0 C 435.0 356.7 436.3 351.5 435.7 349.2 C 436.4 346.6 437.2 344.8 438.0 343.7 C 438.9 344.8 439.6 346.6 440.3 349.2 C 444.5 351.5 445.8 356.7 445.7 360.0 Z M 448.3 360.0 C 448.2 356.2 449.5 350.1 453.4 347.4 C 454.1 344.4 454.9 342.3 455.7 341.0 C 456.6 342.3 457.3 344.4 458.1 347.4 C 457.7 350.1 459.0 356.2 458.9 360.0 Z M 436.7 360.0 C 436.5 353.2 439.0 342.3 441.7 337.6 C 443.1 332.1 444.6 328.4 446.2 326.0 C 447.9 328.4 449.3 332.1 450.7 337.6 C 455.0 342.3 457.5 353.2 457.3 360.0 Z "/><path class="flame-inner" d="M 442.8 360.0 C 442.7 356.5 443.8 350.8 444.8 348.3 C 445.4 345.5 446.0 343.6 446.7 342.3 C 447.5 343.6 448.1 345.5 448.7 348.3 C 450.8 350.8 451.9 356.5 451.8 360.0 Z "/></g>
+  </g>
+  <g id="onward">
+    <g class="onward-mark" stroke="#0098d4"><title>Core continues — since 2019</title><path class="onward l0" fill="none" d="M -5.0 111.5 L -16.5 120.0 L -5.0 128.5"/><text class="onward-say" x="-23.5" y="124.7" text-anchor="end">since 2019</text></g>
+    <g class="onward-mark" stroke="#0098d4"><title>Core continues — and beyond</title><path class="onward l0" fill="none" d="M 485.0 128.5 L 496.5 120.0 L 485.0 111.5"/><text class="onward-say" x="503.5" y="124.7" text-anchor="start">and beyond</text></g>
+  </g>
+  <g id="scenarios">
+    <circle class="traveller t0" cx="0" cy="0" r="8.6"><title>A trip</title></circle>
+  </g>
+  <g id="legend">
+    <g class="legend-item"><line class="legend-swatch l0" x1="151.6" y1="431.1" x2="177.6" y2="431.1" stroke="#0098d4"/><text class="legend-name" x="187.6" y="435.8">Core</text></g>
+    <g class="legend-item" opacity=".55"><line class="legend-swatch l1" x1="232.7" y1="431.1" x2="258.7" y2="431.1" stroke="#e1251b" stroke-dasharray="6 4"/><text class="legend-name" x="268.7" y="435.8">Legacy<title>Legacy · out of service</title></text></g>
+  </g>
+</svg>
