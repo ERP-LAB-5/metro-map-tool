@@ -136,5 +136,116 @@ class ResyncTest(unittest.TestCase):
         self.assertTrue(any("note" in n for n in notes))
 
 
+def synced(label_a="Alpha", date_a="2026-03-01", gx_a=2.0, branch="Side"):
+    """An import that says what it decided, the way the Jira mapping does."""
+    def snap(st):
+        return dict(st, upstream={"label": st["label"], "date": st.get("date"),
+                                  "gx": st["gx"], "gy": st["gy"]})
+    spec = {
+        "stations": {
+            "a": snap({"label": label_a, "date": date_a, "gx": gx_a, "gy": 1,
+                       "origin": "jira:A"}),
+            "b": snap({"label": "Beta", "date": "2026-04-01", "gx": 3.0, "gy": 0,
+                       "origin": "jira:B"})},
+        "junctions": {
+            "j-x-fork": {"gx": gx_a - 1, "gy": 0, "origin": "jira:X#fork",
+                         "upstream": {"gx": gx_a - 1, "gy": 0}},
+            "j-x-join": {"gx": gx_a + 1, "gy": 0, "origin": "jira:X#join",
+                         "upstream": {"gx": gx_a + 1, "gy": 0}}},
+        "lines": [{"name": "One", "color": "#111111", "origin": "jira:ONE",
+                   "stations": ["j-x-fork", "j-x-join", "b"],
+                   "branches": [{"name": branch, "origin": "jira:X",
+                                 "stations": ["j-x-fork", "a", "j-x-join"],
+                                 "upstream": {"name": branch}}],
+                   "notes": [{"at": 1, "text": "Hand-over", "origin": "jira:N",
+                              "upstream": {"text": "Hand-over"}}],
+                   "upstream": {"name": "One", "status": None}}],
+    }
+    return spec
+
+
+class ThreeWayTest(unittest.TestCase):
+    """Jira changed it, or somebody did — and only the first is applied."""
+
+    def setUp(self):
+        self.mine, _ = merge(None, synced(), source="jira", stamp=STAMP)
+        self.mine = copy.deepcopy(self.mine)
+
+    def resync(self, mine=None, **upstream):
+        return merge(mine or self.mine, synced(**upstream), source="jira", stamp=STAMP)
+
+    def test_what_nobody_touched_follows_upstream(self):
+        spec, notes = self.resync(label_a="Alpha v2", date_a="2026-05-01", gx_a=4.0)
+        a = spec["stations"]["a"]
+        self.assertEqual((a["label"], a["date"], a["gx"]), ("Alpha v2", "2026-05-01", 4.0))
+        self.assertEqual(spec["junctions"]["j-x-join"]["gx"], 5.0)
+        self.assertTrue(any("now \"Alpha v2\"" in n for n in notes))
+
+    def test_what_the_map_changed_is_kept_and_the_clash_is_said(self):
+        self.mine["stations"]["a"]["label"] = "My words"
+        spec, notes = self.resync(label_a="Alpha v2")
+        self.assertEqual(spec["stations"]["a"]["label"], "My words")
+        self.assertTrue(any("changed both" in n for n in notes))
+
+    def test_what_only_the_map_changed_stays_without_a_word(self):
+        self.mine["stations"]["a"]["label"] = "My words"
+        spec, notes = self.resync()
+        self.assertEqual(spec["stations"]["a"]["label"], "My words")
+        self.assertFalse(any("jira:A" in n for n in notes))
+
+    def test_a_dragged_stop_stays_put_while_its_date_still_updates(self):
+        self.mine["stations"]["a"]["gx"] = 9.0
+        spec, notes = self.resync(date_a="2026-05-01", gx_a=4.0)
+        self.assertEqual(spec["stations"]["a"]["gx"], 9.0)
+        self.assertEqual(spec["stations"]["a"]["date"], "2026-05-01")
+        self.assertTrue(any("stays where it is" in n for n in notes))
+
+    def test_the_new_upstream_is_the_base_for_next_time(self):
+        self.mine["stations"]["a"]["label"] = "My words"
+        spec, _ = self.resync(label_a="Alpha v2")
+        _, notes = merge(spec, synced(label_a="Alpha v2"), source="jira", stamp=STAMP)
+        self.assertEqual(notes, [])
+
+    def test_a_renamed_branch_and_line_keep_their_names(self):
+        self.mine["lines"][0]["name"] = "My line"
+        self.mine["lines"][0]["branches"][0]["name"] = "My branch"
+        spec, _ = self.resync(branch="Side v2")
+        self.assertEqual(spec["lines"][0]["name"], "My line")
+        self.assertEqual(spec["lines"][0]["branches"][0]["name"], "My branch")
+
+    def test_an_untouched_branch_name_follows(self):
+        spec, _ = self.resync(branch="Side v2")
+        self.assertEqual(spec["lines"][0]["branches"][0]["name"], "Side v2")
+
+    def test_junctions_the_import_no_longer_makes_go_and_hand_made_ones_stay(self):
+        self.mine["junctions"]["mine"] = {"gx": 7, "gy": 5}
+        plain = synced()
+        plain["junctions"] = {}
+        plain["lines"][0]["stations"] = ["b"]
+        plain["lines"][0]["branches"] = []
+        spec, _ = merge(self.mine, plain, source="jira", stamp=STAMP)
+        self.assertEqual(set(spec["junctions"]), {"mine"})
+
+    def test_hand_drawn_branches_and_notes_survive(self):
+        line = self.mine["lines"][0]
+        line["branches"].append({"name": "Mine", "stations": ["b", "a"]})
+        line["notes"].append({"at": 0, "text": "my note"})
+        spec, _ = self.resync()
+        got = spec["lines"][0]
+        self.assertIn("Mine", [b["name"] for b in got["branches"]])
+        self.assertIn("my note", [n["text"] for n in got["notes"]])
+        self.assertEqual([n["text"] for n in got["notes"]].count("Hand-over"), 1)
+
+    def test_a_map_from_before_snapshots_keeps_its_values_once(self):
+        old = copy.deepcopy(self.mine)
+        for st in old["stations"].values():
+            st.pop("upstream")
+        old["stations"]["a"]["label"] = "Older words"
+        spec, _ = self.resync(label_a="Alpha v2")
+        spec, _ = merge(old, synced(label_a="Alpha v2"), source="jira", stamp=STAMP)
+        self.assertEqual(spec["stations"]["a"]["label"], "Older words")
+        self.assertEqual(spec["stations"]["a"]["upstream"]["label"], "Alpha v2")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2136,6 +2136,34 @@ async function settingsDialog(only) {
 
 /* -------------------------------------------------------------- import -- */
 
+/** What the source's browser picked, said in a line, carried in hidden fields.
+ *
+ * Those options are written by the wizard, not typed: a raw "levels" box
+ * inviting "junction,station" by hand is the wizard's job done worse. */
+function browseSummary(opts, filled) {
+  const val = (name) => (filled && filled[name] !== undefined ? filled[name] : "");
+  const list = (name) => String(val(name) || "").split(",").map((x) => x.trim()).filter(Boolean);
+  const roots = list("roots");
+  const bits = [];
+  if (roots.length) {
+    bits.push(`<strong>${esc(roots.join(", "))}</strong>`);
+    if (list("types").length) bits.push(`only ${esc(list("types").join(", "))}`);
+    if (val("open_only") === true || val("open_only") === "true") bits.push("only open");
+    if (list("labels").length) bits.push(`labels ${esc(list("labels").join(", "))}`);
+    if (list("levels").length) bits.push(`levels ${esc(list("levels").join(" → "))}`);
+    if (list("roles").length) bits.push(`${list("roles").length} issue(s) mapped on their own`);
+    if (list("dates").length) bits.push(`${list("dates").length} date(s) of your own`);
+  }
+  return `<div class="card browse-summary">
+      ${roots.length ? `<p>${bits.join(" · ")}</p>` : `<p class="note">Pick issue keys,
+        narrow what is beneath them, and map each level onto the map.</p>`}
+      <p><button type="button" id="imp-browse" class="${roots.length ? "ghost" : "primary"}"
+        >${roots.length ? "Change…" : "Start from issue keys…"}</button></p>
+      ${opts.map((o) => `<input type="hidden" data-opt="${esc(o.name)}"
+        value="${esc(String(val(o.name) ?? ""))}">`).join("")}
+    </div>`;
+}
+
 /** One form field for one declared source option, chosen by its kind. */
 /** A field's starting value: what the browser picked, else its declared default. */
 function optValue(o, filled) {
@@ -2150,14 +2178,18 @@ function optField(o, filled) {
   const common = `id="${id}" data-opt="${esc(o.name)}"`;
   const value = optValue(o, filled);
   if (o.kind === "bool") {
+    // what was filled in wins, false included — only an absent value falls
+    // back to the default
+    const on = filled && filled[o.name] !== undefined && filled[o.name] !== ""
+      ? filled[o.name] === true || filled[o.name] === "true" : !!o.default;
     return `<label class="field"><span>${esc(o.name)}</span>
-      <span class="note"><input type="checkbox" ${common} ${o.default ? "checked" : ""}>
+      <span class="note"><input type="checkbox" ${common} ${on ? "checked" : ""}>
       ${esc(o.help)}</span></label>`;
   }
   if (o.kind === "choice") {
     return `<label class="field" title="${esc(o.help)}"><span>${esc(o.name)}</span>
       <select ${common}>${(o.choices || []).map((c) =>
-        `<option value="${esc(c)}" ${c === o.default ? "selected" : ""}>${esc(c || "auto")}</option>`).join("")}
+        `<option value="${esc(c)}" ${c === value ? "selected" : ""}>${esc(c || "auto")}</option>`).join("")}
       </select></label>`;
   }
   const type = { int: "number", date: "date" }[o.kind] || "text";
@@ -2167,134 +2199,429 @@ function optField(o, filled) {
            placeholder="${esc(o.placeholder || "")}"></label>`;
 }
 
-/** Walk a source's tree and tick what to import. */
-async function browseDialog(src, onPicked) {
-  const view = { name: (src.views[0] || {}).name || "" };
-  const columns = [];                 // [{path, nodes}] — one per level opened
-  const picked = new Map();           // id -> label, in the order ticked
+/** Start from issue keys, narrow what is beneath them, and say what each level
+ * becomes on the map.
+ *
+ * Three steps, because they are three different questions: *which* pieces of
+ * the plan (keys — asked for, checked, each tree loaded once), *how much of
+ * them* (filters), and *as what* (the mapping). The last two are answered
+ * locally on what is already loaded, so changing one costs no round trip and
+ * nothing races back out of order. The rules copied here only count; the
+ * import itself is built by the server, from the same options.
+ *
+ * `start` carries whatever the form already says, so re-opening the wizard on
+ * a map that was imported before picks up where that import left off. */
+async function treeWizard(src, onPicked, start = {}) {
+  const KEY = /^[A-Z][A-Z0-9_]+-\d+$/;
+  const QUARTER = /^[A-Z]{0,4}\d{2}Q[1-4]$/i;
+  const ROLES = [["station", "Station"], ["junction", "Junction — a branch"],
+                 ["zone", "Zone"], ["note", "Track note"],
+                 ["hide", "Hide, keep what is beneath"], ["skip", "Don't import"]];
+  const example = ((src.options || []).find((o) => o.name === "roots") || {})
+    .placeholder || "ABCD-123";
+  const pairs = (list) => Object.fromEntries((list || []).map((p) => {
+    const at = p.indexOf("=");
+    return [p.slice(0, at).trim().toUpperCase(), p.slice(at + 1).trim()];
+  }).filter(([k, v]) => k && v));
 
-  let filter = "";
-  const fetchLevel = async (path) => {
-    const q = new URLSearchParams({ path: path.join("/"), view: view.name });
-    if (filter) q.set("q", filter);
-    return api("GET", `/api/browse/${src.name}?${q}`);
+  let step = 1;
+  let keys = (start.roots || []).length ? [...start.roots] : [""];
+  let problems = {};                  // key row -> sentence
+  let trees = [];                     // [{key, nodes}], in key order
+  let types = [];                     // [[name, count]] across every tree
+  let seenLabels = [];
+  const chosen = {
+    types: new Set(start.types || []),
+    narrowed: (start.types || []).length > 0,
+    open_only: !!start.open_only,
+    labels: (start.labels || []).join(", "),
+  };
+  const map = { levels: [...(start.levels || [])], roles: pairs(start.roles),
+                dates: pairs(start.dates) };
+
+  // ---- the rules, copied just far enough to count --------------------------
+  const labelsWanted = () => chosen.labels.split(",").map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  const keptOf = (nodes) => {
+    const out = new Set([nodes[0].id]);
+    const wanted = labelsWanted();
+    for (const n of nodes.slice(1)) {
+      const f = n.facets || {};
+      if (chosen.narrowed && !chosen.types.has(f.type)) continue;
+      if (chosen.open_only && !f.open) continue;
+      if (wanted.length && !(f.labels || []).some((l) => wanted.includes(l.toLowerCase()))) continue;
+      out.add(n.id);
+    }
+    const parent = new Map(nodes.map((n) => [n.id, n.parent]));
+    for (const id of [...out]) {
+      for (let up = parent.get(id); up && !out.has(up); up = parent.get(up)) out.add(up);
+    }
+    return out;
+  };
+  const kidsOf = (nodes, kept) => {
+    const kids = new Map();
+    nodes.slice(1).filter((n) => kept.has(n.id)).forEach((n) => {
+      if (!kids.has(n.parent)) kids.set(n.parent, []);
+      kids.get(n.parent).push(n);
+    });
+    return kids;
+  };
+  const depthOf = () => Math.max(0, ...trees.flatMap((t) => t.nodes.map((n) => n.depth || 0)));
+  // worked out once per draw: it walks every tree, and the tally asks for it
+  // on every row
+  let defaultOne = null;
+  const levelDefault = (depth) => {
+    if (depth !== 1) return "station";
+    if (defaultOne) return defaultOne;
+    return (defaultOne = trees.some((t) => {
+      const kept = keptOf(t.nodes);
+      const kids = kidsOf(t.nodes, kept);
+      return t.nodes.some((n) => n.depth === 1 && kept.has(n.id) && (kids.get(n.id) || []).length);
+    }) ? "junction" : "station");
+  };
+  const dated = (n) => {
+    const f = n.facets || {};
+    return !!(f.due || (f.labels || []).some((l) => QUARTER.test(l)));
+  };
+  /** Every kept issue's role, as the server will work it out, and the count. */
+  const resolve = () => {
+    const role = new Map();
+    const tally = { stations: 0, branches: 0, zones: 0, notes: 0, lines: 0, undated: 0 };
+    for (const t of trees) {
+      const kept = keptOf(t.nodes);
+      const kids = kidsOf(t.nodes, kept);
+      // returns how many stops the subtree placed, so a junction, zone or
+      // note with nothing beneath it is not counted — it will not be drawn
+      const visit = (id) => {
+        let placed = 0;
+        for (const n of kids.get(id) || []) {
+          let r = map.roles[n.id] || map.levels[n.depth - 1] || levelDefault(n.depth);
+          if (r === "skip") continue;
+          if (r === "junction" && !(kids.get(n.id) || []).length) r = "station";
+          role.set(n.id, r);
+          let here = 0;
+          if (r === "station") {
+            if (dated(n) || map.dates[n.id]) { here = 1; tally.stations += 1; }
+            else tally.undated += 1;
+          }
+          const below = visit(n.id);
+          if (below && r === "junction") tally.branches += 1;
+          // a junction with nothing dated beneath is still a stop if it is dated
+          if (!below && r === "junction" && (dated(n) || map.dates[n.id])) {
+            here = 1; tally.stations += 1;
+          }
+          if (below && r === "zone") tally.zones += 1;
+          if (below && r === "note") tally.notes += 1;
+          placed += here + below;
+        }
+        return placed;
+      };
+      if (visit(t.nodes[0].id)) tally.lines += 1;
+    }
+    return { role, tally };
   };
 
-  const body = () => `
-    <label class="field"><span>Filter this column</span>
-      <input type="text" id="brw-q" value="${esc(filter)}" autocomplete="off"
-             spellcheck="false"
-             placeholder="a few letters, or a pattern like SAP*"></label>
-    ${src.views.length > 1 ? `<div class="strands" id="brw-views">
-      ${src.views.map((v) => `<button type="button" data-view="${esc(v.name)}"
-        class="${v.name === view.name ? "is-on" : ""}"
-        title="${esc(v.help || "")}">${esc(v.title)}</button>`).join("")}
-    </div>` : ""}
-    <div class="browse" id="brw-cols">
-      ${columns.map((col, depth) => `
-        <div class="browse-col" data-depth="${depth}">
-          ${col.nodes.length ? col.nodes.map((n) => `
-            <div class="browse-row ${picked.has(n.id) ? "is-on" : ""}"
-                 data-node="${esc(n.id)}" data-depth="${depth}">
-              ${n.selectable ? `<input type="checkbox" data-pick="${esc(n.id)}"
-                 ${picked.has(n.id) ? "checked" : ""}>` : ""}
-              <span class="grow">${esc(n.label)}
-                ${n.hint ? `<span class="id">${esc(n.hint)}</span>` : ""}</span>
-              ${n.expandable ? `<span class="caret">▸</span>` : ""}
-            </div>`).join("")
-            : `<p class="note">${filter
-                 ? `Nothing matches “${esc(filter)}”.`
-                 : "Nothing here."}</p>`}
-        </div>`).join("")}
-    </div>
-    <p class="note" id="brw-said">${picked.size
-      ? `${picked.size} selected — ${[...picked.values()].slice(0, 3).map(esc).join(", ")}${picked.size > 3 ? "…" : ""}`
-      : "Pick a project, then tick what to import. Nothing ticked imports everything in the project."}</p>
-    <div class="actions">
-      <button value="cancel">Cancel</button>
-      <button type="button" class="primary" id="brw-go">Import</button>
+  // ---- markup -------------------------------------------------------------
+  const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  const chips = (list, attr, isOn) => `<div class="strands">${list.map(([v, n]) =>
+    `<button type="button" data-${attr}="${esc(v)}" class="${isOn(v) ? "is-on" : ""}"
+      >${esc(v)}<span class="count">${n}</span></button>`).join("")}</div>`;
+  const row = (n, extra = "") => `
+    <div class="tree-row ${n.expandable ? "is-line" : ""}" data-row="${esc(n.id)}"
+         style="--depth:${Number(n.depth) || 0}">
+      <span class="key">${esc(n.id)}</span>
+      <span class="grow">${esc(n.label)}</span>
+      <span class="note">${esc(n.hint || "")}</span>${extra}
     </div>`;
 
-  let redraw = () => {};
-  const open = async (path, depth) => {
-    const said = document.querySelector("#brw-said");
-    if (said) said.textContent = "Loading…";
-    let res;
-    try { res = await fetchLevel(path); }
-    catch (err) { showProblems(err.errors); return; }
-    columns.length = depth;
-    columns.push({ path, nodes: res.nodes });
-    redraw();
+  const stepOne = () => `
+    <p class="note">Each key is imported as a line of its own, with everything
+      beneath it. An initiative, an epic or a story will do.</p>
+    ${keys.map((k, i) => `
+      <div class="wiz-key">
+        <input type="text" data-key="${i}" value="${esc(k)}" autocomplete="off"
+               spellcheck="false" placeholder="${esc(example.split(",")[0])}">
+        ${keys.length > 1 ? `<button type="button" class="ghost" data-drop="${i}"
+          title="Remove this key">×</button>` : ""}
+      </div>
+      ${problems[i] ? `<p class="warn">${esc(problems[i])}</p>` : ""}`).join("")}
+    <p><button type="button" class="ghost" id="wiz-add">+ Add key</button></p>
+    <div class="actions">
+      <button value="cancel">Cancel</button>
+      <button type="button" class="primary" id="wiz-next">Next</button>
+    </div>`;
+
+  const stepTwo = () => `
+    <p class="note">Narrow what comes in. Whatever a kept issue hangs from stays,
+      as the structure it sits in.</p>
+    <h3 class="group">Issue types</h3>
+    ${chips(types, "type", (v) => !chosen.narrowed || chosen.types.has(v))}
+    <h3 class="group">Status</h3>
+    <div class="strands">
+      <button type="button" data-open="0" class="${chosen.open_only ? "" : "is-on"}">All</button>
+      <button type="button" data-open="1" class="${chosen.open_only ? "is-on" : ""}">Only open</button>
+    </div>
+    <label class="field"><span>Labels — any of these, comma separated; empty takes all</span>
+      <input type="text" id="wiz-labels" value="${esc(chosen.labels)}" autocomplete="off"
+             spellcheck="false" placeholder="25Q1, cutover"></label>
+    ${seenLabels.length ? `<p class="note">Found beneath these keys:</p>
+      ${chips(seenLabels, "label", (v) => labelsWanted().includes(v.toLowerCase()))}` : ""}
+    ${trees.map((t) => `<details class="tree" open>
+      <summary>${esc(t.nodes[0].id)} · ${esc(t.nodes[0].label)}</summary>
+      ${t.nodes.slice(1).map((n) => row(n)).join("")}
+      ${(t.nodes[0].facets || {}).truncated ? `<p class="warn">Only the first
+        ${t.nodes.length - 1} issues are shown.</p>` : ""}
+    </details>`).join("")}
+    <p class="note" id="wiz-said"></p>
+    <div class="actions">
+      <button type="button" id="wiz-back">Back</button>
+      <button value="cancel">Cancel</button>
+      <button type="button" class="primary" id="wiz-next">Next</button>
+    </div>`;
+
+  const stepThree = () => {
+    const deepest = depthOf();
+    const levelRows = [];
+    for (let d = 1; d <= deepest; d++) {
+      const at = new Map();
+      let branches = false;
+      for (const t of trees) {
+        const kept = keptOf(t.nodes);
+        const kids = kidsOf(t.nodes, kept);
+        t.nodes.filter((n) => n.depth === d && kept.has(n.id)).forEach((n) => {
+          at.set(n.facets.type, (at.get(n.facets.type) || 0) + 1);
+          if ((kids.get(n.id) || []).length) branches = true;
+        });
+      }
+      if (!at.size) continue;
+      const value = map.levels[d - 1] || levelDefault(d);
+      levelRows.push(`<tr>
+        <td>Level ${d}</td>
+        <td class="note">${[...at].map(([ty, c]) => `${esc(ty)} ×${c}`).join(", ")}</td>
+        <td><select data-level="${d}">${ROLES.map(([v, label]) =>
+          `<option value="${v}" ${v === value ? "selected" : ""}
+            ${v === "junction" && !branches ? "disabled" : ""}>${esc(label)}</option>`).join("")}
+        </select></td></tr>`);
+    }
+    return `
+    <p class="note">Each key is a line. Say what each level beneath it becomes —
+      and change single issues below where their level is not right for them.</p>
+    <div class="wiz-levels"><table>${levelRows.join("")}</table></div>
+    ${trees.map((t) => {
+      const kept = keptOf(t.nodes);
+      return `<details class="tree" open>
+        <summary>${esc(t.nodes[0].id)} · ${esc(t.nodes[0].label)} — a line</summary>
+        ${t.nodes.slice(1).filter((n) => kept.has(n.id)).map((n) => row(n, `
+          <select data-role="${esc(n.id)}" title="What this issue becomes">
+            <option value="">as its level</option>
+            ${ROLES.map(([v, label]) => `<option value="${v}"
+              ${map.roles[n.id] === v ? "selected" : ""}>${esc(label)}</option>`).join("")}
+          </select>
+          ${dated(n) ? "" : `<input type="date" data-date="${esc(n.id)}"
+            value="${esc(map.dates[n.id] || "")}" title="Jira has no date for this — give it one">`}`)).join("")}
+      </details>`;
+    }).join("")}
+    <p class="note" id="wiz-said"></p>
+    <div class="actions">
+      <button type="button" id="wiz-back">Back</button>
+      <button value="cancel">Cancel</button>
+      <button type="button" class="primary" id="wiz-go">Continue</button>
+    </div>`;
   };
 
-  dialog(`Browse ${src.title}`, body(), (form, dlg) => {
-    redraw = () => {
-      form.innerHTML = `<h2>Browse ${esc(src.title)}</h2>${body()}`;
-      wire();
+  dialog(`Import from ${src.title}`, stepOne(), (form, dlg) => {
+    const draw = () => {
+      defaultOne = null;
+      const body = step === 1 ? stepOne() : step === 2 ? stepTwo() : stepThree();
+      form.innerHTML = `<h2>Import from ${esc(src.title)}</h2>${body}`;
+      [null, wireOne, wireTwo, wireThree][step]();
     };
-    const wire = () => {
-      const box = form.querySelector("#brw-q");
-      // re-ask only once the typing stops: each keystroke would otherwise be a
-      // round trip to Jira, and the answers would race each other back
-      let waiting = null;
-      box.addEventListener("input", () => {
-        clearTimeout(waiting);
-        waiting = setTimeout(async () => {
-          filter = box.value.trim();
-          const depth = Math.max(0, columns.length - 1);
-          const at = columns[depth] ? columns[depth].path : [];
-          await open(at, depth);
-          const again = form.querySelector("#brw-q");
-          if (again) { again.focus(); again.setSelectionRange(again.value.length,
-                                                              again.value.length); }
-        }, 300);
+    const back = () => {
+      const b = form.querySelector("#wiz-back");
+      if (b) b.addEventListener("click", () => { step -= 1; draw(); });
+    };
+
+    const wireOne = () => {
+      const read = () => { keys = [...form.querySelectorAll("[data-key]")].map((b) => b.value); };
+      form.querySelector("#wiz-add").addEventListener("click", () => {
+        read(); keys.push(""); problems = {}; draw();
+        const boxes = form.querySelectorAll("[data-key]");
+        boxes[boxes.length - 1].focus();
       });
-      form.querySelectorAll("[data-view]").forEach((b) =>
-        b.addEventListener("click", async () => {
-          view.name = b.dataset.view;
-          columns.length = 0;
-          picked.clear();
-          await open([], 0);
-        }));
-      form.querySelectorAll("[data-node]").forEach((row) =>
-        row.addEventListener("click", async (ev) => {
-          if (ev.target.matches("[data-pick]")) return;   // ticking is not opening
-          const depth = Number(row.dataset.depth);
-          const path = columns[depth].path.concat(row.dataset.node);
-          // the words that found a project are not the words you want inside
-          // it, and leaving them in the box would filter the new column by a
-          // term meant for the last one
-          filter = "";
-          await open(path, depth + 1);
-        }));
-      form.querySelectorAll("[data-pick]").forEach((box) =>
-        box.addEventListener("change", () => {
-          const id = box.dataset.pick;
-          if (box.checked) {
-            // the node's own label, not the row's text — the row also carries
-            // the hint, and "Cutover In Progress · due 2026-03-31" is not a name
-            const depth = Number(box.closest(".browse-row").dataset.depth);
-            const node = (columns[depth].nodes || []).find((n) => n.id === id);
-            picked.set(id, (node && node.label) || id);
-          } else {
-            picked.delete(id);
+      form.querySelectorAll("[data-drop]").forEach((b) => b.addEventListener("click", () => {
+        read(); keys.splice(Number(b.dataset.drop), 1); problems = {}; draw();
+      }));
+      const next = form.querySelector("#wiz-next");
+      const go = async () => {
+        read();
+        problems = {};
+        const wanted = keys.map((k) => k.trim().toUpperCase());
+        const seen = new Map();
+        wanted.forEach((k, i) => {
+          if (!k) return;
+          if (!KEY.test(k)) problems[i] = `“${keys[i].trim()}” is not an issue key — it looks like ${example.split(",")[0]}.`;
+          else if (seen.has(k)) problems[i] = `${k} is already in the list.`;
+          else seen.set(k, i);
+        });
+        if (!seen.size && !Object.keys(problems).length) problems[0] = "Give at least one key.";
+        if (Object.keys(problems).length) { draw(); return; }
+        next.disabled = true;
+        next.textContent = "Looking…";
+        const found = await Promise.all([...seen].map(async ([k, i]) => {
+          try {
+            const res = await api("GET", `/api/browse/${src.name}?${new URLSearchParams({ path: k })}`);
+            return { key: k, i, nodes: res.nodes };
+          } catch (err) {
+            // said beside the key it is about: the fix is a typo in that box
+            problems[i] = (err.errors || []).join(" ");
+            return null;
           }
-          const said = form.querySelector("#brw-said");
-          said.textContent = picked.size
-            ? `${picked.size} selected — ${[...picked.values()].slice(0, 3).join(", ")}${picked.size > 3 ? "…" : ""}`
-            : "Nothing ticked imports everything in the project.";
-          box.closest(".browse-row").classList.toggle("is-on", box.checked);
         }));
-      form.querySelector("#brw-go").addEventListener("click", () => {
-        // the first column is projects, so whatever is open there is the scope
-        const project = (columns[0] || {}).path !== undefined && columns[1]
-          ? columns[1].path[0] : "";
-        dlg.close();
-        onPicked({ project, select: [...picked.keys()] });
-      });
+        const loaded = found.filter(Boolean);
+        // a key inside another key's tree would be imported twice
+        for (const t of loaded) {
+          const holder = loaded.find((o) => o !== t && o.nodes.some((n) => n.id === t.key));
+          if (holder) problems[t.i] = `${t.key} is already beneath ${holder.key}, so it would come in twice.`;
+        }
+        if (Object.keys(problems).length) { draw(); return; }
+        const fresh = trees.map((t) => t.key).join() !== loaded.map((t) => t.key).join();
+        trees = loaded.map(({ key, nodes }) => ({ key, nodes }));
+        keys = trees.map((t) => t.key);
+        const tally = (pick) => {
+          const m = new Map();
+          trees.forEach((t) => t.nodes.slice(1).forEach((n) =>
+            pick(n.facets || {}).forEach((v) => v && m.set(v, (m.get(v) || 0) + 1))));
+          return [...m].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+        };
+        types = tally((f) => [f.type]);
+        seenLabels = tally((f) => f.labels || []);
+        if (fresh && !(start.types || []).length) { chosen.narrowed = false; chosen.types = new Set(); }
+        step = 2;
+        draw();
+      };
+      next.addEventListener("click", go);
+      form.querySelectorAll("[data-key]").forEach((box) => box.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") { ev.preventDefault(); go(); }   // not submit-and-close
+      }));
+      const empty = [...form.querySelectorAll("[data-key]")].find((b) => !b.value);
+      (empty || form.querySelector("[data-key]")).focus();
     };
-    wire();
-    open([], 0);
+
+    // Filtering changes classes, not markup, so a long tree keeps its scroll
+    // position while boxes are ticked and letters typed.
+    const refreshTwo = () => {
+      form.querySelectorAll("[data-type]").forEach((b) =>
+        b.classList.toggle("is-on", !chosen.narrowed || chosen.types.has(b.dataset.type)));
+      form.querySelectorAll("[data-open]").forEach((b) =>
+        b.classList.toggle("is-on", (b.dataset.open === "1") === chosen.open_only));
+      form.querySelectorAll("[data-label]").forEach((b) =>
+        b.classList.toggle("is-on", labelsWanted().includes(b.dataset.label.toLowerCase())));
+      let kept = 0, all = 0;
+      for (const t of trees) {
+        const keep = keptOf(t.nodes);
+        kept += keep.size - 1;
+        all += t.nodes.length - 1;
+        t.nodes.slice(1).forEach((n) => {
+          const el = form.querySelector(`[data-row="${CSS.escape(n.id)}"]`);
+          if (el) el.classList.toggle("is-out", !keep.has(n.id));
+        });
+      }
+      const said = form.querySelector("#wiz-said");
+      const none = chosen.narrowed && !chosen.types.size;
+      said.textContent = none ? "Pick at least one issue type."
+        : `${kept} of ${plural(all, "issue")} beneath ${plural(trees.length, "key")}`;
+      said.classList.toggle("warn", none);
+      form.querySelector("#wiz-next").disabled = none;
+    };
+
+    const wireTwo = () => {
+      back();
+      form.querySelectorAll("[data-type]").forEach((b) => b.addEventListener("click", () => {
+        if (!chosen.narrowed) { chosen.narrowed = true; chosen.types = new Set(types.map(([v]) => v)); }
+        const v = b.dataset.type;
+        chosen.types.has(v) ? chosen.types.delete(v) : chosen.types.add(v);
+        if (chosen.types.size === types.length) chosen.narrowed = false;
+        refreshTwo();
+      }));
+      form.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => {
+        chosen.open_only = b.dataset.open === "1"; refreshTwo();
+      }));
+      const box = form.querySelector("#wiz-labels");
+      box.addEventListener("input", () => { chosen.labels = box.value; refreshTwo(); });
+      form.querySelectorAll("[data-label]").forEach((b) => b.addEventListener("click", () => {
+        const v = b.dataset.label;
+        const list = chosen.labels.split(",").map((s) => s.trim()).filter(Boolean);
+        const at = list.findIndex((l) => l.toLowerCase() === v.toLowerCase());
+        if (at >= 0) list.splice(at, 1); else list.push(v);
+        chosen.labels = list.join(", ");
+        box.value = chosen.labels;
+        refreshTwo();
+      }));
+      form.querySelector("#wiz-next").addEventListener("click", () => { step = 3; draw(); });
+      refreshTwo();
+    };
+
+    const refreshThree = () => {
+      const { role, tally } = resolve();
+      form.querySelectorAll("[data-row]").forEach((el) => {
+        const r = role.get(el.dataset.row);
+        el.classList.toggle("is-out", !r || r === "hide");
+        const date = el.querySelector("[data-date]");
+        if (date) date.hidden = r !== "station";
+      });
+      const said = form.querySelector("#wiz-said");
+      const bits = [plural(tally.stations, "station")];
+      if (tally.branches) bits.push(plural(tally.branches, "branch").replace("branchs", "branches"));
+      if (tally.zones) bits.push(plural(tally.zones, "zone"));
+      if (tally.notes) bits.push(plural(tally.notes, "track note"));
+      said.textContent = tally.stations
+        ? `${bits.join(" · ")} on ${plural(tally.lines, "line")}`
+          + (tally.undated ? ` · ${tally.undated} left out for want of a date` : "")
+        : "Nothing would be placed — give the undated issues a date, or map a level to Station.";
+      said.classList.toggle("warn", !tally.stations);
+      form.querySelector("#wiz-go").disabled = !tally.stations;
+    };
+
+    const wireThree = () => {
+      back();
+      form.querySelectorAll("[data-level]").forEach((sel) => sel.addEventListener("change", () => {
+        const d = Number(sel.dataset.level);
+        while (map.levels.length < d) map.levels.push("");
+        map.levels[d - 1] = sel.value;
+        refreshThree();
+      }));
+      form.querySelectorAll("[data-role]").forEach((sel) => sel.addEventListener("change", () => {
+        if (sel.value) map.roles[sel.dataset.role] = sel.value;
+        else delete map.roles[sel.dataset.role];
+        refreshThree();
+      }));
+      form.querySelectorAll("[data-date]").forEach((box) => box.addEventListener("change", () => {
+        if (box.value) map.dates[box.dataset.date] = box.value;
+        else delete map.dates[box.dataset.date];
+        refreshThree();
+      }));
+      form.querySelector("#wiz-go").addEventListener("click", () => {
+        // the levels as shown, defaults written out, so a re-sync does not
+        // quietly change its mind when the tree beneath grows a level
+        const levels = [];
+        for (let d = 1; d <= depthOf(); d++) levels.push(map.levels[d - 1] || levelDefault(d));
+        const known = new Set(trees.flatMap((t) => t.nodes.map((n) => n.id)));
+        const undated = new Set(trees.flatMap((t) => t.nodes.filter((n) => !dated(n)).map((n) => n.id)));
+        dlg.close();
+        onPicked({
+          roots: trees.map((t) => t.key),
+          types: chosen.narrowed ? [...chosen.types] : [],
+          open_only: chosen.open_only,
+          labels: chosen.labels.split(",").map((s) => s.trim()).filter(Boolean),
+          levels,
+          roles: Object.entries(map.roles).filter(([k]) => known.has(k)).map(([k, v]) => `${k}=${v}`),
+          dates: Object.entries(map.dates).filter(([k]) => undated.has(k)).map(([k, v]) => `${k}=${v}`),
+        });
+      });
+      refreshThree();
+    };
+
+    wireOne();
   });
 }
 
@@ -2304,29 +2631,50 @@ async function importDialog(want, filled) {
   catch (err) { showProblems(err.errors); return; }
   // fetched now rather than at boot: whether a credential is set can change
   // while the designer is running, and a stale "not set" reads as a bug
+  const stamped = (S.spec && S.spec.source) || {};
+  if (typeof want !== "string") want = stamped.name;
   let chosen = info.sources.some((s) => s.name === want)
     ? want : (info.sources.length ? info.sources[0].name : "");
+  // A map this source made before already says how it was imported. Starting
+  // from that makes bringing it up to date Import → Import, with nothing to
+  // remember or retype.
+  if (!filled && S.name && stamped.name === chosen) {
+    filled = Object.fromEntries(Object.entries(stamped.options || {}).map(
+      ([k, v]) => [k, Array.isArray(v) ? v.join(",") : v]));
+  }
 
   const body = () => {
     const src = info.sources.find((s) => s.name === chosen) || {};
+    // The screen shows what a person filling it in needs. Every option is
+    // still taken by the command line and MCP; the groups only decide where,
+    // or whether, each one appears here.
     const opts = (src.options || []).filter(
-      (o) => !(info.local_only || []).includes(o.name));
+      (o) => !(info.local_only || []).includes(o.name) && o.group !== "cli");
     const missing = (src.env || []).filter((e) => e.required && !e.present);
+    const browsed = src.browsable ? opts.filter((o) => o.group === "browse") : [];
+    const main = opts.filter((o) => !browsed.includes(o) && o.group !== "advanced");
+    const more = opts.filter((o) => o.group === "advanced");
+    const given = (o) => filled && filled[o.name] !== undefined && filled[o.name] !== ""
+      && String(filled[o.name]) !== String(o.default ?? "");
+    const from = [...new Set((src.env || []).map((e) => e.from).filter(Boolean))];
     return `
       <label class="field"><span>Import from</span>
         <select id="imp-source">${info.sources.map((s) =>
           `<option value="${esc(s.name)}" ${s.name === chosen ? "selected" : ""}
            >${esc(s.title)}</option>`).join("")}</select></label>
       <p class="note">${esc(src.summary || "")}</p>
-      ${(src.env || []).map((e) => `<p class="note">${e.present ? "✓" : "!"}
-        <code>${esc(e.name)}</code> — ${e.present ? `set from ${esc(e.from || "settings")}`
-          : `not set. ${esc(e.help)}`}</p>`).join("")}
+      ${(src.env || []).length && !missing.length ? `<p class="note">✓ Connected —
+        credentials from ${esc(from.join(" and ") || "settings")}</p>` : ""}
+      ${missing.map((e) => `<p class="note">! <code>${esc(e.name)}</code> — not set.
+        ${esc(e.help)}</p>`).join("")}
       ${missing.length ? `<p class="warn">Not connected yet —
         <button type="button" id="imp-settings" class="ghost">open Settings</button></p>` : ""}
-      ${src.browsable && !missing.length ? `<p class="note">
-        <button type="button" id="imp-browse" class="ghost">Browse ${esc(src.title)}…</button>
-        — pick a project and tick what you want, instead of typing keys.</p>` : ""}
-      ${opts.map((o) => optField(o, filled)).join("")}
+      ${browsed.length && !missing.length ? browseSummary(browsed, filled) : ""}
+      ${main.map((o) => optField(o, filled)).join("")}
+      ${more.length ? `<details class="more" ${more.some(given) ? "open" : ""}>
+        <summary>More options</summary>
+        ${more.map((o) => optField(o, filled)).join("")}
+      </details>` : ""}
       ${S.name ? `<label class="field"><span>
         <input type="checkbox" id="imp-into" ${(S.spec.source || {}).name === chosen ? "checked" : ""}>
         Re-sync into “${esc(S.name)}”</span>
@@ -2354,14 +2702,28 @@ async function importDialog(want, filled) {
       const openBrowse = form.querySelector("#imp-browse");
       if (openBrowse) openBrowse.addEventListener("click", () => {
         const src = info.sources.find((s) => s.name === chosen);
-        document.querySelector("#dialog").close();
-        browseDialog(src, (choice) => {
-          // straight back to the *same* source's form with the choice filled
-          // in, so what the browser picked is visible and editable rather than
-          // hidden — and so a Jira selection cannot land on git's form
-          importDialog(src.name, {project: choice.project,
-                                  select: choice.select.join(",")});
+        // the wizard starts from what the form says now, so a mapping made
+        // last time — or typed in by hand — is where it picks up
+        const now = {};
+        form.querySelectorAll("[data-opt]").forEach((el) => {
+          now[el.dataset.opt] = el.type === "checkbox" ? el.checked : el.value;
         });
+        const csv = (v) => String(v || "").split(",").map((x) => x.trim()).filter(Boolean);
+        document.querySelector("#dialog").close();
+        treeWizard(src, (choice) => {
+          // straight back to the *same* source's form with the choice filled
+          // in, so what the wizard picked is visible and editable rather than
+          // hidden — and so a Jira selection cannot land on git's form
+          importDialog(src.name, {
+            ...now,
+            roots: choice.roots.join(","), types: choice.types.join(","),
+            open_only: choice.open_only, labels: choice.labels.join(","),
+            levels: choice.levels.join(","), roles: choice.roles.join(","),
+            dates: choice.dates.join(",") });
+        }, { roots: csv(now.roots), types: csv(now.types),
+             open_only: now.open_only === true || now.open_only === "true",
+             labels: csv(now.labels), levels: String(now.levels || "").split(",").map((x) => x.trim()),
+             roles: csv(now.roles), dates: csv(now.dates) });
       });
       form.querySelector("#imp-go").addEventListener("click", async () => {
         const options = {};

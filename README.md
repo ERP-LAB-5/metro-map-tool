@@ -291,7 +291,7 @@ metro-map --sources                       # what can be imported from
 metro-map --from jira --describe          # and what that one needs
 
 metro-map --from github --opt repo=owner/name        -o plan.svg
-metro-map --from jira   --opt project=PAY            -o plan.svg
+metro-map --from jira   --opt project=ABCD            -o plan.svg
 ```
 
 Or **Import…** in the designer, which asks the same questions as a form.
@@ -323,29 +323,48 @@ A credential is never an option, so it cannot reach a map, an API response or
 an error message. `metro-map --from NAME --describe` says what a source wants
 and whether it is set.
 
-### Browsing before importing
+### Starting from issue keys
 
-Importing used to need three things you could only get from somewhere else: the
-project key, a JQL query, and the number of the custom field holding sprints.
-Now you browse to them — **Import… → Browse**, starting at the project:
+A roadmap is usually a few initiatives and what hangs off them, not a whole
+project, so the Jira import starts from keys — **Import… → Start from issue
+keys…** — in three steps:
 
-| view | what you walk down |
-|---|---|
-| By hierarchy | project → epic set → epic → issue |
-| By board | project → board → sprint → issue |
+1. **Keys.** Type one, **+ Add key** for more. Each key becomes a line of its
+   own. A key that does not exist (or your account cannot see), a duplicate, or
+   a key already beneath another one in the list is said right under its box.
+2. **Filter** by **issue type**, **All or Only open**, and **labels** — typed
+   freely, comma separated, with the labels found beneath your keys offered to
+   click. The trees are loaded once and filtered where they are, so nothing is
+   re-fetched while you narrow. Filtering keeps the structure: pick only Bugs
+   and whatever they hang from stays, as what they sit in.
+3. **Map.** Say what each level beneath a key becomes, and override single
+   issues where their level is not right for them:
 
-There is a **filter** above the columns, which matters on a site with hundreds
-of projects: a few letters means "contains", and a pattern with `*` or `?` is
-taken literally, so `SAP*` is the projects whose key or name *starts* with SAP.
-The plain part of a pattern is handed to Jira so the list is narrowed before it
-is sent, not after.
+   | role | on the map |
+   |---|---|
+   | Station | a stop at its date |
+   | Junction | a branch of the line, carrying what is beneath it — it turns off before its first stop and rejoins after its last, and branches can branch |
+   | Zone | a band around the stops beneath it |
+   | Track note | its name on the track beside the stops beneath it (on a line's main route) |
+   | Hide | not drawn; what is beneath it still comes |
+   | Don't import | neither it nor anything beneath it |
 
-Tick what you want and import it. The same selection works on the command line,
-because the browser only fills in an ordinary option:
+   An issue with no due date and no quarter label gets a date box: a date typed
+   there places it until Jira has a date of its own, and then Jira's wins. The
+   count at the bottom says what you will get — stations, branches, zones and
+   notes on how many lines, and what will be left out for want of a date.
+
+The wizard only fills in ordinary options, so the same import works on the
+command line and through MCP, and a re-sync repeats the same mapping:
 
 ```bash
-metro-map --from jira --opt project=ACME --opt select=ACME-831,ACME-902
+metro-map --from jira --opt roots=ABCD-123,ABCD-456 --opt open_only=true \
+          --opt levels=junction,station --opt roles=ABCD-130=zone \
+          --opt dates=ABCD-140=2026-10-01
 ```
+
+`project=` still takes a whole project the old way — epics as lines — and
+`jql=` any search you like.
 
 And you no longer have to know your instance's field numbers: the plugin asks
 Jira which fields are called Sprint, Start date and Epic Link, and remembers
@@ -364,14 +383,28 @@ This is the point of importing rather than exporting. Every stop an import
 creates remembers where it came from, so the next sync recognises it:
 
 ```bash
-metro-map --from jira --opt project=PAY --model plan.json --write-spec plan.json
+metro-map --from jira --opt project=ABCD --model plan.json --write-spec plan.json
 ```
 
 **The import owns what exists upstream; you own where it sits, what colour it
 is and what the map calls it.** Move a stop, recolour a line, rename something
 into words your team actually uses — a re-sync brings in what changed and
-leaves all of that alone. Where the wording upstream has drifted from yours it
-says so rather than overwriting you.
+leaves all of that alone.
+
+What a Jira import makes remembers what Jira said for it — the label, the date,
+the position — so a re-sync can tell the two kinds of change apart:
+
+| since the last sync… | the re-sync |
+|---|---|
+| Jira changed it, the map did not | takes Jira's — a new due date moves the stop, a new summary renames it |
+| the map changed it, Jira did not | keeps the map's, without a word |
+| both changed it | keeps the map's, and says what Jira has now |
+
+So a stop you never touched follows its date, and one you dragged stays where
+you put it. The same happens from the designer (the **Re-sync into** checkbox,
+which also fills the form from how the map was imported) and from MCP
+`import_map(into=…)`. A map imported before this existed keeps its values on
+the first re-sync and is updated like this from then on.
 
 Something that vanishes upstream is **kept**, with a note, because a sync that
 deletes is triggered by innocuous things — a narrower date window, a rename, a
@@ -384,8 +417,8 @@ not maintain by hand.
 ### Working offline, and adding your own source
 
 ```bash
-metro-map --from jira --opt project=PAY --opt to_file=payload.json   # record
-metro-map --from jira --opt project=PAY --opt from_file=payload.json # replay
+metro-map --from jira --opt project=ABCD --opt to_file=payload.json   # record
+metro-map --from jira --opt project=ABCD --opt from_file=payload.json # replay
 ```
 
 Fetching and drawing are separate, so a recorded payload replays identically

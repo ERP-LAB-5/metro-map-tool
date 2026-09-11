@@ -854,7 +854,7 @@ def origin_errors(owner: dict, where: str) -> List[str]:
     if origin is None:
         return []
     if not isinstance(origin, str) or not origin.strip():
-        return [f"{where}: origin must be non-empty text like 'jira:ACME-1'"]
+        return [f"{where}: origin must be non-empty text like 'jira:ABCD-1'"]
     return []
 
 

@@ -59,6 +59,10 @@ class RejectionTest(unittest.TestCase):
         bad = self._source(options=(S.Option("x", "h", kind="colour"),))
         self.assertIn("unknown kind", S._rejected(bad, {}))
 
+    def test_an_option_in_an_unknown_group_is_refused(self):
+        bad = self._source(options=(S.Option("x", "h", group="sidebar"),))
+        self.assertIn("unknown group", S._rejected(bad, {}))
+
     def test_a_duplicated_option_name_is_refused(self):
         bad = self._source(options=(S.Option("x", "h"), S.Option("x", "h")))
         self.assertIn("twice", S._rejected(bad, {}))

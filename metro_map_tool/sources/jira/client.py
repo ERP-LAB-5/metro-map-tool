@@ -115,17 +115,40 @@ class Jira:
         return found if isinstance(found, list) else []
 
     def search(self, jql: str, fields: str, limit: int = 200) -> List[dict]:
+        """Issues matching a JQL, paged to `limit`.
+
+        /search/jql rather than /search: Atlassian removed the old endpoint,
+        which now answers 410 Gone. The new one pages by a token instead of an
+        offset, so there is no asking for page five without reading one to four.
+        """
         out: List[dict] = []
-        for start in range(0, limit, 100):
-            page = self.get("/rest/api/3/search",
-                            {"jql": jql, "startAt": start,
-                             "maxResults": min(100, limit - start),
-                             "fields": fields})
-            batch = page.get("issues") or []
-            out.extend(batch)
-            if len(batch) < 100:
+        token = None
+        for _ in range(http.MAX_PAGES):
+            page = self.get("/rest/api/3/search/jql",
+                            {"jql": jql, "fields": fields,
+                             "maxResults": min(100, limit - len(out)),
+                             "nextPageToken": token})
+            out.extend(page.get("issues") or [])
+            token = page.get("nextPageToken")
+            if page.get("isLast", True) or not token or len(out) >= limit:
                 break
         return out[:limit]
+
+    def issue(self, key: str, fields: str) -> dict:
+        """One issue by key, or a sentence saying it is not there to be seen.
+
+        Jira answers 404 both for a key that does not exist and for one this
+        account may not see, and deliberately does not say which — so neither
+        does this.
+        """
+        try:
+            return self.get(f"/rest/api/3/issue/{urllib.parse.quote(key)}",
+                            {"fields": fields})
+        except SourceError as exc:
+            if " 404 " not in f"{exc} ":
+                raise
+            raise SourceError(f"there is no issue {key} — check the key, or "
+                              "whether this account can see it") from None
 
     def versions(self, project: str) -> List[dict]:
         found = self.get(

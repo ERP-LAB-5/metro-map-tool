@@ -85,5 +85,32 @@ class SecrecyTest(unittest.TestCase):
         self.assertEqual(got.status_code, 400)
 
 
+class BrowseOptionsTest(unittest.TestCase):
+    def test_the_filter_options_reach_the_source_as_options(self):
+        from unittest import mock
+        from metro_map_tool.sources import jira
+        designer.app.config["TESTING"] = True
+        seen = {}
+
+        def browse(path, opts, view, query="", client=None, creds=None):
+            seen.update(path=path, opts=opts)
+            return []
+        with mock.patch.object(jira, "credentials", lambda src: {}), \
+                mock.patch.object(jira.browse_mod, "browse", browse):
+            got = designer.app.test_client().get(
+                "/api/browse/jira?path=ABCD-1&open_only=true&types=Story,Bug"
+                "&roots=ABCD-1,ABCD-2&levels=junction,station"
+                "&roles=ABCD-3%3Dzone&dates=ABCD-4%3D2026-10-01",
+                environ_base={"REMOTE_ADDR": "127.0.0.1"})
+        self.assertEqual(got.status_code, 200, got.get_data(as_text=True))
+        self.assertEqual(seen["path"], ["ABCD-1"])
+        self.assertIs(seen["opts"]["open_only"], True)
+        self.assertEqual(seen["opts"]["types"], ["Story", "Bug"])
+        self.assertEqual(seen["opts"]["roots"], ["ABCD-1", "ABCD-2"])
+        self.assertEqual(seen["opts"]["levels"], ["junction", "station"])
+        self.assertEqual(seen["opts"]["roles"], ["ABCD-3=zone"])
+        self.assertEqual(seen["opts"]["dates"], ["ABCD-4=2026-10-01"])
+
+
 if __name__ == "__main__":
     unittest.main()

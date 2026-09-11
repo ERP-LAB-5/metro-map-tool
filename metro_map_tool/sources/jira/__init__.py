@@ -11,9 +11,10 @@ them.
 
 The plugin owns everything it needs: its own settings (config.py), its own
 lightweight REST client (client.py), its own way of finding out what this Jira
-calls things (fields.py), and its own discovery tree (browse.py). It reaches
-the rest of the tool only through the Source interface, so it can be lifted
-into a package of its own later without anything else noticing.
+calls things (fields.py), and its own discovery tree (browse.py, over the walk
+and the filter in tree.py). It reaches the rest of the tool only through the
+Source interface, so it can be lifted into a package of its own later without
+anything else noticing.
 
 It is read-only. client.request refuses anything but GET, and says so.
 """
@@ -29,6 +30,8 @@ from . import browse as browse_mod
 from . import client as jira_client
 from . import config as jira_config
 from . import fields as jira_fields
+from . import layout as jira_layout
+from . import tree as jira_tree
 
 NO_EPIC = "Unassigned"
 # Teams label a quarter in whatever dialect they settled on years ago — 25Q1,
@@ -93,15 +96,40 @@ def _fetch(opts: dict, model: Optional[dict]) -> dict:
     extra = [f for f in (found.get("sprint"), found.get("start_date"),
                          found.get("epic_link")) if f]
     fields = ",".join(BASE_FIELDS + tuple(dict.fromkeys(extra)))
-    issues = client.search(_scope(opts), fields, int(opts.get("limit") or 200))
+    limit = int(opts.get("limit") or 200)
+    notes = jira_fields.summary(found)
 
+    roots: List[dict] = []
+    issues: List[dict] = []
     versions: List[dict] = []
-    if opts.get("project"):
-        versions = client.versions(str(opts["project"]))
+    project = str(opts.get("project") or "")
+    if opts.get("roots"):
+        # the mapping is checked before Jira is asked anything, so a typo in a
+        # role costs a sentence rather than a tree walk
+        jira_tree.levels_of(opts.get("levels"))
+        jira_tree.roles_of(opts.get("roles"))
+        jira_tree.dates_of(opts.get("dates"))
+        seen_projects: List[str] = []
+        for key in dict.fromkeys(k.strip().upper() for k in opts["roots"] if k.strip()):
+            root, found_issues, truncated = jira_tree.walk(client, key, fields, limit)
+            roots.append({"root": root, "issues": found_issues,
+                          "truncated": truncated})
+            prefix = (root.get("key") or key).rsplit("-", 1)[0]
+            if prefix not in seen_projects:
+                seen_projects.append(prefix)
+        for prefix in seen_projects:
+            versions.extend(client.versions(prefix))
+        project = ",".join(seen_projects)
+    elif project or opts.get("jql") or opts.get("select"):
+        issues = client.search(_scope(opts), fields, limit)
+        versions = client.versions(project) if project else []
+    else:
+        raise SourceError("nothing to import yet — start from issue keys (roots), "
+                          "or give a project or a JQL search")
 
-    return {"project": opts.get("project", ""), "site": client.site,
+    return {"project": project, "site": client.site, "roots": roots,
             "issues": issues, "versions": versions, "fields": found,
-            "notes": jira_fields.summary(found)}
+            "notes": notes}
 
 
 # ------------------------------------------------------------------ build --
@@ -142,6 +170,14 @@ def _build(data: dict, opts: dict, model: Optional[dict]) -> Tuple[dict, List[st
     epic_field = str(opts.get("epic_field") or found.get("epic_link") or "")
     use_quarters = opts.get("quarter_labels", True)
     notes: List[str] = list(data.get("notes") or [])
+
+    if data.get("roots"):
+        under = [i for entry in data["roots"] for i in
+                [entry.get("root") or {}] + list(entry.get("issues") or [])]
+        spec, more = jira_layout.build(
+            data["roots"], opts, model, versions=data.get("versions"),
+            phases=_phases({"issues": under}, opts, found))
+        return spec, notes + more
 
     items: List[dict] = []
     members: Dict[str, List[str]] = {}
@@ -218,20 +254,51 @@ def _browse(path: List[str], opts: dict, view: str, query: str = "") -> List[Nod
 SOURCE = Source(
     name="jira",
     title="Jira epics and issues",
-    summary="epics as lines, issues as stations, due dates as the axis, fix "
-            "versions as milestones across them",
+    summary="each issue key a line, and each level beneath it mapped to stops, "
+            "branches, zones or track notes — due dates as the axis, fix versions "
+            "as milestones across the lines",
     options=(
-        Option("project", "the project key — browse to find it",
-               placeholder="ACME"),
+        Option("roots", "issue keys to start from, each one its own line with "
+                        "everything beneath it; takes the place of project and jql",
+               kind="csv", placeholder="ABCD-123,ABCD-456",
+               group="browse"),
+        Option("types", "only these issue types, e.g. Story,Bug — the structure "
+                        "above them is kept", kind="csv", placeholder="Story,Bug",
+               group="browse"),
+        Option("open_only", "leave out issues that are done", kind="bool",
+               default=False,
+               group="browse"),
+        Option("labels", "only issues carrying at least one of these labels — "
+                         "any label, typed freely",
+               kind="csv", placeholder="25Q1,cutover",
+               group="browse"),
+        Option("levels", "what each level beneath a key becomes, level 1 first: "
+                         + ", ".join(jira_tree.ROLES)
+                         + " — left empty, level 1 branches where it can",
+               kind="csv", placeholder="junction,station",
+               group="browse"),
+        Option("roles", "the same for single issues, overriding their level",
+               kind="csv", placeholder="ABCD-130=zone,ABCD-131=skip",
+               group="browse"),
+        Option("dates", "a date for an issue Jira has none for — used until "
+                        "Jira has one of its own",
+               kind="csv", placeholder="ABCD-140=2026-10-01",
+               group="browse"),
+        Option("project", "the whole project instead of one issue's tree",
+               placeholder="ABCD",
+               group="advanced"),
         Option("jql", "override the search; the default takes the whole project "
                       "ordered by due date",
-               placeholder="project = ACME AND duedate <= 2027-01-01"),
+               placeholder="project = ABCD AND duedate <= 2027-01-01",
+               group="advanced"),
         Option("epic_field", "the custom field holding the epic link; found "
                              "automatically when left empty",
-               placeholder="customfield_10014"),
+               placeholder="customfield_10014",
+               group="advanced"),
         Option("sprint_field", "the custom field holding sprints; found "
                                "automatically when left empty",
-               placeholder="customfield_10007"),
+               placeholder="customfield_10007",
+               group="advanced"),
         Option("quarter_labels", "place an undated issue from a quarter label "
                                  "like 25Q1 or FY25Q1 rather than leaving it out",
                kind="bool", default=True),

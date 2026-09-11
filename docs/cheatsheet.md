@@ -62,7 +62,7 @@ metro-map --from jira --describe           # and what that one needs
 
 metro-map --from git    --opt repo=.                  -o history.svg
 metro-map --from github --opt repo=owner/name         -o plan.svg
-metro-map --from jira   --opt project=ACME            -o plan.svg
+metro-map --from jira   --opt project=ABCD            -o plan.svg
 ```
 
 `--opt KEY=VALUE` is repeatable; `-O` is the short form; a bare `-O prune`
@@ -71,7 +71,7 @@ means true.
 **Re-sync** — import once, arrange it by hand, keep it current:
 
 ```bash
-metro-map --from jira --opt project=ACME \
+metro-map --from jira --opt project=ABCD \
           --model plan.json --write-spec plan.json -o plan.svg
 ```
 
@@ -84,7 +84,7 @@ Universal options, on every source:
 | option | does |
 |---|---|
 | `model=FILE` | fold the import into a map you already drew |
-| `select=a,b,c` | import only these, as the browser would have picked them |
+| `select=a,b,c` | with a Jira `project`: only these keys and what hangs from them (command line only) |
 | `limit=N` | most items to take (200) |
 | `prune=true` | remove what is no longer upstream (off) |
 | `refresh=label,gx` | re-take these fields from upstream (none) |
@@ -111,10 +111,13 @@ token — it understands `url`/`base_url`, `token`/`api_token`, `user`/`email`:
 export METRO_MAP_JIRA_CONFIG=/path/to/your/config.conf
 ```
 
-**Browsing** — Import… → Browse, starting at the project. Filter with a few
-letters ("contains") or a pattern (`SAP*` starts with SAP). Jira offers two
-spines: by hierarchy (epic set → epic → issue) and by board (board → sprint →
-issue). Field ids are discovered, not asked for.
+**Starting from issue keys** — Import… → Start from issue keys…: add keys
+(each one a line), narrow by issue type, all or only open and free-text labels,
+then map each level: station, junction (a branch), zone, track note, hide, or
+don't import — with a date for issues Jira has none for. The same on the command
+line: `--opt roots=ABCD-123,ABCD-456 --opt levels=junction,station
+--opt roles=ABCD-130=zone --opt dates=ABCD-140=2026-10-01`. Field ids are
+discovered, not asked for.
 
 ---
 
@@ -294,8 +297,10 @@ stops.
   fights you.
 - A **capsule** (`interchanges`) replaces the markers of the stops it covers
   and speaks for them, so do not expect their own labels to show.
-- **Notes are dropped on a re-sync** — they number hops, and after an import
-  the hops have moved.
+- **Your own notes are dropped on a re-sync** when the hops they number have
+  moved; notes an import made are simply made again.
+- **A re-sync updates what only Jira changed** — a stop you never dragged
+  follows its new date; one you dragged stays, and the change is listed.
 - `mymaps/` **follows your working directory** when installed, so run the
   designer from where you keep your maps.
 - An import lands **unsaved and unnamed** — saving is deliberate. Re-syncing

@@ -7,6 +7,7 @@ answers the same shapes, which is the point of keeping fetch and build apart.
 
 import os
 import pathlib
+import re
 import tempfile
 import unittest
 
@@ -16,64 +17,68 @@ from metro_map_tool.sources.jira import SOURCE, quarter_dates
 from metro_map_tool.sources.jira import browse as jira_browse
 from metro_map_tool.sources.jira import client as jira_client
 from metro_map_tool.sources.jira import fields as jira_fields
+from metro_map_tool.sources.jira import tree as jira_tree
 
 
 class Stand_in:
-    """Answers what the plugin asks, and counts what it was asked."""
+    """Answers what the plugin asks, and counts what it was asked.
+
+    `issues` is a flat list; a `parent in (...)` search is answered from each
+    issue's parent field, the way Jira answers it.
+    """
 
     FIELDS = [{"id": "customfield_10007", "name": "Sprint"},
               {"id": "customfield_10015", "name": "Start date"},
               {"id": "customfield_10014", "name": "Epic Link"},
               {"id": "summary", "name": "Summary"}]
 
-    def __init__(self, types=("Epic Set", "Epic", "Story"), issues=None):
+    def __init__(self, issues=None):
         self.calls = []
-        self._types = list(types)
         self._issues = issues or []
 
     def fields(self):
         self.calls.append("fields")
         return self.FIELDS
 
-    def projects(self, query="", limit=2000):
-        self.calls.append(("projects", query))
-        found = [{"key": "ACME", "name": "Acme Platform"},
-                 {"key": "ACMESUB", "name": "Acme Subsidiary"},
-                 {"key": "BILL", "name": "Billing"},
-                 {"key": "SALES", "name": "Sales Ops"}]
-        if query:
-            found = [p for p in found
-                     if query.lower() in p["key"].lower()
-                     or query.lower() in p["name"].lower()]
-        return found
-
-    def get(self, path, params=None):
-        self.calls.append(path)
-        if path.startswith("/rest/api/3/project/"):
-            return {"key": "ACME",
-                    "issueTypes": [{"name": n} for n in self._types]}
-        return {}
+    def issue(self, key, fields):
+        self.calls.append(("issue", key))
+        for found in self._issues:
+            if found["key"] == key:
+                return found
+        raise SourceError(f"there is no issue {key} — check the key, or "
+                          "whether this account can see it")
 
     def search(self, jql, fields, limit=200):
         self.calls.append(("search", jql))
-        return list(self._issues)
-
-    def boards(self, project):
-        self.calls.append("boards")
-        return [{"id": 7, "name": "ACME Scrum", "type": "scrum"}]
-
-    def sprints(self, board):
-        self.calls.append("sprints")
-        return [{"id": 14, "name": "Sprint 14", "state": "closed",
-                 "startDate": "2026-02-02T00:00:00Z",
-                 "endDate": "2026-02-16T00:00:00Z"}]
+        asked = re.findall(r'"([^"]+)"', jql)
+        if jql.startswith("parent in"):
+            return [i for i in self._issues
+                    if ((i["fields"].get("parent") or {}).get("key")) in asked
+                    ][:limit]
+        return list(self._issues)[:limit]
 
 
-def issue(key, summary, kind="Story", due=None):
-    return {"key": key, "fields": {"summary": summary, "duedate": due,
-                                   "issuetype": {"name": kind},
-                                   "status": {"name": "To Do",
-                                              "statusCategory": {"key": "new"}}}}
+def issue(key, summary, kind="Story", due=None, parent=None, done=False,
+          labels=()):
+    fields = {"summary": summary, "duedate": due, "issuetype": {"name": kind},
+              "labels": list(labels),
+              "status": {"name": "Done" if done else "To Do",
+                         "statusCategory": {"key": "done" if done else "new"}}}
+    if parent:
+        fields["parent"] = {"key": parent}
+    return {"key": key, "fields": fields}
+
+
+def initiative():
+    """INIT-1 → EPIC-1 → ST-1 (open, 25Q1), ST-2 (done); EPIC-2 → ST-3 (Bug)."""
+    return [issue("INIT-1", "Platform", "Initiative"),
+            issue("EPIC-1", "Cutover", "Epic", parent="INIT-1"),
+            issue("EPIC-2", "Hardening", "Epic", parent="INIT-1"),
+            issue("ST-1", "Freeze", due="2026-03-01", parent="EPIC-1",
+                  labels=["25Q1"]),
+            issue("ST-2", "Rehearse", due="2026-02-01", parent="EPIC-1",
+                  done=True),
+            issue("ST-3", "Load test", "Bug", due="2026-04-01", parent="EPIC-2")]
 
 
 class SettingsTest(unittest.TestCase):
@@ -153,53 +158,341 @@ class FieldDiscoveryTest(unittest.TestCase):
 
 
 class BrowseTest(unittest.TestCase):
-    def test_the_top_of_the_tree_is_projects(self):
-        nodes = jira_browse.browse([], {}, "hierarchy", client=Stand_in())
-        self.assertEqual({n.kind for n in nodes}, {"project"})
-        self.assertTrue(all(n.expandable for n in nodes))
+    def test_it_starts_from_a_key_not_a_project_list(self):
+        with self.assertRaises(SourceError) as caught:
+            jira_browse.browse([], {}, "tree", client=Stand_in())
+        self.assertIn("issue key", str(caught.exception))
 
-    def test_an_instance_with_an_epic_set_shows_that_level(self):
-        stand = Stand_in(issues=[issue("ACME-1", "Platform Upgrade", "Epic Set")])
-        nodes = jira_browse.browse(["ACME"], {}, "hierarchy", client=stand)
-        self.assertEqual([n.kind for n in nodes], ["epicset"])
+    def test_an_unknown_key_says_so(self):
+        with self.assertRaises(SourceError) as caught:
+            jira_browse.browse(["NOPE-1"], {}, "tree", client=Stand_in(initiative()))
+        self.assertIn("there is no issue NOPE-1", str(caught.exception))
 
-    def test_an_instance_without_one_skips_it_rather_than_showing_it_empty(self):
-        stand = Stand_in(types=("Epic", "Story"),
-                         issues=[issue("ACME-9", "Rollout", "Epic")])
-        nodes = jira_browse.browse(["ACME"], {}, "hierarchy", client=stand)
-        self.assertEqual([n.kind for n in nodes], ["epic"])
+    def test_something_that_is_not_a_key_is_refused_before_asking(self):
+        stand = Stand_in(initiative())
+        with self.assertRaises(SourceError):
+            jira_browse.browse(["platform upgrade"], {}, "tree", client=stand)
+        self.assertEqual(stand.calls, [])
 
-    def test_opening_a_project_does_not_fetch_its_issues(self):
-        # a project with four thousand issues must not be downloaded to draw
-        # three rows, so each level is asked for only when it is opened
-        stand = Stand_in(issues=[issue("ACME-1", "A", "Epic Set")])
-        jira_browse.browse(["ACME"], {}, "hierarchy", client=stand)
-        searches = [c for c in stand.calls if isinstance(c, tuple)]
-        self.assertEqual(len(searches), 1)
-        self.assertIn("Epic Set", searches[0][1])
+    def test_the_whole_subtree_comes_back_with_its_shape(self):
+        nodes = jira_browse.browse(["INIT-1"], {}, "tree",
+                                   client=Stand_in(initiative()))
+        by = {n.id: n for n in nodes}
+        self.assertEqual(nodes[0].id, "INIT-1")
+        self.assertEqual((by["INIT-1"].depth, by["INIT-1"].kind), (0, "root"))
+        self.assertEqual((by["EPIC-1"].depth, by["EPIC-1"].parent), (1, "INIT-1"))
+        self.assertEqual((by["ST-2"].depth, by["ST-2"].parent), (2, "EPIC-1"))
+        self.assertTrue(by["EPIC-1"].expandable)
+        self.assertFalse(by["ST-1"].expandable)
+        self.assertEqual(by["ST-2"].facets["open"], False)
+        self.assertEqual(by["ST-3"].facets["type"], "Bug")
+        self.assertEqual(by["ST-1"].facets["labels"], ["25Q1"])
 
-    def test_the_board_view_walks_boards_then_sprints(self):
-        stand = Stand_in()
-        boards = jira_browse.browse(["ACME"], {}, "boards", client=stand)
-        self.assertEqual([n.kind for n in boards], ["board"])
-        sprints = jira_browse.browse(["ACME", boards[0].id], {}, "boards",
-                                     client=stand)
-        self.assertEqual([n.kind for n in sprints], ["sprint"])
-        self.assertIn("2026-02-02", sprints[0].hint)
+    def test_a_lowercase_key_is_understood(self):
+        nodes = jira_browse.browse(["epic-1"], {}, "tree",
+                                   client=Stand_in(initiative()))
+        self.assertEqual([n.id for n in nodes], ["EPIC-1", "ST-1", "ST-2"])
 
-    def test_a_site_without_jira_software_has_no_boards_not_an_error(self):
-        stand = Stand_in()
-        stand.boards = lambda project: []
-        self.assertEqual(jira_browse.browse(["ACME"], {}, "boards", client=stand), [])
+
+class WalkTest(unittest.TestCase):
+    def test_a_wide_level_is_asked_for_in_chunks(self):
+        wide = [issue("RT-1", "Root", "Epic")] + [
+            issue(f"ST-{n}", f"Story {n}", parent="RT-1") for n in range(120)]
+        stand = Stand_in(wide)
+        # one level of 120 below the root: every child must be asked about,
+        # and no single JQL may name all of them
+        _, found, truncated = jira_tree.walk(stand, "RT-1", "summary", 500)
+        self.assertEqual((len(found), truncated), (120, False))
+        asked = [c[1] for c in stand.calls if c[0] == "search"]
+        self.assertEqual(len(asked), 1 + 3)       # the root's children, then 3 chunks
+        self.assertTrue(all(q.count('"') <= 2 * jira_tree.CHUNK for q in asked))
+
+    def test_it_stops_at_the_limit_and_says_so(self):
+        _, found, truncated = jira_tree.walk(Stand_in(initiative()), "INIT-1",
+                                             "summary", 3)
+        self.assertEqual((len(found), truncated), (3, True))
+
+    def test_a_parent_loop_does_not_walk_forever(self):
+        loop = [issue("AB-1", "A", "Epic", parent="AB-2"),
+                issue("AB-2", "B", "Epic", parent="AB-1")]
+        _, found, _ = jira_tree.walk(Stand_in(loop), "AB-1", "summary", 100)
+        self.assertEqual([i["key"] for i in found], ["AB-2"])
+
+
+class KeepTest(unittest.TestCase):
+    """The one definition of what a filter leaves, shared by preview and import."""
+
+    def setUp(self):
+        _, self.issues, _ = jira_tree.walk(Stand_in(initiative()), "INIT-1",
+                                           "summary", 100)
+
+    def keep(self, **given):
+        return jira_tree.keep(self.issues, "INIT-1", **given)
+
+    def test_no_filter_keeps_everything(self):
+        self.assertEqual(len(self.keep()), 6)
+
+    def test_by_type_keeps_the_structure_above(self):
+        self.assertEqual(self.keep(types=["bug"]), {"INIT-1", "EPIC-2", "ST-3"})
+
+    def test_only_open_drops_what_is_done(self):
+        self.assertNotIn("ST-2", self.keep(open_only=True))
+        self.assertIn("ST-1", self.keep(open_only=True))
+
+    def test_a_label_keeps_its_issue_and_what_it_hangs_from(self):
+        self.assertEqual(self.keep(labels=["25q1"]), {"INIT-1", "EPIC-1", "ST-1"})
+
+    def test_filters_combine(self):
+        self.assertEqual(self.keep(types=["Story"], open_only=True),
+                         {"INIT-1", "EPIC-1", "ST-1"})
+
+
+def mapped(opts=None, trees=None):
+    """Build a spec the way an import does, from stand-in trees.
+
+    `trees` is a list of (root key, issues); by default the one initiative.
+    """
+    trees = trees or [("INIT-1", initiative())]
+    roots = []
+    for key, issues in trees:
+        root, found, truncated = jira_tree.walk(Stand_in(issues), key, "summary", 100)
+        roots.append({"root": root, "issues": found, "truncated": truncated})
+    raw = dict({"roots": ",".join(k for k, _ in trees)}, **(opts or {}))
+    coerced, errors = S.coerce(SOURCE, raw)
+    assert not errors, errors
+    data = {"roots": roots, "versions": [], "fields": {}, "notes": []}
+    spec, notes = SOURCE.build(data, coerced, None)
+    return spec, notes
+
+
+def operations():
+    """OPS-1 → OPS-2 (Alerts, Dashboards), OPS-6 (Forecast), and Runbook directly."""
+    return [issue("OPS-1", "Operations", "Initiative"),
+            issue("OPS-2", "Monitoring", "Epic", parent="OPS-1"),
+            issue("OPS-3", "Alerts", due="2026-05-01", parent="OPS-2"),
+            issue("OPS-4", "Dashboards", due="2026-06-15", parent="OPS-2"),
+            issue("OPS-6", "Capacity", "Epic", parent="OPS-1"),
+            issue("OPS-7", "Forecast", due="2026-05-10", parent="OPS-6"),
+            issue("OPS-5", "Runbook", due="2026-03-15", parent="OPS-1")]
+
+
+class MappingOptionsTest(unittest.TestCase):
+    """What the mapping is told, and the sentence for telling it wrong."""
+
+    def test_levels_roles_and_dates_are_read(self):
+        self.assertEqual(jira_tree.levels_of(["", "Junction"]), ["", "junction"])
+        self.assertEqual(jira_tree.roles_of(["abcd-1=Zone"]), {"ABCD-1": "zone"})
+        self.assertEqual(jira_tree.dates_of(["ABCD-2=2026-10-01"]),
+                         {"ABCD-2": "2026-10-01"})
+
+    def test_each_mistake_is_a_sentence(self):
+        for call, said in ((lambda: jira_tree.levels_of(["tunnel"]), "level 1"),
+                           (lambda: jira_tree.roles_of(["ABCD-1=tunnel"]), "not a role"),
+                           (lambda: jira_tree.roles_of(["ABCD-1"]), "KEY=value"),
+                           (lambda: jira_tree.dates_of(["ABCD-1=soon"]), "yyyy-mm-dd")):
+            with self.assertRaises(SourceError) as caught:
+                call()
+            self.assertIn(said, str(caught.exception))
+
+    def test_the_cli_spelling_survives_coercion(self):
+        opts, errors = S.coerce(SOURCE, {"roots": "ABCD-1,ABCD-2",
+                                         "dates": "ABCD-3=2026-10-01"})
+        self.assertEqual(errors, [])
+        self.assertEqual(opts["dates"], ["ABCD-3=2026-10-01"])
+
+
+class RolesTest(unittest.TestCase):
+    def setUp(self):
+        _, self.issues, _ = jira_tree.walk(Stand_in(initiative()), "INIT-1",
+                                           "summary", 100)
+        self.kept = jira_tree.keep(self.issues, "INIT-1")
+
+    def roles(self, levels=None, overrides=None):
+        return jira_tree.roles(self.issues, "INIT-1", self.kept, levels, overrides)
+
+    def test_by_default_a_level_that_has_children_branches(self):
+        got, _ = self.roles()
+        self.assertEqual((got["EPIC-1"], got["ST-1"]), ("junction", "station"))
+
+    def test_an_issue_overrides_its_level(self):
+        got, _ = self.roles(["station"], {"EPIC-2": "zone"})
+        self.assertEqual((got["EPIC-1"], got["EPIC-2"]), ("station", "zone"))
+
+    def test_skip_takes_everything_beneath_with_it(self):
+        got, _ = self.roles(overrides={"EPIC-1": "skip"})
+        self.assertNotIn("EPIC-1", got)
+        self.assertNotIn("ST-1", got)
+        self.assertIn("ST-3", got)
+
+    def test_hide_keeps_what_is_beneath(self):
+        got, _ = self.roles(["hide"])
+        self.assertEqual(got["EPIC-1"], "hide")
+        self.assertEqual(got["ST-1"], "station")
+
+    def test_a_junction_with_nothing_beneath_is_a_station_and_says_so(self):
+        got, said = self.roles(["junction", "junction"])
+        self.assertEqual(got["ST-1"], "station")
+        self.assertTrue(any("instead of a junction" in s for s in said))
+
+
+class LayoutTest(unittest.TestCase):
+    def assertValid(self, spec):
+        from metro_map_tool import metro_map as mm
+        self.assertEqual(mm.validate_spec(spec), [])
+
+    def test_each_key_is_its_own_line_on_its_own_rows(self):
+        spec, _ = mapped(trees=[("INIT-1", initiative()), ("OPS-1", operations())])
+        self.assertValid(spec)
+        self.assertEqual([ln["name"] for ln in spec["lines"]], ["Platform", "Operations"])
+        rows = lambda ln: {spec["stations"][s]["gy"] for b in ln.get("branches", [])
+                           for s in b["stations"] if s in spec["stations"]}
+        self.assertFalse(rows(spec["lines"][0]) & rows(spec["lines"][1]))
+
+    def test_a_junction_is_a_branch_that_forks_and_rejoins(self):
+        spec, _ = mapped()
+        self.assertValid(spec)
+        line = spec["lines"][0]
+        cutover = next(b for b in line["branches"] if b["name"] == "Cutover")
+        self.assertEqual(cutover["stations"][0], "j-epic-1-fork")
+        self.assertEqual(cutover["stations"][-1], "j-epic-1-join")
+        self.assertEqual(cutover["stations"][1:-1], ["st-2", "st-1"])  # by date
+        self.assertIn("j-epic-1-fork", line["stations"])
+        self.assertIn("j-epic-1-join", line["stations"])
+        fork = spec["junctions"]["j-epic-1-fork"]
+        self.assertLess(fork["gx"], spec["stations"]["st-2"]["gx"])
+
+    def test_a_branch_can_fork_off_a_branch(self):
+        deep = initiative() + [issue("ST-9", "Sub-epic", "Epic", parent="EPIC-1"),
+                               issue("SU-1", "Deep", due="2026-02-15", parent="ST-9")]
+        spec, _ = mapped({"levels": "junction,junction"}, [("INIT-1", deep)])
+        self.assertValid(spec)
+        names = [b["name"] for b in spec["lines"][0]["branches"]]
+        self.assertIn("Sub-epic", names)
+        sub = next(b for b in spec["lines"][0]["branches"] if b["name"] == "Sub-epic")
+        cutover = next(b for b in spec["lines"][0]["branches"] if b["name"] == "Cutover")
+        self.assertIn(sub["stations"][0], cutover["stations"])
+
+    def test_a_zone_bands_exactly_what_is_beneath_it(self):
+        spec, _ = mapped({"levels": "zone"})
+        self.assertValid(spec)
+        zones = {z["name"]: sorted(z["stations"]) for z in spec["zones"]}
+        self.assertEqual(zones, {"Cutover": ["st-1", "st-2"], "Hardening": ["st-3"]})
+
+    def test_a_note_rides_the_hop_of_its_first_stop(self):
+        spec, _ = mapped({"levels": "note"})
+        self.assertValid(spec)
+        line = spec["lines"][0]
+        texts = {n["text"]: line["stations"][n["at"]] for n in line["notes"]}
+        self.assertEqual(texts["Cutover"], "st-2")
+
+    def test_a_note_on_a_branch_is_left_out_and_says_why(self):
+        deep = initiative() + [issue("ST-9", "Aside", "Task", parent="EPIC-1"),
+                               issue("SU-1", "Deep", due="2026-02-15", parent="ST-9")]
+        spec, notes = mapped({"levels": "junction,note"}, [("INIT-1", deep)])
+        self.assertValid(spec)
+        self.assertTrue(any("main route" in n for n in notes))
+
+    def test_a_date_of_your_own_places_an_undated_issue(self):
+        undated = initiative() + [issue("ST-4", "Sign-off", parent="EPIC-2")]
+        spec, notes = mapped({"dates": "ST-4=2026-05-01"}, [("INIT-1", undated)])
+        self.assertEqual(spec["stations"]["st-4"]["date"], "2026-05-01")
+
+    def test_jira_s_own_date_beats_yours_and_says_so(self):
+        spec, notes = mapped({"dates": "ST-1=2027-01-01"})
+        self.assertEqual(spec["stations"]["st-1"]["date"], "2026-03-01")
+        self.assertTrue(any("no longer used" in n for n in notes))
+
+    def test_what_has_no_date_at_all_is_counted_as_left_out(self):
+        undated = initiative() + [issue("ST-4", "Sign-off", parent="EPIC-2")]
+        spec, notes = mapped(trees=[("INIT-1", undated)])
+        self.assertNotIn("st-4", spec["stations"])
+        self.assertTrue(any("1 issue(s)" in n and "ST-4" in n for n in notes))
+
+    def test_a_junction_with_nothing_dated_beneath_is_a_stop_when_it_is_dated(self):
+        tree = initiative() + [issue("EPIC-3", "Dated epic", "Epic", due="2026-04-15",
+                                     parent="INIT-1"),
+                               issue("ST-5", "Undated", parent="EPIC-3")]
+        spec, notes = mapped(trees=[("INIT-1", tree)])
+        self.assertIn("epic-3", spec["stations"])
+        self.assertNotIn("j-epic-3-fork", spec.get("junctions", {}))
+        self.assertTrue(any("no branch" in n for n in notes))
+
+    def test_only_crowded_labels_are_tilted(self):
+        spec, _ = mapped()
+        # st-2 and st-1 are a month apart on a monthly ruler: level is fine
+        self.assertNotIn("label_angle", spec["stations"]["st-1"])
+
+    def test_everything_made_carries_what_jira_decided(self):
+        spec, _ = mapped()
+        st = spec["stations"]["st-1"]
+        self.assertEqual(st["upstream"], {"label": st["label"], "date": st["date"],
+                                          "gx": st["gx"], "gy": st["gy"]})
+        self.assertEqual(spec["lines"][0]["upstream"]["name"], "Platform")
+        self.assertTrue(all("upstream" in j for j in spec["junctions"].values()))
+
+    def test_a_filter_that_leaves_nothing_says_so(self):
+        with self.assertRaises(SourceError) as caught:
+            mapped({"types": "Task"})
+        self.assertIn("nothing to place", str(caught.exception))
+
+
+class SearchPagingTest(unittest.TestCase):
+    """The search Jira still answers, paged the way it now pages."""
+
+    def test_it_follows_the_page_token_on_the_new_endpoint(self):
+        conn = jira_client.Jira("https://example.atlassian.net", "a@b.c", "t")
+        asked = []
+        pages = [{"issues": [{"key": "A-1"}, {"key": "A-2"}],
+                  "nextPageToken": "p2", "isLast": False},
+                 {"issues": [{"key": "A-3"}], "isLast": True}]
+
+        def get(path, params=None):
+            asked.append((path, dict(params or {})))
+            return pages[len(asked) - 1]
+        conn.get = get
+        found = conn.search("project = A", "summary", 200)
+        self.assertEqual([i["key"] for i in found], ["A-1", "A-2", "A-3"])
+        self.assertEqual({p for p, _ in asked}, {"/rest/api/3/search/jql"})
+        self.assertEqual(asked[1][1]["nextPageToken"], "p2")
+
+    def test_it_stops_at_the_limit(self):
+        conn = jira_client.Jira("https://example.atlassian.net", "a@b.c", "t")
+        conn.get = lambda path, params=None: {
+            "issues": [{"key": f"A-{n}"} for n in range(100)],
+            "nextPageToken": "more", "isLast": False}
+        self.assertEqual(len(conn.search("x", "summary", 150)), 150)
+
+    def test_a_missing_issue_is_a_sentence_not_a_url(self):
+        conn = jira_client.Jira("https://example.atlassian.net", "a@b.c", "t")
+
+        def get(path, params=None):
+            raise SourceError(f"https://example.atlassian.net{path} returned "
+                              "404 Not Found — check the project or repository name")
+        conn.get = get
+        with self.assertRaises(SourceError) as caught:
+            conn.issue("ABCD-9", "summary")
+        self.assertEqual(str(caught.exception), "there is no issue ABCD-9 — check "
+                         "the key, or whether this account can see it")
 
 
 class ScopeTest(unittest.TestCase):
     """What a browsed selection asks Jira for."""
 
+    def test_no_keys_no_project_and_no_search_says_what_to_give(self):
+        from unittest import mock
+        from metro_map_tool.sources import jira
+        with mock.patch.object(jira, "credentials", lambda src: {}), \
+                mock.patch.object(jira.jira_client, "connect", lambda creds: Stand_in()), \
+                mock.patch.object(jira.jira_config, "remembered_fields", lambda: {}), \
+                mock.patch.object(jira.jira_config, "remember_fields", lambda found: None):
+            with self.assertRaises(SourceError) as caught:
+                jira._fetch({}, None)
+        self.assertIn("start from issue keys", str(caught.exception))
+
     def test_a_selection_asks_only_for_what_was_picked(self):
         from metro_map_tool.sources.jira import _scope
-        jql = _scope({"project": "ACME", "select": ["ACME-10", "ACME-20"]})
-        self.assertIn("ACME-10", jql)
+        jql = _scope({"project": "ABCD", "select": ["ABCD-10", "ABCD-20"]})
+        self.assertIn("ABCD-10", jql)
         self.assertIn("parent in", jql)          # its children come too
         self.assertNotIn("project =", jql)
 
@@ -209,7 +502,7 @@ class ScopeTest(unittest.TestCase):
 
     def test_no_selection_takes_the_project(self):
         from metro_map_tool.sources.jira import _scope
-        self.assertIn('project = "ACME"', _scope({"project": "ACME"}))
+        self.assertIn('project = "ABCD"', _scope({"project": "ABCD"}))
 
 
 class QuarterLabelTest(unittest.TestCase):
@@ -319,43 +612,3 @@ class OtherPeoplesConfigTest(unittest.TestCase):
         self.path.write_text("[jira]\nurl = https://x\nemail = a@b.c\n"
                              "api_token = t\n", encoding="utf-8")
         self.assertEqual(str(S.config_path("jira")), str(self.path))
-
-
-class FilterTest(unittest.TestCase):
-    """A site with hundreds of projects needs narrowing, not scrolling."""
-
-    def keys(self, query):
-        return [n.id for n in
-                jira_browse.browse([], {}, "hierarchy", query, client=Stand_in())]
-
-    def test_a_bare_word_means_contains(self):
-        self.assertEqual(self.keys("acme"), ["ACME", "ACMESUB"])
-
-    def test_a_star_is_taken_literally(self):
-        self.assertEqual(self.keys("ACME*"), ["ACME", "ACMESUB"])
-        self.assertEqual(self.keys("S*"), ["SALES"])       # not ACMESUB
-        self.assertEqual(self.keys("*SUB"), ["ACMESUB"])
-
-    def test_it_matches_the_name_as_well_as_the_key(self):
-        self.assertEqual(self.keys("Billing"), ["BILL"])
-
-    def test_no_filter_is_everything(self):
-        self.assertEqual(len(self.keys("")), 4)
-
-    def test_the_server_is_asked_to_narrow_first(self):
-        stand = Stand_in()
-        jira_browse.browse([], {}, "hierarchy", "ACME*", client=stand)
-        # the star cannot go to Jira, but the plain part of it can, so the
-        # whole list is not dragged back to be thrown away here
-        self.assertIn(("projects", "ACME"), stand.calls)
-
-    def test_a_pattern_of_only_wildcards_asks_the_server_for_everything(self):
-        stand = Stand_in()
-        jira_browse.browse([], {}, "hierarchy", "*", client=stand)
-        self.assertIn(("projects", ""), stand.calls)
-
-    def test_it_filters_deeper_levels_too(self):
-        stand = Stand_in(issues=[issue("ACME-1", "Platform Upgrade", "Epic Set"),
-                                 issue("ACME-2", "Data Migration", "Epic Set")])
-        nodes = jira_browse.browse(["ACME"], {}, "hierarchy", "Data", client=stand)
-        self.assertEqual([n.label for n in nodes], ["Data Migration"])

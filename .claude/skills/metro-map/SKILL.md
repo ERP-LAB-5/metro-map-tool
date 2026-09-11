@@ -78,7 +78,7 @@ canvas within a couple of seconds.
 | zone `continues` / `onward` | A zone takes the same two fields a line does. A band that was already running before the map begins, or goes on after it ends, is drawn out to the edge and left **open** on that side rather than closed as if it stopped — with the `onward` text written just past the open edge. |
 | `junctions` | A top-level `{"<id>": {"gx": num, "gy": num}}`. A junction is a bend in the track with **no platform**: a line routes through it, but nothing draws a marker or a label for it, and no zone can hold one. It is where a branch splits off or rejoins when there is no station at that spot. |
 | `branches` | On a line: `[{"name": str?, "stations": [ids], "continues"?, "onward"?}]`. A branch is **the same line going two ways** — same colour, same service, one legend entry — not a second line of the same colour. Start it on a point the line's route already passes through and end it on one too, and the fork and the rejoin draw themselves. This is how to draw a Helsinki-style split. Notes stay on the trunk, addressed by its hop index. |
-| `origin` | On a station, line, zone or interchange an importer made: `"<source>:<id>"` — `jira:ACME-231`, `github:issue/owner/repo#12`. **Leave it alone.** It is how a re-sync recognises what it made last time and keeps the position, colour and wording a human gave it. A spec that came from an importer also carries a top-level `source` recording which one, and with what options. Neither changes anything that is drawn, so neither raises the `format`. |
+| `origin` | On a station, line, zone or interchange an importer made: `"<source>:<id>"` — `jira:ABCD-231`, `github:issue/owner/repo#12`. **Leave it alone.** It is how a re-sync recognises what it made last time and keeps the position, colour and wording a human gave it. A spec that came from an importer also carries a top-level `source` recording which one, and with what options. Neither changes anything that is drawn, so neither raises the `format`. |
 | `color` | `#rrggbb`. `spec_reference` returns the ten-colour palette the designer offers; stay inside it unless the diagram has its own brand colours. |
 
 **Line states.** `out-of-service` draws dashed and faded, and caps the route
@@ -219,12 +219,26 @@ so read it, adjust it, then `save_map` it.
 Pass `into` the name of a map that source imported before and it **re-syncs**:
 what changed upstream comes in, and the layout, colours and wording already in
 the map survive. Prefer that to importing again — a fresh import throws away
-everything anyone arranged.
+everything anyone arranged. Elements a Jira mapping made carry an `upstream`
+snapshot — **leave it alone too**: it is how a re-sync tells "Jira changed this"
+(applied) from "someone changed this on the map" (kept, and a clash is noted).
 
-**Browse before you import.** `browse_source` walks one level at a time —
-Jira starts at the project and goes down either the hierarchy (epic set, epic,
-issue) or the boards (board, sprint, issue). Pass the ids you want as
-`select`, rather than importing a whole project and discarding most of it.
+**Look before you import.** For Jira, `browse_source(path="ABCD-123")` returns
+that issue and its whole subtree, each node with its `parent`, `depth` and
+`facets` (type, open, labels, due) — call it once per key. Then import those
+trees with a mapping rather than a whole project:
+
+```json
+{"roots": ["ABCD-123", "ABCD-456"], "open_only": true, "labels": ["25Q1"],
+ "levels": ["junction", "station"], "roles": ["ABCD-130=zone"],
+ "dates": ["ABCD-140=2026-10-01"]}
+```
+
+Each key is a line. `levels` says what level 1, 2, … beneath it becomes —
+`station`, `junction` (a branch of the line), `zone`, `note` (on the main
+route's track), `hide` (not drawn, children still come) or `skip` (nothing from
+there down); `roles` overrides single issues. A station needs a due date, a
+quarter label or a `dates` entry, and Jira's own date wins once it has one.
 
 Three rules worth carrying: something that vanished upstream is kept and
 reported rather than deleted (`prune` is how you actually remove it);
@@ -248,7 +262,7 @@ The `metro-map` server (`.mcp.json` in the repo) starts the designer on demand.
 | `spec_reference` | palette, label sides and angles, line states, modes, intervals, legend positions, style defaults |
 | `designer_url` | hand the human a link to take over in the browser |
 | `list_sources` | the importers available, their options, and which credentials each needs |
-| `browse_source(source, path="", view="", query="")` | look before importing — one level at a time; `query` narrows it (`SAP*`); node ids feed `import_map`'s `select` |
+| `browse_source(source, path="", view="", query="")` | look before importing — for Jira `path` is an issue key and the answer is its whole subtree, with facets to filter by |
 | `import_map(source, options, into="")` | build a spec from git, GitHub or Jira; `into` re-syncs a map instead of starting over |
 | `stop_designer` | shut the local server down |
 

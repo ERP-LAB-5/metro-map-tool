@@ -235,19 +235,18 @@ def browse_source(source: str, path: str = "", view: str = "",
                   query: str = "") -> dict:
     """Look at what is in an external system before importing any of it.
 
-    Returns the children of one level, so walk down rather than asking for
-    everything: `path` is the ids so far joined by "/", empty for the top,
-    which for Jira is the list of projects. `view` picks a spine when a source
-    has more than one — list_sources() names them; Jira offers "hierarchy"
-    (project, epic set, epic, issue) and "boards" (project, board, sprint).
+    For Jira, `path` is an issue key — an initiative, an epic, a story — and
+    the answer is that issue followed by its whole subtree. Every node carries
+    `parent`, `depth` and `facets` (type, status, open, labels, due), which is
+    what the import can be narrowed by. `view` and `query` are not used by Jira.
 
-    `query` filters the level being looked at — a bare word means "contains",
-    and a pattern with * or ? is taken literally, so "SAP*" is the projects
-    whose key or name starts with SAP. Use it on a site with hundreds of
-    projects rather than reading the whole list.
-
-    Each node's id is what import_map's `select` option takes, so the way to
-    import part of a project is to browse to the pieces and pass their ids.
+    Call it once per key, then import those trees with import_map and the
+    options `roots` (the keys — each one a line), the filters `types`,
+    `open_only` and `labels`, and the mapping: `levels` says what level 1, 2, …
+    beneath a key becomes — station, junction (a branch), zone, note, hide or
+    skip — and `roles` (["ABCD-130=zone"]) overrides single issues. A station
+    needs a due date, a quarter label, or a `dates` entry (["ABCD-140=2026-10-01"])
+    — the facets tell you which issues lack one before you import.
     """
     ensure_designer()
     from urllib.parse import urlencode
@@ -263,8 +262,9 @@ def import_map(source: str, options: dict, into: str = "",
 
     `source` is a name from list_sources(); `options` is that source's options
     as a flat object, e.g. {"repo": "owner/name", "label_prefix": "area:"}.
-    Pass `select` — a list of ids from browse_source — to import part of a
-    project rather than all of it.
+    For Jira, pass `roots` — issue keys from browse_source — to import those
+    trees rather than a whole project, with the filters and the level mapping
+    browse_source describes.
 
     Credentials are the designer's business, not yours: they come from that
     machine's environment or its settings file. Never ask a human to paste a
@@ -276,8 +276,10 @@ def import_map(source: str, options: dict, into: str = "",
 
     Give `into` the name of a map this source imported before and it re-syncs
     instead of starting over — stops it created are recognised by their origin,
-    and the position, colour and wording a human gave them survive. That is the
-    point of importing at all: arrange it once, then keep it current.
+    and the position, colour and wording a human gave them survive. Where an
+    element carries an `upstream` snapshot, what only Jira changed is applied (a
+    stop nobody moved follows its new date), what only the map changed is kept,
+    and a change on both sides keeps the map's and is reported in the notes.
 
     Options naming a file on the designer's machine (from_file, to_file, model)
     are only available on the command line.
@@ -349,7 +351,7 @@ def spec_reference() -> dict:
                         "the same colour. Notes stay on the trunk, addressed by "
                         "its hop index",
             "origin": 'a station, line, zone or interchange an importer made '
-                      'carries "origin": "<source>:<id>" — "jira:ACME-231", '
+                      'carries "origin": "<source>:<id>" — "jira:ABCD-231", '
                       '"github:issue/owner/repo#12". Leave it alone: it is how '
                       "a re-sync recognises what it made last time and keeps "
                       "the layout and wording a human gave it. A spec that came "

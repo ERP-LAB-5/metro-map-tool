@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 KINDS = ("str", "int", "bool", "date", "path", "choice", "csv")
+GROUPS = ("", "browse", "advanced", "cli")
 
 
 class SourceError(RuntimeError):
@@ -46,11 +47,20 @@ class Option:
     choices: Tuple[str, ...] = ()
     required: bool = False
     placeholder: str = ""
+    # Where the designer's Import screen puts it. The command line and MCP take
+    # every option whatever its group; this only keeps the screen to what a
+    # person filling it in needs to see.
+    #   ""          a field on the form
+    #   "browse"    set by the source's browser, shown as a summary of that
+    #   "advanced"  folded away under More options
+    #   "cli"       not on the screen at all
+    group: str = ""
 
     def as_json(self) -> dict:
         return {"name": self.name, "help": self.help, "kind": self.kind,
                 "default": self.default, "choices": list(self.choices),
-                "required": self.required, "placeholder": self.placeholder}
+                "required": self.required, "placeholder": self.placeholder,
+                "group": self.group}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -96,10 +106,16 @@ class Node:
     """
     id: str                     # opaque to the UI, meaningful to the source
     label: str
-    kind: str = "item"          # project | epicset | epic | issue | board | sprint
+    kind: str = "item"          # e.g. root | epic | issue
     hint: str = ""              # the secondary line: a status, a date, a count
     expandable: bool = False
     selectable: bool = True
+    # For a source that hands back a whole tree at once: where a row hangs, and
+    # what it can be filtered by. The designer builds its filters from whatever
+    # facets turn up, so it still needs to know nothing about Jira.
+    parent: str = ""
+    depth: int = 0
+    facets: dict = dataclasses.field(default_factory=dict)
 
     def as_json(self) -> dict:
         return dataclasses.asdict(self)
@@ -159,15 +175,16 @@ UNIVERSAL: Tuple[Option, ...] = (
     Option("from_file", "read a saved payload instead of calling the system — for "
                         "working offline, and for tests", kind="path"),
     Option("to_file", "also save the payload fetched, to replay later", kind="path"),
-    Option("limit", "most items to take", kind="int", default=200),
+    Option("limit", "most items to take", kind="int", default=200,
+           group="advanced"),
     Option("prune", "remove items this source imported before that are no longer "
                     "upstream (off by default — see the module docstring)",
-           kind="bool", default=False),
+           kind="bool", default=False, group="advanced"),
     Option("refresh", "fields to re-take from upstream on an item that already "
                       "exists, e.g. label,gx — by default the import never "
-                      "overwrites what you changed", kind="csv"),
-    Option("select", "the ids to import, as the browser would have picked them "
-                     "— leave empty to take everything in scope", kind="csv"),
+                      "overwrites what you changed", kind="csv", group="advanced"),
+    Option("select", "the ids to import — leave empty to take everything in "
+                     "scope", kind="csv", group="cli"),
 )
 
 
@@ -493,6 +510,8 @@ def _rejected(src: object, found: Dict[str, Source]) -> str:
     for opt in src.all_options():
         if opt.kind not in KINDS:
             return f"option '{opt.name}' has an unknown kind '{opt.kind}'"
+        if opt.group not in GROUPS:
+            return f"option '{opt.name}' has an unknown group '{opt.group}'"
         if opt.name in seen:
             return f"option '{opt.name}' is declared twice"
         seen.add(opt.name)

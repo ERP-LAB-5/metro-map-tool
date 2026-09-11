@@ -4,183 +4,66 @@
 """
 browse.py — look at what is in Jira before importing any of it.
 
-Importing used to need three things you could only get from somewhere else: the
-project key, a JQL query, and the number of the custom field holding sprints.
-This is the answer to all three — start at the project and walk down.
+It starts from an issue key, not from the list of projects. Walking down from a
+project meant a list of hundreds, then two different spines, then a filter box
+that could only ever narrow the column it happened to be in; somebody who wants
+one initiative on a roadmap already knows its key, and is better served typing
+it than hunting for it.
 
-Two spines over the same issues, because a roadmap wants both: the hierarchy
-gives the lines, and the boards give the sprint bands. Each level is fetched
-only when it is opened, since a project with four thousand issues must not be
-downloaded to show three rows.
+So the answer to a key is the issue and its whole subtree in one go, each row
+saying where it hangs and what it can be filtered by. Filtering is then the
+browser's business, on data it already has — see tree.py for why.
 """
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import List, Optional
 
-import fnmatch
-
-from .. import Node, View
+from .. import Node, SourceError, View
 from . import client as jira_client
+from . import tree
 
 VIEWS = (
-    View("hierarchy", "By hierarchy",
-         "Project, then the epics inside it, then their issues"),
-    View("boards", "By board",
-         "Project, then its boards and sprints — where the dates come from"),
+    View("tree", "From an issue",
+         "An initiative, epic or story, and everything beneath it"),
 )
 
-# The type sitting above Epic on instances that have one. Named rather than
-# assumed: most Jiras have no such level, and the browser skips it silently
-# rather than showing an empty column.
-ABOVE_EPIC = ("epic set", "initiative", "theme")
-
 FIELDS = "summary,status,duedate,issuetype,parent,labels"
+# A preview is for looking, so it may go further than an import's default limit
+# — but not unboundedly: a key near the top of a big instance is thousands.
+PREVIEW = 1000
 
 
-def _issue_node(issue: dict, kind: str, expandable: bool = False) -> Node:
+def _node(issue: dict, depth: int, parent: str, has_kids: bool) -> Node:
     fields = issue.get("fields") or {}
-    status = ((fields.get("status") or {}).get("name") or "").strip()
+    said = tree.facets(issue)
     due = (fields.get("duedate") or "")[:10]
-    hint = " · ".join(x for x in (status, f"due {due}" if due else "") if x)
-    return Node(id=issue.get("key", ""), label=fields.get("summary") or
-                issue.get("key", ""), kind=kind, hint=hint,
-                expandable=expandable)
-
-
-def _types(client, project: str) -> List[str]:
-    """The issue type names this project uses, as the instance spells them."""
-    try:
-        found = client.get(f"/rest/api/3/project/{project}")
-    except Exception:
-        return []
-    return [t.get("name") or "" for t in (found.get("issueTypes") or [])]
-
-
-def matches(node: Node, pattern: str) -> bool:
-    """Whether a row survives a filter, against both its name and its id.
-
-    A bare word is taken as "contains", because that is what somebody typing
-    three letters into a box means. A pattern with * or ? in it is taken
-    literally, so "S*" is the projects starting with S and not the ones merely
-    containing one.
-    """
-    pattern = (pattern or "").strip().lower()
-    if not pattern:
-        return True
-    if "*" not in pattern and "?" not in pattern:
-        pattern = f"*{pattern}*"
-    return any(fnmatch.fnmatch((text or "").lower(), pattern)
-               for text in (node.label, node.id, node.hint))
-
-
-def _term(pattern: str) -> str:
-    """The longest plain run of a pattern, for asking the server to narrow first.
-
-    Jira's own search is a substring match, so "SAP*" is sent as "SAP" and the
-    exact meaning of the star is applied to what comes back. Sending nothing
-    when a pattern is all wildcards is correct: there is nothing to narrow by.
-    """
-    parts = [p for p in (pattern or "").replace("?", "*").split("*") if p]
-    return max(parts, key=len) if parts else ""
+    hint = " · ".join(x for x in (said["type"], said["status"],
+                                  f"due {due}" if due else "") if x)
+    return Node(id=issue.get("key", ""),
+                label=fields.get("summary") or issue.get("key", ""),
+                kind="root" if depth == 0 else ("epic" if has_kids else "issue"),
+                hint=hint, expandable=has_kids, parent=parent, depth=depth,
+                facets=said)
 
 
 def browse(path: List[str], opts: dict, view: str, query: str = "",
            client=None, creds: Optional[dict] = None) -> List[Node]:
-    """The children of a path. An empty path is the list of projects.
+    """An issue and its subtree, root first. `path` is the key to start from.
 
-    `query` filters the level being looked at. At the top it is handed to Jira
-    as well, so a site with hundreds of projects is narrowed before it is sent
-    rather than after.
+    `view` and `query` are accepted for the Source interface and not used:
+    there is one spine, and filtering happens on the tree once it is loaded.
     """
+    if not path:
+        raise SourceError("start from a Jira issue key, such as ABCD-123")
     if client is None:
         client = jira_client.connect(creds or {})
-    view = view or VIEWS[0].name
+    cap = max(int(opts.get("limit") or 0), PREVIEW)
+    root, issues, truncated = tree.walk(client, path[-1], FIELDS, cap)
 
-    if not path:
-        found = [Node(id=p.get("key", ""), label=p.get("name") or p.get("key", ""),
-                      kind="project", hint=p.get("key", ""), expandable=True,
-                      selectable=True)
-                 for p in client.projects(query=_term(query))]
-    elif view == "boards":
-        found = _boards(client, path)
-    else:
-        found = _hierarchy(client, path)
-    return [n for n in found if matches(n, query)]
-
-
-def _hierarchy(client, path: List[str]) -> List[Node]:
-    project = path[0]
-    if len(path) == 1:
-        # Where the instance has a level above Epic, show that; otherwise go
-        # straight to epics rather than making the reader click through a
-        # column that only ever holds one thing.
-        # match case-insensitively but ask using the instance's own spelling —
-        # a JQL that renames someone's issue type is asking to be rejected
-        names = _types(client, project)
-        above = [n for n in names if n.lower() in ABOVE_EPIC]
-        if above:
-            found = client.search(
-                f'project = "{project}" AND issuetype = "{above[0]}" '
-                "ORDER BY created ASC", FIELDS, 100)
-            if found:
-                return [_issue_node(i, "epicset", True) for i in found]
-        return _epics(client, project)
-
-    parent = path[-1]
-    if len(path) == 2:
-        kids = client.search(f'parent = "{parent}" ORDER BY duedate ASC',
-                             FIELDS, 200)
-        # a child that is itself an epic keeps its own children
-        return [_issue_node(i, _kind_of(i), _kind_of(i) == "epic") for i in kids]
-
-    return [_issue_node(i, "issue")
-            for i in client.search(f'parent = "{parent}" ORDER BY duedate ASC',
-                                   FIELDS, 200)]
-
-
-def _kind_of(issue: dict) -> str:
-    name = (((issue.get("fields") or {}).get("issuetype") or {})
-            .get("name") or "").lower()
-    if name in ABOVE_EPIC:
-        return "epicset"
-    return "epic" if "epic" in name else "issue"
-
-
-def _epics(client, project: str) -> List[Node]:
-    found = client.search(
-        f'project = "{project}" AND issuetype = Epic ORDER BY duedate ASC',
-        FIELDS, 200)
-    return [_issue_node(i, "epic", True) for i in found]
-
-
-def _boards(client, path: List[str]) -> List[Node]:
-    project = path[0]
-    if len(path) == 1:
-        boards = client.boards(project)
-        if not boards:
-            return []                   # no Jira Software here, not an error
-        return [Node(id=f"board:{b.get('id')}", label=b.get("name") or "board",
-                     kind="board", hint=b.get("type") or "", expandable=True)
-                for b in boards]
-    if len(path) == 2 and path[1].startswith("board:"):
-        out = []
-        for sprint in client.sprints(path[1].split(":", 1)[1]):
-            span = " – ".join(x[:10] for x in
-                              (sprint.get("startDate") or "",
-                               sprint.get("endDate") or "") if x)
-            out.append(Node(id=f"sprint:{sprint.get('id')}",
-                            label=sprint.get("name") or "sprint", kind="sprint",
-                            hint=" · ".join(x for x in
-                                            (sprint.get("state") or "", span) if x),
-                            expandable=True))
-        return out
-    if path[-1].startswith("sprint:"):
-        sid = path[-1].split(":", 1)[1]
-        try:
-            page = client.get(f"/rest/agile/1.0/sprint/{sid}/issue",
-                              {"maxResults": 200, "fields": FIELDS})
-        except Exception:
-            return []
-        return [_issue_node(i, "issue") for i in (page.get("issues") or [])]
-    return []
+    parents = {i.get("parent") for i in issues}
+    top = _node(root, 0, "", bool(issues))
+    if truncated:
+        top.facets["truncated"] = True      # the node is frozen; its dict is not
+    return [top] + [_node(i, i["depth"], i["parent"], i.get("key") in parents)
+                    for i in issues]

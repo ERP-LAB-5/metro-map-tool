@@ -15,9 +15,17 @@ this module is unsure it keeps what the human did and says something, rather
 than taking the upstream answer quietly.
 
 Items are matched by "origin", a flat string each source stamps on what it
-creates — "jira:ACME-231", "github:issue/1487", "git:9f3a1c2". On a match the
+creates — "jira:ABCD-231", "github:issue/1487", "git:9f3a1c2". On a match the
 *author's* id is kept, which is load-bearing: every line route, zone membership,
 interchange group and scenario naming that id keeps resolving, for free.
+
+A source that also stamps an `upstream` snapshot — what it decided for a label,
+a date, a position — gets a three-way merge instead of "keep what is there".
+The snapshot from last time is the base, the map is mine, the new import is
+theirs: a field upstream changed and nobody touched on the map follows
+upstream; a field changed on both sides keeps the map's value and says so; a
+field only the map changed stays as it is. That is how a date moved in Jira
+moves the stop, while a stop somebody dragged stays where they put it.
 """
 
 from __future__ import annotations
@@ -25,7 +33,57 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Tuple
 
 # Keys the import decides; everything else on a matched item is the author's.
-OWNED_TOP = ("stations", "lines", "format")
+OWNED_TOP = ("stations", "junctions", "lines", "format")
+# Where a position lives; changes to these are the stop following its date, and
+# not worth a sentence of their own unless they conflict.
+QUIET = ("gx", "gy")
+
+
+def three_way(existing: dict, incoming: dict, notes: List[str], who: str,
+              source: str) -> bool:
+    """Fold `incoming`'s upstream snapshot into `existing`, in place.
+
+    Returns False when `incoming` carries no snapshot, so the caller falls back
+    to its older rule. An `existing` with no snapshot of its own was made before
+    snapshots were: its values are kept, and the new snapshot becomes the base
+    for next time.
+    """
+    theirs = incoming.get("upstream")
+    if not isinstance(theirs, dict):
+        return False
+    base = existing.get("upstream")
+    base = base if isinstance(base, dict) else None
+    conflicts = []
+    for field, value in theirs.items():
+        mine = existing.get(field)
+        if base is None or field not in base:
+            continue
+        was = base[field]
+        if value == was or mine == value:
+            continue
+        if mine == was:
+            if value is None:
+                existing.pop(field, None)
+            else:
+                existing[field] = value
+            if field not in QUIET:
+                notes.append(f"{who}: {field} is now {_said(value)} in {source} "
+                             f"(was {_said(was)}) — updated")
+        else:
+            conflicts.append((field, mine, value))
+    if any(field in QUIET for field, _, _ in conflicts):
+        notes.append(f"{who}: moved on the map, so it stays where it is although "
+                     f"{source} has moved it")
+    for field, mine, value in conflicts:
+        if field not in QUIET:
+            notes.append(f"{who}: {field} changed both on the map and in {source} — "
+                         f"the map keeps {_said(mine)}, {source} says {_said(value)}")
+    existing["upstream"] = dict(theirs)
+    return True
+
+
+def _said(value) -> str:
+    return "nothing" if value in (None, "") else f"\"{value}\""
 
 
 def merge(model: Optional[dict], fresh: dict, *, source: str,
@@ -84,13 +142,15 @@ def merge(model: Optional[dict], fresh: dict, *, source: str,
             kept[sid] = dict(incoming)
         else:
             existing = dict(kept[sid])
+            synced = three_way(existing, incoming, notes, origin, source)
             # fill what is missing, never replace what is there: a label the
             # author rewrote is the map's own words and outranks upstream's
             for key, value in incoming.items():
                 existing.setdefault(key, value)
             existing["origin"] = origin
             said = incoming.get("label")
-            if said and existing.get("label") != said and "label" not in refresh:
+            if not synced and said and existing.get("label") != said \
+                    and "label" not in refresh:
                 notes.append(f"{origin} is now \"{said}\" upstream; the map still "
                              f"says \"{existing.get('label')}\"")
             for key in refresh:
@@ -113,14 +173,20 @@ def merge(model: Optional[dict], fresh: dict, *, source: str,
 
     gone = {sid for sid in m_stations if sid not in kept}
 
+    junctions = _fold_junctions(model.get("junctions") or {},
+                                fresh.get("junctions") or {}, kept, rename, gone,
+                                mine, resync, source, notes)
+
     spec: dict = {k: v for k, v in model.items() if k not in OWNED_TOP}
     spec["stations"] = kept
+    if junctions:
+        spec["junctions"] = junctions
     spec["lines"] = _fold_lines(model.get("lines") or [], fresh.get("lines") or [],
-                                rename, gone, mine, prune, notes)
+                                rename, gone, mine, prune, notes, source)
 
     for key in ("zones", "interchanges"):
         folded = _fold_groups(spec.get(key) or [], fresh.get(key) or [],
-                              rename, gone, mine, prune, key, notes)
+                              rename, gone, mine, prune, key, notes, source)
         if folded:
             spec[key] = folded
         else:
@@ -159,8 +225,52 @@ def _repoint(ids: List[str], rename: Dict[str, str], gone: set) -> List[str]:
     return out
 
 
+def _fold_junctions(m_junctions: dict, f_junctions: dict, stations: dict,
+                    rename: Dict[str, str], gone: set, mine: str, resync: bool,
+                    source: str, notes: List[str]) -> dict:
+    """Junctions: the bends a source put in the track, and the ones the author did.
+
+    A junction a source made is geometry, not work: when the import stops making
+    it, it goes, with no prune to ask for — a fork with no branch leaving it is
+    only a kink. The author's own junctions are theirs and stay. Where both sides
+    have one, the three-way rule decides its position.
+    """
+    out: dict = {}
+    by_origin: Dict[str, str] = {}
+    for jid, jn in m_junctions.items():
+        origin = isinstance(jn, dict) and jn.get("origin") or ""
+        if origin.startswith(mine):
+            if resync:
+                by_origin.setdefault(origin, jid)
+            else:
+                gone.add(jid)
+            continue
+        out[jid] = jn                       # hand-drawn: the author's
+    used = set()
+    for fid, incoming in f_junctions.items():
+        origin = incoming.get("origin") or ""
+        jid = by_origin.get(origin)
+        if jid is not None:
+            existing = dict(m_junctions[jid])
+            three_way(existing, incoming, notes, origin, source)
+            for key, value in incoming.items():
+                existing.setdefault(key, value)
+            used.add(jid)
+        else:
+            jid = fid
+            if jid in out or jid in stations:
+                jid = _free(fid, {**out, **stations})
+            existing = dict(incoming)
+        out[jid] = existing
+        rename[fid] = jid
+    for origin, jid in by_origin.items():
+        if jid not in used:
+            gone.add(jid)
+    return out
+
+
 def _fold_lines(m_lines: List[dict], f_lines: List[dict], rename, gone, mine,
-                prune, notes) -> List[dict]:
+                prune, notes, source: str = "") -> List[dict]:
     """Model lines first, in the author's order, then anything new."""
     by_origin = {ln.get("origin"): i for i, ln in enumerate(m_lines) if ln.get("origin")}
     by_name = {ln.get("name"): i for i, ln in enumerate(m_lines) if ln.get("name")}
@@ -189,31 +299,85 @@ def _fold_lines(m_lines: List[dict], f_lines: List[dict], rename, gone, mine,
                 continue
             out.append(held)
             continue
-        line = {k: v for k, v in ln.items() if k not in ("stations", "notes")}
+        line = {k: v for k, v in ln.items()
+                if k not in ("stations", "notes", "branches")}
+        three_way(line, fresh_match, notes,
+                  fresh_match.get("origin") or f"line '{ln.get('name')}'", source)
         for key, value in fresh_match.items():
-            if key not in ("stations", "notes"):
+            if key not in ("stations", "notes", "branches"):
                 line.setdefault(key, value)
         before = ln.get("stations") or []
         line["stations"] = _repoint(fresh_match.get("stations") or [], rename, gone)
-        if ln.get("notes") and before != line["stations"]:
+        # notes the import made are the import's to replace; the author's own
+        # keep the old rule
+        own = [n for n in ln.get("notes") or [] if not n.get("origin")]
+        theirs = [dict(n) for n in fresh_match.get("notes") or []]
+        by_note = {n.get("origin"): n for n in ln.get("notes") or [] if n.get("origin")}
+        for note in theirs:
+            had = by_note.get(note.get("origin"))
+            if had:
+                kept_note = dict(had)
+                three_way(kept_note, note, notes, note["origin"], source)
+                note.update(text=kept_note.get("text", note.get("text")),
+                            upstream=kept_note.get("upstream"))
+                if "flip" in had:
+                    note["flip"] = had["flip"]
+        if own and before != line["stations"]:
             # a note is addressed by hop index, so once the hops move it would
             # come to mean "between two stops that happen to sit there now"
-            notes.append(f"line '{line.get('name')}': {len(ln['notes'])} track "
+            notes.append(f"line '{line.get('name')}': {len(own)} track "
                          "note(s) dropped — the hops they numbered have moved")
-        elif ln.get("notes"):
-            line["notes"] = ln["notes"]
+            own = []
+        if own or theirs:
+            line["notes"] = own + theirs
+        branches = _fold_branches(ln.get("branches") or [],
+                                  fresh_match.get("branches") or [],
+                                  rename, gone, notes, source)
+        if branches:
+            line["branches"] = branches
         out.append(line)
 
     for fl in f_lines:
         if id(fl) not in used:
             new = dict(fl)
             new["stations"] = _repoint(new.get("stations") or [], rename, gone)
+            if new.get("branches"):
+                new["branches"] = [dict(br, stations=_repoint(br.get("stations") or [],
+                                                              rename, gone))
+                                   for br in new["branches"]]
             out.append(new)
     return out
 
 
+def _fold_branches(m_branches: List[dict], f_branches: List[dict], rename, gone,
+                   notes: List[str], source: str) -> List[dict]:
+    """A line's branches: the import's are re-routed, the author's are kept.
+
+    Matched by origin. The route of an imported branch is the import's — it is
+    what is beneath the issue now — while its name follows the three-way rule.
+    """
+    by_origin = {br.get("origin"): br for br in m_branches
+                 if isinstance(br, dict) and br.get("origin")}
+    out: List[dict] = []
+    for fb in f_branches:
+        had = by_origin.get(fb.get("origin"))
+        branch = dict(had) if had else {}
+        if had:
+            three_way(branch, fb, notes, fb.get("origin") or "a branch", source)
+        for key, value in fb.items():
+            if key != "stations":
+                branch.setdefault(key, value)
+        branch["stations"] = _repoint(fb.get("stations") or [], rename, gone)
+        out.append(branch)
+    for br in m_branches:
+        if isinstance(br, dict) and not br.get("origin"):
+            out.append(dict(br, stations=_repoint(br.get("stations") or [],
+                                                  rename, gone)))
+    return out
+
+
 def _fold_groups(m_items: List[dict], f_items: List[dict], rename, gone, mine,
-                 prune, what, notes) -> List[dict]:
+                 prune, what, notes, source: str = "") -> List[dict]:
     """Zones and interchanges: same identity rules, one implementation."""
     used: set = set()
     out: List[dict] = []
@@ -227,6 +391,7 @@ def _fold_groups(m_items: List[dict], f_items: List[dict], rename, gone, mine,
                 break
         merged = dict(item)
         if match:
+            three_way(merged, match, notes, match.get("origin") or what[:-1], source)
             for key, value in match.items():
                 if key != "stations":
                     merged.setdefault(key, value)

@@ -479,15 +479,32 @@ body.side-hidden .side { display: none; }
 .strands button.is-on { background: var(--accent, #0098d4); color: #fff; border-color: transparent; }
 .pick .junction-pick { border-style: dashed; }
 
-/* The discovery browser: columns you walk left to right, like a file picker. */
-.browse { display: flex; gap: 8px; overflow-x: auto; margin: 8px 0;
-          border: 1px solid var(--edge); border-radius: 8px; padding: 6px; }
-.browse-col { min-width: 190px; max-width: 260px; max-height: 320px;
-              overflow-y: auto; border-right: 1px solid var(--edge);
-              padding-right: 6px; }
-.browse-col:last-child { border-right: none; }
-.browse-row { display: flex; align-items: center; gap: 6px; padding: 4px 6px;
-              border-radius: 6px; cursor: pointer; font-size: 13px; }
-.browse-row:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
-.browse-row.is-on { background: color-mix(in srgb, var(--accent) 22%, transparent); }
-.browse-row .grow { display: flex; flex-direction: column; line-height: 1.25; }
+/* The import wizard: a key, then the tree beneath it with filters above. */
+.wiz-root { border: 1px solid var(--edge); border-radius: 8px; padding: 8px 10px;
+            margin: 6px 0 10px; }
+.wiz-root .lbl { font-weight: 600; }
+.strands button .count { opacity: .7; margin-left: 4px; }
+.tree { max-height: 320px; overflow: auto; margin: 8px 0;
+        border: 1px solid var(--edge); border-radius: 8px; padding: 6px; }
+.tree-row { display: flex; align-items: baseline; gap: 8px; font-size: 13px;
+            padding: 2px 6px 2px calc(6px + var(--depth, 0) * 18px);
+            line-height: 1.3; }
+.tree-row .key { font-family: var(--mono); font-size: 11px; color: var(--muted);
+                 white-space: nowrap; }
+.tree-row .grow { flex: 1; min-width: 0; }
+.tree-row.is-line .grow { font-weight: 600; }
+.tree-row.is-out { opacity: .38; }
+.wiz-key { display: flex; gap: 6px; align-items: center; }
+.wiz-key input { flex: 1; min-width: 0; font-family: var(--mono); }
+details.tree > summary { cursor: pointer; font-weight: 600; font-size: 13px;
+                         padding: 2px 6px 6px; }
+.tree-row select, .tree-row input[type="date"] { font-size: 12px; padding: 1px 4px;
+                                                 max-width: 11em; }
+.wiz-levels { overflow-x: auto; }
+.wiz-levels table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.wiz-levels td { padding: 4px 8px 4px 0; vertical-align: middle; }
+.wiz-levels td:first-child { white-space: nowrap; font-weight: 600; }
+.browse-summary p { margin: 0; }
+details.more > summary { cursor: pointer; font-size: 12px; color: var(--muted);
+                         padding: 2px 0; }
+details.more[open] { display: flex; flex-direction: column; gap: 10px; }
