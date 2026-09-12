@@ -61,3 +61,15 @@ metro_map_tool = ["VERSION", "templates/*.html", "static/*", "shared-maps/*.json
 
 [tool.setuptools.dynamic]
 version = { file = "metro_map_tool/VERSION" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Use ./test.sh rather than calling pytest directly: a ROS 2 workstation leaks
+# pytest plugins in through PYTHONPATH that cannot import here.
+#
+# testpaths is what keeps a bare `pytest` inside tests/. Without it, pytest
+# falls back to walking the whole tree and collects anything named *_test.py
+# under temp/ — scratch that is git-ignored precisely because it holds
+# whatever was last unzipped there. scripts/release.py runs `./test.sh -q`,
+# and that argument displaces the shell default, so this is the setting that
+# stops a release preflight failing on someone else's vendored code.
