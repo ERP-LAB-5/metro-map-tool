@@ -1,7 +1,7 @@
 # Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
 _commit: v0.3.0
 _src_path: gh:ERP-LAB-5/python-tool-template
-author: D-LAB-5
+author: ERP-LAB-5
 cli_command: metro-map
 cli_module: metro_map
 coffee_url: https://www.buymeacoffee.com/dlab5
