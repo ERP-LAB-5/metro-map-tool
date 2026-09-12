@@ -49,9 +49,14 @@ def call(method: str, path: str, payload: Optional[dict] = None,
          timeout: float = 30) -> Any:
     """One request against the web server, with its error messages preserved."""
     body = json.dumps(payload).encode() if payload is not None else None
-    req = urllib.request.Request(
-        BASE + path, data=body, method=method,
-        headers={"Content-Type": "application/json"} if body else {})
+    # Name ourselves on every call. The web server records it, so the Agent
+    # panel in the browser can say an agent is working here rather than guess:
+    # a stdio server has no port to look for and no pid the page could find.
+    headers = {"X-Agent": f"{identity.TOOL_NAME}-mcp"}
+    if body:
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(BASE + path, data=body, method=method,
+                                 headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as res:
             raw = res.read()
