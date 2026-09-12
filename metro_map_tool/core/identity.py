@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 D-LAB-5
+# Copyright (C) 2026 ERP-LAB-5
 """
 identity.py — who this tool is, as far as the core needs to know.
 
@@ -13,8 +13,8 @@ TOOL_NAME = "metro-map"
 PACKAGE = "metro_map_tool"
 TITLE = "Metro map designer"
 DESCRIPTION = "Transit-map diagrams for landscapes, pipelines and roadmaps, rendered to a standalone SVG"
-AUTHOR = "D-LAB-5"
-COPYRIGHT = "© 2026 D-LAB-5"
+AUTHOR = "ERP-LAB-5"
+COPYRIGHT = "© 2026 ERP-LAB-5"
 LICENCE = "GPL-3.0-or-later"
 LICENCE_URL = "https://www.gnu.org/licenses/gpl-3.0.html"
 DISCLAIMER = ""
