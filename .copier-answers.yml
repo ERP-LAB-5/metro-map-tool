@@ -1,0 +1,24 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_commit: v0.2.1
+_src_path: gh:ERP-LAB-5/python-tool-template
+author: D-LAB-5
+cli_command: metro-map
+cli_module: metro_map
+coffee_url: https://www.buymeacoffee.com/dlab5
+copyright_year: 2026
+default_branch: main
+description: Transit-map diagrams for landscapes, pipelines and roadmaps, rendered
+    to a standalone SVG
+disclaimer: ''
+github_org: ERP-LAB-5
+package_name: metro_map_tool
+port: 8765
+repo_name: metro-map-tool
+title: Metro map designer
+tool_name: metro-map
+web_command: metro-map-designer
+with_mcp: true
+with_plugin: true
+with_release: true
+with_windows: true
+with_workspace: false

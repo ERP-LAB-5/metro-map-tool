@@ -44,10 +44,10 @@ Issues = "https://github.com/ERP-LAB-5/metro-map-tool/issues"
 metro-map = "metro_map_tool.metro_map:main"
 metro-map-designer = "metro_map_tool.app:main"
 metro-map-mcp = "metro_map_tool.mcp_server:main"
-metro-map-skill = "metro_map_tool.skill_install:main"
+metro-map-skill = "metro_map_tool.core.skill_install:main"
 
 [tool.setuptools]
-packages = ["metro_map_tool", "metro_map_tool.sources",
+packages = ["metro_map_tool", "metro_map_tool.core", "metro_map_tool.sources",
             "metro_map_tool.sources.jira"]
 
 # Flask resolves templates/ and static/ relative to app.py, and app.py resolves
@@ -57,6 +57,7 @@ packages = ["metro_map_tool", "metro_map_tool.sources",
 [tool.setuptools.package-data]
 metro_map_tool = ["VERSION", "templates/*.html", "static/*", "shared-maps/*.json",
                   "skill/*.md"]
+"metro_map_tool.core" = ["static/*", "templates/core/*.html"]
 
 [tool.setuptools.dynamic]
 version = { file = "metro_map_tool/VERSION" }
