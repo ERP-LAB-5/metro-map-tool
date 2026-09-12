@@ -1,0 +1,10 @@
+# What the tests need, beyond requirements.txt.
+#   .venv/bin/python -m pytest tests/
+# PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 keeps a workstation's ROS 2 pytest plugins
+# out of the run; they fail to import without ROS's own dependencies.
+pytest>=8.0
+
+# Optional, and only for `--from archimate`: with rdflib installed the Turtle is
+# read by a real parser, and without it by the small built-in reader. The tests
+# check the two agree, and skip that check when it is absent.
+rdflib>=7.0

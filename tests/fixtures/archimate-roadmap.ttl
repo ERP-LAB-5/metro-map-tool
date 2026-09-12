@@ -1,0 +1,89 @@
+# A small implementation-and-migration model, in the shape a generator writes:
+# explicit IRIs, one property per blank node, the plain relationship triple.
+# Synthetic throughout — no real system, project or person appears here.
+@prefix archimate: <https://purl.org/archimate#>.
+@prefix ex: <https://example.org/ns#>.
+
+<https://example.org/i/demo/WorkPackage/wp1> a archimate:WorkPackage;
+    archimate:identifier "wp1";
+    archimate:name "Foundations";
+    archimate:documentation "The groundwork everything else stands on.";
+    archimate:hasProperty _:p-wp1-0.
+_:p-wp1-0 a archimate:Property;
+    archimate:propertyKey "startDate";
+    archimate:propertyValue "2026-01-05".
+<https://example.org/i/demo/WorkPackage/wp1> archimate:hasProperty _:p-wp1-1.
+_:p-wp1-1 a archimate:Property;
+    archimate:propertyKey "endDate";
+    archimate:propertyValue "2026-02-16".
+<https://example.org/i/demo/WorkPackage/wp1> archimate:hasProperty _:p-wp1-2.
+_:p-wp1-2 a archimate:Property;
+    archimate:propertyKey "status";
+    archimate:propertyValue "done".
+
+<https://example.org/i/demo/WorkPackage/wp1-1> a archimate:WorkPackage;
+    archimate:identifier "wp1-1";
+    archimate:name "Pick the store";
+    archimate:hasProperty _:p-wp11-0.
+_:p-wp11-0 a archimate:Property;
+    archimate:propertyKey "endDate";
+    archimate:propertyValue "2026-01-26".
+<https://example.org/i/demo/WorkPackage/wp1> archimate:composition <https://example.org/i/demo/WorkPackage/wp1-1>.
+
+<https://example.org/i/demo/WorkPackage/wp2> a archimate:WorkPackage;
+    archimate:identifier "wp2";
+    archimate:name "Editing";
+    archimate:hasProperty _:p-wp2-0.
+_:p-wp2-0 a archimate:Property;
+    archimate:propertyKey "endDate";
+    archimate:propertyValue "2026-05-11".
+<https://example.org/i/demo/WorkPackage/wp2> archimate:hasProperty _:p-wp2-1.
+_:p-wp2-1 a archimate:Property;
+    archimate:propertyKey "status";
+    archimate:propertyValue "in-progress".
+<https://example.org/i/demo/WorkPackage/wp1> archimate:triggering <https://example.org/i/demo/WorkPackage/wp2>.
+
+# A deliverable carries no date of its own: it is finished when the work that
+# produces it is.
+<https://example.org/i/demo/Deliverable/d-store> a archimate:Deliverable;
+    archimate:identifier "d-store";
+    archimate:name "Model store";
+    archimate:hasProperty _:p-dstore-0.
+_:p-dstore-0 a archimate:Property;
+    archimate:propertyKey "status";
+    archimate:propertyValue "done".
+<https://example.org/i/demo/WorkPackage/wp1> archimate:realization <https://example.org/i/demo/Deliverable/d-store>.
+
+<https://example.org/i/demo/Deliverable/d-editor> a archimate:Deliverable;
+    archimate:identifier "d-editor";
+    archimate:name "Visual editor";
+    archimate:hasProperty _:p-deditor-0.
+_:p-deditor-0 a archimate:Property;
+    archimate:propertyKey "status";
+    archimate:propertyValue "planned".
+<https://example.org/i/demo/WorkPackage/wp2> archimate:realization <https://example.org/i/demo/Deliverable/d-editor>.
+
+# A plateau is a state, and stores no date: it is reached when the work
+# realising it finishes.
+<https://example.org/i/demo/Plateau/p1> a archimate:Plateau;
+    archimate:identifier "p1";
+    archimate:name "P1 Somewhere to keep it".
+<https://example.org/i/demo/Deliverable/d-store> archimate:realization <https://example.org/i/demo/Plateau/p1>.
+<https://example.org/i/demo/WorkPackage/wp1-1> archimate:realization <https://example.org/i/demo/Plateau/p1>.
+# A state worth drawing is one several streams have to reach together, so the
+# editing stream lands on it too — that is what makes it a moment, not a label.
+<https://example.org/i/demo/WorkPackage/wp2> archimate:realization <https://example.org/i/demo/Plateau/p1>.
+
+<https://example.org/i/demo/ImplementationEvent/e-live> a archimate:ImplementationEvent;
+    archimate:identifier "e-live";
+    archimate:name "first model stored";
+    archimate:hasProperty _:p-elive-0.
+_:p-elive-0 a archimate:Property;
+    archimate:propertyKey "date";
+    archimate:propertyValue "2026-02-23".
+<https://example.org/i/demo/WorkPackage/wp1> archimate:triggering <https://example.org/i/demo/ImplementationEvent/e-live>.
+
+<https://example.org/i/demo/Gap/gap-editing> a archimate:Gap;
+    archimate:identifier "gap-editing";
+    archimate:name "The model can only be edited as forms".
+<https://example.org/i/demo/Plateau/p1> archimate:association <https://example.org/i/demo/Gap/gap-editing>.

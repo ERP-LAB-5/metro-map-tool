@@ -101,6 +101,78 @@ class JiraTest(unittest.TestCase):
         self.assertNotIn("phases", spec)
 
 
+class ArchimateTest(unittest.TestCase):
+    """The mapping, replayed from a recorded payload — no RDF library needed."""
+
+    def setUp(self):
+        self.spec, self.notes = imported("archimate", {
+            "file": "unused-when-replayed.ttl",
+            "from_file": str(FIXTURES / "archimate-roadmap.json")})
+
+    def test_draws_without_complaint(self):
+        self.assertEqual(mm.validate_spec(self.spec), [])
+        self.assertIn("<svg", mm.render(self.spec, mm.style_from(self.spec["style"])))
+
+    def test_a_work_package_is_a_line(self):
+        self.assertEqual([ln["name"] for ln in self.spec["lines"]],
+                         ["Foundations", "Editing"])
+
+    def test_a_child_work_package_rides_its_parents_line(self):
+        foundations = self.spec["lines"][0]
+        self.assertIn("wp1-1", foundations["stations"])
+
+    def test_a_deliverable_inherits_the_date_of_the_work_that_produces_it(self):
+        # d-store carries no date of its own; wp1 ends on the 16th
+        self.assertEqual(self.spec["stations"]["d-store"]["date"], "2026-02-16")
+
+    def test_a_finished_stream_is_drawn_as_live_and_an_unstarted_one_as_planned(self):
+        foundations, editing = self.spec["lines"]
+        self.assertNotIn("status", foundations)          # live is the default
+        self.assertNotEqual(editing.get("status"), "live")
+
+    def test_a_plateau_becomes_a_capsule_at_the_date_its_work_finishes(self):
+        # p1 stores no date: it is reached when d-store and wp1-1 are done
+        capsule = self.spec["interchanges"][0]
+        self.assertEqual(capsule["label"], "P1 Somewhere to keep it")
+        gxs = {self.spec["stations"][s]["gx"] for s in capsule["stations"]}
+        self.assertEqual(len(gxs), 1)
+
+    def test_a_gap_is_said_rather_than_silently_dropped(self):
+        self.assertTrue(any(n.startswith("gap —") for n in self.notes))
+
+    def test_everything_carries_an_origin_so_a_resync_knows_its_own_work(self):
+        for sid, st in self.spec["stations"].items():
+            self.assertTrue(st["origin"].startswith("archimate:"), sid)
+
+
+class TurtleReaderTest(unittest.TestCase):
+    """The small reader, which only has to handle what a generator writes."""
+
+    def setUp(self):
+        from metro_map_tool.sources import archimate
+        self.archimate = archimate
+        self.text = (FIXTURES / "archimate-roadmap.ttl").read_text(encoding="utf-8")
+
+    def test_it_agrees_with_rdflib_where_rdflib_is_installed(self):
+        mine = self.archimate.read_turtle(self.text)
+        theirs = self.archimate._with_rdflib(self.text)
+        if theirs is None:
+            self.skipTest("rdflib is not installed")
+        flat = lambda ts: sorted((s.get("iri") or "B", p.get("iri") or "",
+                                  o.get("iri") or o.get("lit") or "B") for s, p, o in ts)
+        self.assertEqual(flat(mine), flat(theirs))
+
+    def test_a_comment_is_not_data(self):
+        triples = self.archimate.read_turtle(self.text)
+        self.assertFalse([t for t in triples if "no real system" in str(t)])
+
+    def test_an_undeclared_prefix_is_refused_by_name(self):
+        from metro_map_tool.sources import SourceError
+        with self.assertRaises(SourceError) as caught:
+            self.archimate.read_turtle('nope:thing a archimate:WorkPackage.')
+        self.assertIn("nope:", str(caught.exception))
+
+
 class AwkwardTest(unittest.TestCase):
     """The shapes that turn up in real projects and used to be assumed away."""
 

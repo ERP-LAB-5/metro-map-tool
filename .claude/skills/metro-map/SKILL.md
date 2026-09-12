@@ -215,6 +215,17 @@ so read it, adjust it, then `save_map` it.
 | an issue | a station at its due date |
 | a fix version or milestone | an `interchanges` capsule across the lanes it lands on |
 | a sprint | a `phases` band |
+| an ArchiMate `WorkPackage` | a line; a nested one rides its parent's line |
+| an ArchiMate `Deliverable` | a station, dated from the work that produces it |
+| an ArchiMate `Plateau` | a capsule, dated from the work realising it |
+
+**`archimate`** reads an implementation-and-migration model in Turtle:
+`import_map("archimate", {"file": "roadmap.ttl"})`. Two rules of that model are
+carried rather than re-invented — **a plateau stores no date** (it is reached
+when the work realising it finishes, so the date is computed), and a gap is
+reported in the notes rather than drawn, because it is not a thing with a date.
+A capsule needs two lanes to cross: a plateau only one stream reaches is a
+label, not a moment, and is left out.
 
 Pass `into` the name of a map that source imported before and it **re-syncs**:
 what changed upstream comes in, and the layout, colours and wording already in

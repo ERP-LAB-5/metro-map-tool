@@ -290,8 +290,9 @@ where it already lives.
 metro-map --sources                       # what can be imported from
 metro-map --from jira --describe          # and what that one needs
 
-metro-map --from github --opt repo=owner/name        -o plan.svg
-metro-map --from jira   --opt project=ABCD            -o plan.svg
+metro-map --from github    --opt repo=owner/name        -o plan.svg
+metro-map --from jira      --opt project=ABCD           -o plan.svg
+metro-map --from archimate --opt file=roadmap.ttl       -o plan.svg
 ```
 
 Or **Import…** in the designer, which asks the same questions as a form.
@@ -303,6 +304,33 @@ Or **Import…** in the designer, which asks the same questions as a form.
 | a fix version, or a milestone | a **capsule** across every lane it lands on |
 | a sprint | a **band** behind the map |
 | an epic where nothing has started | the line drawn as **planned** |
+
+### From an ArchiMate model
+
+`--from archimate` reads an implementation-and-migration model in Turtle, so a
+roadmap that is already a model does not have to be retyped as a drawing:
+
+| ArchiMate | how it is drawn |
+|---|---|
+| a `WorkPackage` | a **line**; one nested inside another rides its parent's line |
+| a `Deliverable` | a **station** — it has no date of its own, so it takes the date of the work that produces it |
+| an `ImplementationEvent` | a **station** at its own date |
+| a `Plateau` | a **capsule** across the lanes, at the date the work realising it finishes |
+| a `Gap` | said in the notes, never silently dropped |
+| the `status` property | `done` draws the line **live**, `planned` draws it **planned** |
+
+**A plateau carries no date**, and this importer does not invent one: a state is
+reached when the work bringing it about finishes, so the date is computed. That
+is the rule the model itself is built on, and copying it here is what stops the
+two disagreeing.
+
+Turtle is read with `rdflib` when it is installed, and otherwise by a small
+built-in reader that handles what model generators emit. Nothing else in the
+tool needs RDF, so it stays an optional extra:
+
+```bash
+pip install rdflib        # optional; only --from archimate benefits
+```
 
 ### Connecting
 

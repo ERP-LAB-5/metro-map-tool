@@ -1,0 +1,131 @@
+{
+  "elements": [
+    {
+      "documentation": "",
+      "id": "d-editor",
+      "iri": "https://example.org/i/demo/Deliverable/d-editor",
+      "name": "Visual editor",
+      "properties": {
+        "status": "planned"
+      },
+      "type": "Deliverable"
+    },
+    {
+      "documentation": "",
+      "id": "d-store",
+      "iri": "https://example.org/i/demo/Deliverable/d-store",
+      "name": "Model store",
+      "properties": {
+        "status": "done"
+      },
+      "type": "Deliverable"
+    },
+    {
+      "documentation": "",
+      "id": "gap-editing",
+      "iri": "https://example.org/i/demo/Gap/gap-editing",
+      "name": "The model can only be edited as forms",
+      "properties": {},
+      "type": "Gap"
+    },
+    {
+      "documentation": "",
+      "id": "e-live",
+      "iri": "https://example.org/i/demo/ImplementationEvent/e-live",
+      "name": "first model stored",
+      "properties": {
+        "date": "2026-02-23"
+      },
+      "type": "ImplementationEvent"
+    },
+    {
+      "documentation": "",
+      "id": "p1",
+      "iri": "https://example.org/i/demo/Plateau/p1",
+      "name": "P1 Somewhere to keep it",
+      "properties": {},
+      "type": "Plateau"
+    },
+    {
+      "documentation": "The groundwork everything else stands on.",
+      "id": "wp1",
+      "iri": "https://example.org/i/demo/WorkPackage/wp1",
+      "name": "Foundations",
+      "properties": {
+        "endDate": "2026-02-16",
+        "startDate": "2026-01-05",
+        "status": "done"
+      },
+      "type": "WorkPackage"
+    },
+    {
+      "documentation": "",
+      "id": "wp1-1",
+      "iri": "https://example.org/i/demo/WorkPackage/wp1-1",
+      "name": "Pick the store",
+      "properties": {
+        "endDate": "2026-01-26"
+      },
+      "type": "WorkPackage"
+    },
+    {
+      "documentation": "",
+      "id": "wp2",
+      "iri": "https://example.org/i/demo/WorkPackage/wp2",
+      "name": "Editing",
+      "properties": {
+        "endDate": "2026-05-11",
+        "status": "in-progress"
+      },
+      "type": "WorkPackage"
+    }
+  ],
+  "model": "archimate-roadmap.ttl",
+  "relations": [
+    {
+      "source": "https://example.org/i/demo/WorkPackage/wp1",
+      "target": "https://example.org/i/demo/WorkPackage/wp1-1",
+      "type": "composition"
+    },
+    {
+      "source": "https://example.org/i/demo/WorkPackage/wp1",
+      "target": "https://example.org/i/demo/WorkPackage/wp2",
+      "type": "triggering"
+    },
+    {
+      "source": "https://example.org/i/demo/WorkPackage/wp1",
+      "target": "https://example.org/i/demo/Deliverable/d-store",
+      "type": "realization"
+    },
+    {
+      "source": "https://example.org/i/demo/WorkPackage/wp2",
+      "target": "https://example.org/i/demo/Deliverable/d-editor",
+      "type": "realization"
+    },
+    {
+      "source": "https://example.org/i/demo/Deliverable/d-store",
+      "target": "https://example.org/i/demo/Plateau/p1",
+      "type": "realization"
+    },
+    {
+      "source": "https://example.org/i/demo/WorkPackage/wp1-1",
+      "target": "https://example.org/i/demo/Plateau/p1",
+      "type": "realization"
+    },
+    {
+      "source": "https://example.org/i/demo/WorkPackage/wp2",
+      "target": "https://example.org/i/demo/Plateau/p1",
+      "type": "realization"
+    },
+    {
+      "source": "https://example.org/i/demo/WorkPackage/wp1",
+      "target": "https://example.org/i/demo/ImplementationEvent/e-live",
+      "type": "triggering"
+    },
+    {
+      "source": "https://example.org/i/demo/Plateau/p1",
+      "target": "https://example.org/i/demo/Gap/gap-editing",
+      "type": "association"
+    }
+  ]
+}

@@ -443,7 +443,7 @@ def payload(src: Source, opts: dict, model: Optional[dict]) -> object:
 # installed distribution metadata: run.sh and the MCP server both start the tool
 # as `python -m metro_map_tool.metro_map`, and entry-point-only discovery would
 # leave every checkout with no importers at all. Entry points are additive.
-_BUILTIN = ("git", "github", "jira")
+_BUILTIN = ("archimate", "git", "github", "jira")
 _GROUP = "metro_map_tool.sources"
 
 _cache: Optional[Dict[str, Source]] = None
