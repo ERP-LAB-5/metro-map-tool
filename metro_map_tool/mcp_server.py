@@ -30,6 +30,8 @@ Nothing may be written to stdout: that is the MCP transport. Log to stderr.
 from __future__ import annotations
 
 import argparse
+import urllib.parse
+from pathlib import Path
 from typing import Any, Optional
 
 from mcp.server.mcpserver import MCPServer
