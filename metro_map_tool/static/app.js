@@ -43,7 +43,6 @@ const S = {
   spec: { stations: {}, junctions: {}, lines: [], zones: [], scenarios: [], interchanges: [] },
   style: { cell: 120, stroke: 10, corner: 22, bundle_gap: 13, label_size: 16 },
   autoIx: true,
-  theme: "auto",                           // designer chrome and preview only
   sideHidden: false,
   ridesPlaying: true,                      // the travellers run on their own
   snap: 1,                                 // grid step when dragging or nudging
@@ -82,28 +81,7 @@ let TIMELINE = null;                         // ruler the server resolved, or nu
 
 const GUIDE_MAP = "how-this-tool-works";     // the map that explains the tool
 const LAST_MAP_KEY = "metro-map:last";
-const THEME_KEY = "metro-map:theme";
 const SIDE_KEY = "metro-map:side";
-
-/* --------------------------------------------------------------- theme -- */
-
-/* A per-browser preference, not part of any map: it themes the designer and
-   its preview, never an exported file. An export has to keep both palettes,
-   because it may be opened anywhere. */
-
-function storedTheme() {
-  try { return localStorage.getItem(THEME_KEY) || "auto"; } catch (_) { return "auto"; }
-}
-
-function applyTheme(theme) {
-  S.theme = ["auto", "light", "dark"].includes(theme) ? theme : "auto";
-  const root = document.documentElement;
-  if (S.theme === "auto") delete root.dataset.theme;
-  else root.dataset.theme = S.theme;
-  try { localStorage.setItem(THEME_KEY, S.theme); } catch (_) { /* no storage */ }
-  const select = $("#theme-select");
-  if (select && select.value !== S.theme) select.value = S.theme;
-}
 
 /* ---------------------------------------------------------- side panel -- */
 
@@ -120,9 +98,11 @@ function storedSide() {
   try { return localStorage.getItem(SIDE_KEY) === "1"; } catch (_) { return false; }
 }
 
-/** What the preview should actually be drawn as, resolving "auto" now. */
 function resolvedTheme() {
-  if (S.theme !== "auto") return S.theme;
+  // The header's picker is core.js's, and it records its choice on <html>.
+  // "auto" leaves no attribute, so the system preference decides.
+  const chosen = document.documentElement.dataset.theme;
+  if (chosen === "light" || chosen === "dark") return chosen;
   return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
     ? "dark" : "light";
 }
@@ -2898,100 +2878,6 @@ function saveAsDialog() {
   });
 }
 
-/** Version, licence, where this came from, and how to move it forward. */
-async function aboutDialog() {
-  const repo = "https://github.com/ERP-LAB-5/metro-map-tool";
-  dialog("About metro map", `
-    <div class="about">
-      <img class="about-logo" src="/static/dlab5.png" alt="D-LAB-5"
-           width="88" height="88">
-      <p class="about-lead">A transit-map drawing tool: stations on a grid, lines
-        routed through them, zones banding groups of them.</p>
-      <dl class="about-grid">
-        <dt>Installed</dt><dd id="a-installed">…</dd>
-        <dt>Latest</dt><dd id="a-latest">checking…</dd>
-        <dt>Repository</dt>
-        <dd><a href="${repo}" target="_blank" rel="noopener noreferrer">${repo.replace("https://", "")}</a></dd>
-        <dt>Licence</dt><dd><a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener noreferrer">GPL-3.0-or-later</a></dd>
-      </dl>
-      <p class="note" id="a-note"></p>
-      <pre class="about-log" id="a-log" hidden></pre>
-      <p class="about-foot">© 2026 D-LAB-5 — Twin. Experiment. Automate.<br>
-        <a href="https://www.buymeacoffee.com/dlab5" target="_blank"
-           rel="noopener noreferrer">☕ Buy me a coffee</a></p>
-    </div>
-    <div class="actions">
-      <button type="button" id="a-update" hidden>Update and restart</button>
-      <button value="cancel" class="primary">Close</button>
-    </div>`);
-
-  let info;
-  try { info = await api("GET", "/api/version"); }
-  catch (_) { info = null; }
-  const installed = $("#a-installed");
-  if (!installed) return;                       // dialog closed while we asked
-  const latest = $("#a-latest");
-  const note = $("#a-note");
-
-  if (!info) {
-    installed.textContent = "unknown";
-    latest.textContent = "—";
-    note.textContent = "The designer did not answer.";
-    return;
-  }
-  installed.textContent = info.installed;
-  if (info.disabled) {
-    latest.textContent = "not checked";
-    note.textContent = "The update check is off (--no-update-check).";
-  } else if (info.offline || !info.latest) {
-    latest.textContent = "unknown";
-    note.textContent = "Could not reach github.com — offline, or behind a proxy.";
-  } else if (info.update_available) {
-    latest.innerHTML = `<strong>${esc(info.latest)}</strong> — `
-      + `<a href="${esc(info.releases)}" target="_blank" rel="noopener noreferrer">release notes</a>`;
-    // pip can only upgrade what pip installed; a checkout is git's business
-    if (info.install === "installed") {
-      note.textContent = `You are on ${info.installed}. Updating runs pip, then restarts.`;
-      const btn = $("#a-update");
-      btn.hidden = false;
-      btn.className = "warn-btn";
-      btn.addEventListener("click", () => runUpdate(btn));
-    } else {
-      note.textContent = `You are on ${info.installed}, running from a checkout — `
-        + "update it with git pull, then press Restart.";
-    }
-  } else {
-    latest.textContent = info.latest;
-    note.textContent = "Up to date.";
-  }
-}
-
-/** Ask the server to pip-upgrade itself, then offer the restart that lands it. */
-async function runUpdate(btn) {
-  const note = $("#a-note");
-  const log = $("#a-log");
-  btn.disabled = true;
-  btn.textContent = "Updating…";
-  note.textContent = "Running pip. This can take a minute.";
-  let out;
-  try { out = await api("POST", "/api/update"); }
-  catch (err) { out = (err.data && err.data.output) ? err.data : { ok: false, output: err.errors.join("\n") }; }
-  if (log) {
-    log.hidden = false;
-    log.textContent = out.output || "";
-  }
-  if (!out.ok) {
-    btn.disabled = false;
-    btn.textContent = "Try again";
-    note.textContent = "The update did not go through — nothing has changed.";
-    return;
-  }
-  // the files are new; only a restart is running them
-  note.textContent = "Updated. Restarting to run the new version.";
-  btn.textContent = "Restarting…";
-  restartTheServer();
-}
-
 /** Start over: an empty grid, unnamed until it is saved. */
 function newMap() {
   if (!confirmDiscard()) return;
@@ -3197,51 +3083,6 @@ function confirmLeaving(verb, go) {
   });
 }
 
-function stopServer() { confirmLeaving("stop", shutDownServer); }
-function restartServer() { confirmLeaving("restart", restartTheServer); }
-
-function shutDownServer() {
-  // the server answers, then exits — a failed fetch here is the expected ending
-  fetch("/api/shutdown", { method: "POST", headers: { "Content-Type": "application/json" } })
-    .catch(() => {})
-    .finally(() => {
-      window.removeEventListener("beforeunload", guardUnload);
-      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-      document.body.innerHTML =
-        `<div class="stopped"><h1>Designer stopped</h1>
-         <p>The local server has shut down. Run <code>./run.sh</code>
-         (or <code>run.cmd</code> / <code>run.ps1</code> on Windows) to start it
-         again.</p></div>`;
-    });
-}
-
-/** Ask the server to replace itself, then reload once it answers again. */
-async function restartTheServer() {
-  window.removeEventListener("beforeunload", guardUnload);
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-  document.body.innerHTML =
-    `<div class="stopped"><h1>Restarting…</h1>
-     <p id="restart-note">Waiting for the designer to come back.</p></div>`;
-  fetch("/api/restart", { method: "POST", headers: { "Content-Type": "application/json" } })
-    .catch(() => {});   // the server may die mid-answer, which is the point
-
-  // it has to go away and come back; polling from the start could catch the old
-  // one still answering, so wait past the moment it replaces itself
-  await new Promise((r) => setTimeout(r, 900));
-  for (let tries = 0; tries < 40; tries += 1) {
-    try {
-      const res = await fetch("/api/maps", { cache: "no-store" });
-      if (res.ok) { location.reload(); return; }
-    } catch (_) { /* still down */ }
-    await new Promise((r) => setTimeout(r, 400));
-  }
-  const note = document.getElementById("restart-note");
-  if (note) {
-    note.textContent = "It did not come back. Start it again with ./run.sh "
-      + "(or run.cmd on Windows).";
-  }
-}
-
 /* ----------------------------------------------------------------- live -- */
 
 const POLL_MS = 2000;
@@ -3367,7 +3208,6 @@ function initKeys() {
 /* ---------------------------------------------------------------- boot -- */
 
 async function boot() {
-  applyTheme(storedTheme());          // before anything paints, to avoid a flash
   applySide(storedSide());
   try {
     const [defaults, palette] = await Promise.all([
@@ -3394,15 +3234,9 @@ async function boot() {
   $("#mode-select").innerHTML = MODES.map((m) =>
     `<option value="${esc(m.value)}">${esc(m.label)}</option>`).join("");
   $("#mode-select").addEventListener("change", (ev) => setMode(ev.target.value));
-  $("#theme-select").addEventListener("change", (ev) => {
-    applyTheme(ev.target.value);
-    scheduleRender();                 // the preview is drawn in the theme, not styled into it
-  });
-  // while on auto, follow the system if it changes under us
-  if (window.matchMedia) {
-    window.matchMedia("(prefers-color-scheme: dark)")
-      .addEventListener("change", () => { if (S.theme === "auto") scheduleRender(); });
-  }
+  // The preview is drawn in the theme rather than styled into it, so a change
+  // of theme means a re-render. core.js announces its own.
+  document.addEventListener("core:theme", scheduleRender)
 
   initTabs();
   initCanvas();
@@ -3425,9 +3259,10 @@ async function boot() {
   $("#btn-save").addEventListener("click", () => saveMap());
   $("#btn-saveas").addEventListener("click", saveAsDialog);
   $("#btn-export").addEventListener("click", exportSVG);
-  $("#btn-stop").addEventListener("click", stopServer);
-  $("#btn-restart").addEventListener("click", restartServer);
-  $("#btn-about").addEventListener("click", aboutDialog);
+  // Stop, Restart, About and the theme picker belong to the header that
+  // core/_base.html draws, and core.js wires them. What it cannot know is that
+  // a map lives in this browser until it is saved, so the guard stays here.
+  core.setLeavingGuard(confirmLeaving);
   $("#btn-side").addEventListener("click", () => applySide(!S.sideHidden));
   $("#btn-undo").addEventListener("click", undo);
   $("#btn-redo").addEventListener("click", redo);

@@ -1,38 +1,36 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Metro map designer</title>
-<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body>
+{% extends "core/_base.html" %}
 
-<header class="bar">
+{#- The theme picker, About, Restart and Stop, the favicon link and core.js all
+    come from core/_base.html (the D-LAB-5 tool template). Everything below is
+    the designer's own. -#}
+
+{% block title %}Metro map designer{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+{% endblock %}
+
+{% block brand %}
   <button id="btn-side" class="icon" title="show or hide the panel (Ctrl+\)"
           aria-label="Toggle the side panel">&#9776;</button>
   <span class="brand">metro&nbsp;map</span>
 
   <span class="name-slot">
-    <span id="map-name">untitled</span><span id="dirty" class="dirty" hidden title="unsaved changes">●</span>
+    <span id="map-name">untitled</span><span id="dirty" class="dirty" hidden title="unsaved changes">&#9679;</span>
   </span>
+{% endblock %}
 
-  <span class="spacer"></span>
-
+{% block toolbar %}
   <button id="btn-new">New</button>
   <button id="btn-open">Open</button>
   <button id="btn-save">Save</button>
-  <button id="btn-saveas">Save as…</button>
-  <button id="btn-import">Import…</button>
+  <button id="btn-saveas">Save as&hellip;</button>
+  <button id="btn-import">Import&hellip;</button>
   <button id="btn-settings" title="connect Jira, GitHub and other importers">Settings</button>
   <button id="btn-export">Export SVG</button>
-  <button id="btn-restart" title="start the server again on the same port">Restart</button>
-  <button id="btn-stop" class="stop" title="shut the local server down">Stop</button>
-  <button id="btn-about" title="version, licence and the repository">About</button>
+{% endblock %}
 
-  <span class="sep"></span>
-
+{% block toolbar_end %}
   <button id="btn-undo" title="Ctrl+Z" disabled>Undo</button>
   <button id="btn-redo" title="Ctrl+Shift+Z" disabled>Redo</button>
 
@@ -43,16 +41,9 @@
   <label class="toggle" title="a roadmap gives the x axis a calendar">
     mode <select id="mode-select"></select>
   </label>
+{% endblock %}
 
-  <label class="toggle" title="themes the designer only — an exported SVG still follows whoever opens it">
-    theme <select id="theme-select">
-      <option value="auto">auto</option>
-      <option value="light">light</option>
-      <option value="dark">dark</option>
-    </select>
-  </label>
-</header>
-
+{% block main %}
 <main>
   <aside class="side">
     <nav class="tabs" role="tablist">
@@ -155,7 +146,8 @@
 </main>
 
 <dialog id="dialog"><form method="dialog" id="dialog-form"></form></dialog>
+{% endblock %}
 
+{% block scripts %}
 <script src="{{ url_for('static', filename='app.js') }}"></script>
-</body>
-</html>
+{% endblock %}

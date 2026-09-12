@@ -1,0 +1,11 @@
+{
+  "name": "metro-map",
+  "version": "3.3.0",
+  "description": "Transit-map diagrams for landscapes, pipelines and roadmaps, rendered to a standalone SVG",
+  "author": {
+    "name": "D-LAB-5"
+  },
+  "homepage": "https://github.com/ERP-LAB-5/metro-map-tool",
+  "repository": "https://github.com/ERP-LAB-5/metro-map-tool",
+  "license": "GPL-3.0-or-later"
+}

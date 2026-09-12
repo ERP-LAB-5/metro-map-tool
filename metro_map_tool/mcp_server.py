@@ -30,22 +30,14 @@ Nothing may be written to stdout: that is the MCP transport. Log to stderr.
 from __future__ import annotations
 
 import argparse
-import json
-import os
-import subprocess
-import sys
-import time
-import urllib.error
 import urllib.parse
-import urllib.request
 from pathlib import Path
 from typing import Any, Optional
 
 from mcp.server.mcpserver import MCPServer
 
-HERE = Path(__file__).resolve().parent
-BASE = "http://127.0.0.1:8765"
-AUTOSTART = True
+from .core import mcp_bridge as web
+from .core.mcp_bridge import call, log
 
 server = MCPServer(
     name="metro-map",
@@ -64,59 +56,12 @@ server = MCPServer(
 )
 
 
-# ------------------------------------------------------------------ http ----
-
-def log(msg: str) -> None:
-    print(f"  [metro-map] {msg}", file=sys.stderr, flush=True)
-
-
-def call(method: str, path: str, payload: Optional[dict] = None) -> Any:
-    """One request against the designer, with its error messages preserved."""
-    body = json.dumps(payload).encode() if payload is not None else None
-    req = urllib.request.Request(
-        BASE + path, data=body, method=method,
-        headers={"Content-Type": "application/json"} if body else {})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as res:
-            return json.loads(res.read() or b"null")
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode(errors="replace")
-        try:
-            errors = json.loads(detail).get("errors") or [detail]
-        except ValueError:
-            errors = [detail]
-        raise ValueError("; ".join(str(e) for e in errors)) from None
-    except urllib.error.URLError as exc:
-        raise ConnectionError(f"the designer at {BASE} is not answering: {exc.reason}") from None
-
-
-def alive() -> bool:
-    try:
-        call("GET", "/api/maps")
-        return True
-    except (ConnectionError, ValueError):
-        return False
-
+# call, alive, ensure_server and log are the core's bridge: one HTTP client
+# against the designer, so an agent and a person work through one server.
 
 def ensure_designer() -> None:
-    """Start the designer if nothing is answering, and wait for it to come up."""
-    if alive():
-        return
-    if not AUTOSTART:
-        raise ConnectionError(f"nothing is running at {BASE} — start it with run.sh")
-    port = urllib.parse.urlparse(BASE).port or 8765
-    log(f"no designer on {BASE} — starting one")
-    subprocess.Popen(
-        [sys.executable, "-m", "metro_map_tool.app", "--port", str(port)],
-        cwd=HERE.parent, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-    for _ in range(40):
-        time.sleep(0.25)
-        if alive():
-            log(f"designer ready at {BASE}")
-            return
-    raise ConnectionError(f"started a designer but {BASE} never answered")
+    """The designer, running. Named for what it starts, not for how."""
+    web.ensure_server()
 
 
 # ----------------------------------------------------------------- tools ----
@@ -396,35 +341,34 @@ def resolve_timeline(timeline: dict) -> dict:
 def designer_url() -> str:
     """The URL to open the designer in a browser, so a person can take over."""
     ensure_designer()
-    return BASE + "/"
+    return web.BASE + "/"
 
 
 @server.tool()
 def stop_designer() -> str:
     """Shut the designer's local server down."""
-    if not alive():
+    if not web.alive():
         return "nothing was running"
     try:
         call("POST", "/api/shutdown")
     except ConnectionError:
         pass                                  # it died mid-answer, which is the point
-    return f"stopped the designer at {BASE}"
+    return f"stopped the designer at {web.BASE}"
 
 
 # ------------------------------------------------------------------ main ----
 
 def main() -> int:
-    global BASE, AUTOSTART
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
+    ap = argparse.ArgumentParser(prog="metro-map-mcp",
+                                 description=__doc__.splitlines()[1])
     ap.add_argument("--url", help="designer base URL (overrides --port)")
-    ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--port", type=int, default=None)
     ap.add_argument("--no-autostart", action="store_true",
                     help="fail rather than starting a designer that is not running")
     args = ap.parse_args()
 
-    BASE = (args.url or f"http://127.0.0.1:{args.port}").rstrip("/")
-    AUTOSTART = not args.no_autostart
-    log(f"serving MCP over stdio, designer at {BASE}")
+    web.configure(port=args.port, url=args.url, autostart=not args.no_autostart)
+    log(f"serving MCP over stdio, designer at {web.BASE}")
     server.run()
     return 0
 

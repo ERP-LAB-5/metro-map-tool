@@ -185,7 +185,7 @@ code — the named commands are only generated wrappers:
 | `metro-map-designer` | `python3 -m metro_map_tool.app` |
 | `metro-map` | `python3 -m metro_map_tool.metro_map` |
 | `metro-map-mcp` | `python3 -m metro_map_tool.mcp_server` |
-| `metro-map-skill` | `python3 -m metro_map_tool.skill_install` |
+| `metro-map-skill` | `python3 -m metro_map_tool.core.skill_install` |
 
 Flags are identical either way — `python3 -m metro_map_tool.app --port 9000`.
 
