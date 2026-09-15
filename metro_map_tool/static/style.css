@@ -553,27 +553,65 @@ svg.rides-off #scenarios { display: none; }
 /* --------------------------------------------------------- navigation -- */
 
 .stage { position: relative; }
-svg .nav-veil { fill: var(--paper); opacity: .86; pointer-events: none; }
-/* the route's own stops are labelled on the overlay; the rest fade with the veil */
-svg.navigating #labels { visibility: hidden; }
-svg .nav-route { fill: none; opacity: .3; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
-svg .nav-trail { fill: none; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+svg .nav-route { fill: none; stroke: none; pointer-events: none; }
+svg .nav-trail { fill: none; stroke-linecap: round; stroke-linejoin: round; pointer-events: none;
+                 filter: drop-shadow(0 0 2px var(--paper)); }
 svg .nav-ahead {
-  fill: none; stroke-linecap: round; stroke-linejoin: round; opacity: .55; pointer-events: none;
+  fill: none; stroke-linecap: round; stroke-linejoin: round; pointer-events: none;
+  stroke-opacity: .5;
   animation: nav-glow 1.1s ease-in-out infinite alternate;
 }
-@keyframes nav-glow { from { opacity: .25; } to { opacity: .7; } }
-svg .nav-stop circle { fill: var(--paper); pointer-events: none; }
-svg .nav-stop.jump circle { stroke-dasharray: 3 4; opacity: .7; }
-svg .nav-stop.passed circle { opacity: .55; }
-svg .nav-stop text {
-  font: 600 15px "Hanken Grotesk", "Helvetica Neue", Helvetica, Arial, sans-serif;
-  fill: var(--ink); stroke: var(--paper); stroke-width: 4px; paint-order: stroke; pointer-events: none;
-}
-svg .nav-stop.jump text { opacity: .6; font-style: italic; }
+@keyframes nav-glow { from { stroke-opacity: .2; } to { stroke-opacity: .75; } }
 svg .nav-traveller { stroke: var(--paper); stroke-width: 4px; pointer-events: none;
                      filter: drop-shadow(0 0 6px rgb(0 0 0 / .35)); }
-@media (prefers-reduced-motion: reduce) { svg .nav-ahead { animation: none; } }
+@media (prefers-reduced-motion: reduce) {
+  svg .nav-ahead { animation: none; }
+  .nav-bubble { transition: none; }
+}
+
+/* A stop on the followed route speaks in a bubble: it opens as the traveller
+   nears, wraps a long name, points at its stop, and closes once it is behind. */
+.nav-bubbles { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 4; }
+.nav-bubble {
+  --gap: 24px;
+  position: absolute; max-width: 190px; width: max-content;
+  padding: 6px 10px 7px; border-radius: 14px;
+  background: var(--paper); color: var(--ink);
+  border: 2px solid var(--rc); box-shadow: 0 6px 18px rgb(0 0 0 / .16);
+  font-size: 13px; line-height: 1.25; text-align: center;
+  overflow-wrap: anywhere; hyphens: auto;
+  opacity: 0; visibility: hidden;
+  transition: opacity .35s ease, transform .35s ease, visibility 0s linear .35s;
+}
+.nav-bubble b { display: block; font-weight: 700; }
+.nav-bubble-kicker { display: block; font-size: 10px; letter-spacing: .08em;
+                     text-transform: uppercase; color: var(--muted); }
+.nav-bubble-sub { display: block; font-size: 11px; color: var(--muted); }
+.nav-bubble-sub:empty { display: none; }
+.nav-bubble.show { opacity: 1; visibility: visible; transition: opacity .35s ease, transform .35s ease; }
+.nav-bubble.current { border-width: 3px; font-size: 14px; }
+.nav-bubble.next { opacity: .92; }
+.nav-bubble.passing { opacity: .7; font-size: 12px; }
+.nav-bubble.passing b { font-weight: 600; font-style: italic; }
+/* open away from the stop, and a little closer while closed, so it grows out of it */
+.nav-bubble.side-above { transform: translate(-50%, calc(-100% - var(--gap) + 8px)) scale(.92); }
+.nav-bubble.side-below { transform: translate(-50%, calc(var(--gap) - 8px)) scale(.92); }
+.nav-bubble.side-left  { transform: translate(calc(-100% - var(--gap) + 8px), -50%) scale(.92); }
+.nav-bubble.side-right { transform: translate(calc(var(--gap) - 8px), -50%) scale(.92); }
+.nav-bubble.show.side-above { transform: translate(-50%, calc(-100% - var(--gap))); }
+.nav-bubble.show.side-below { transform: translate(-50%, var(--gap)); }
+.nav-bubble.show.side-left  { transform: translate(calc(-100% - var(--gap)), -50%); }
+.nav-bubble.show.side-right { transform: translate(var(--gap), -50%); }
+/* the tail, pointing back at the stop */
+.nav-bubble::after {
+  content: ""; position: absolute; width: 12px; height: 12px;
+  background: var(--paper); border: inherit; border-width: 0 2px 2px 0;
+  border-style: solid; border-color: var(--rc);
+}
+.nav-bubble.side-above::after { left: 50%; bottom: -7px; transform: translateX(-50%) rotate(45deg); }
+.nav-bubble.side-below::after { left: 50%; top: -7px; transform: translateX(-50%) rotate(225deg); }
+.nav-bubble.side-left::after  { top: 50%; right: -7px; transform: translateY(-50%) rotate(-45deg); }
+.nav-bubble.side-right::after { top: 50%; left: -7px; transform: translateY(-50%) rotate(135deg); }
 
 .navboard {
   position: absolute; top: 12px; left: 12px; z-index: 5; width: min(360px, calc(100% - 24px));

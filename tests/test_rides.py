@@ -108,6 +108,24 @@ class RoutingTest(unittest.TestCase):
         self.assertEqual(mm.validate_spec(spec), [])
         self.assertTrue(any("choose where" in w for w in mm.spec_warnings(spec)))
 
+    def test_after_a_via_it_goes_on_rather_than_back_the_way_it_came(self):
+        got = route_of(with_rides({"name": "r", "from": "a", "to": "q", "via": ["x"]}))
+        route = got["route"]
+        self.assertEqual(len(route), len(set(route)), route)       # no stop twice
+
+    def test_a_ride_that_must_turn_back_really_reaches_the_turn(self):
+        spec = with_rides({"name": "r", "from": "a", "to": "b", "via": ["c"]})
+        got = route_of(spec)
+        self.assertEqual([s["id"] for s in got["stops"]], ["a", "b", "c", "b"])
+        ats = [s["at"] for s in got["stops"]]
+        self.assertEqual(ats, sorted(ats))
+        self.assertLess(ats[1], ats[2])                             # b, then c further on
+        # the drawn path goes out to Charlie and back, not straight through it
+        m = mm.Map(spec, mm.Style())
+        path = m.ride(spec["scenarios"][0])["path"]
+        cx = m.pos["c"][0]
+        self.assertTrue(any(abs(p[0] - cx) < 20 for p in path), path)
+
     def test_stops_along_the_path_run_forward_to_the_end(self):
         got = route_of(with_rides({"name": "r", "from": "a", "to": "d", "via": ["x"]}))
         ats = [s["at"] for s in got["stops"]]

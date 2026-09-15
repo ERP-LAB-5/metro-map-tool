@@ -210,18 +210,27 @@ def intersect(p1: Point, d1: Point, p2: Point, d2: Point) -> Optional[Point]:
     return (p1[0] + d1[0] * t, p1[1] + d1[1] * t)
 
 
-def drop_collinear(pts: Sequence[Point]) -> List[Point]:
-    """Remove pass-through vertices so no corner is rounded where there is no bend."""
+def drop_collinear(pts: Sequence[Point], keep_turns: bool = False) -> List[Point]:
+    """Remove pass-through vertices so no corner is rounded where there is no bend.
+
+    With keep_turns, a vertex the path turns straight back at is kept. It is
+    collinear too, and a *line* doubling back over itself has always been drawn
+    as one straight stroke, so lines keep that. A ride is different: dropping
+    the turn would erase its whole run out and back, and it would never reach
+    the stop it went back for.
+    """
     out = [pts[0]]
     for i in range(1, len(pts) - 1):
         a, b = norm(sub(pts[i], out[-1])), norm(sub(pts[i + 1], pts[i]))
-        if abs(a[0] * b[1] - a[1] * b[0]) > 1e-6:
+        bends = abs(a[0] * b[1] - a[1] * b[0]) > 1e-6
+        turns = keep_turns and a[0] * b[0] + a[1] * b[1] < 0
+        if bends or turns:
             out.append(pts[i])
     out.append(pts[-1])
     return out
 
 
-def join_legs(legs: Sequence[Tuple[Point, Point]]) -> List[Point]:
+def join_legs(legs: Sequence[Tuple[Point, Point]], keep_turns: bool = False) -> List[Point]:
     """Points through a run of offset legs, re-joined at their intersections.
 
     Two legs that have been pushed apart into parallel tracks no longer meet;
@@ -239,7 +248,7 @@ def join_legs(legs: Sequence[Tuple[Point, Point]]) -> List[Point]:
     for p in pts[1:]:
         if dist(p, out[-1]) > 0.5:
             out.append(p)
-    return drop_collinear(out)
+    return drop_collinear(out, keep_turns)
 
 
 def rounded_path(pts: Sequence[Point], radius: float) -> str:
@@ -548,12 +557,15 @@ class Map:
         return None
 
     def shortest(self, graph: Dict[str, List[dict]], start: str, goal: str,
-                 penalty: float) -> Optional[List[dict]]:
+                 penalty: float, avoid: Optional[set] = None,
+                 detour: float = 0.0) -> Optional[List[dict]]:
         """The cheapest run of hops from start to goal, or None.
 
         Searched over (node, line) so a change of line can cost something: a
         traveller would rather stay aboard than hop off and back on for a
-        marginally shorter way round.
+        marginally shorter way round. Stops in `avoid` — ones an earlier leg
+        already passed — cost `detour` extra, so after a via the ride goes on
+        rather than back the way it came, unless back is the only way.
         """
         import heapq
         if start == goal:
@@ -567,8 +579,12 @@ class Map:
                 return path
             if best.get((node, line), float("inf")) < cost:
                 continue
+            seen = {start} | {h["to"] for h in path}
             for hop in graph.get(node, []):
-                step = hop["length"] + (penalty if line not in (-1, hop["line"]) else 0.0)
+                if hop["to"] in seen:
+                    continue            # no doubling back through a stop within a leg
+                step = hop["length"] + (penalty if line not in (-1, hop["line"]) else 0.0) \
+                    + (detour if avoid and hop["to"] in avoid else 0.0)
                 total = cost + step
                 key = (hop["to"], hop["line"])
                 if total < best.get(key, float("inf")):
@@ -622,7 +638,9 @@ class Map:
             nodes.append(node)
         hops: List[dict] = []
         for a, b in zip(nodes, nodes[1:]):
-            found = self.shortest(graph, a, b, penalty=2 * self.style.cell)
+            been = {hops[0]["frm"]} | {h["to"] for h in hops} if hops else set()
+            found = self.shortest(graph, a, b, penalty=2 * self.style.cell,
+                                  avoid=been - {b}, detour=3 * self.style.cell)
             if found is None:
                 out["problems"].append(f"no track joins {self.node_name(a)} and "
                                        f"{self.node_name(b)}")
@@ -635,7 +653,7 @@ class Map:
         legs: List[Tuple[Point, Point]] = []
         for h in hops:
             legs.extend(self.hop_run(h))
-        path = join_legs(legs)
+        path = join_legs(legs, keep_turns=True)
         out.update(route=route, path=path)
         jump = {x for x in (sc.get("pass") or []) if isinstance(x, str)}
         stray = sorted(jump - set(route))
@@ -665,23 +683,32 @@ class Map:
         for p, q in zip(path, path[1:]):
             cum.append(cum[-1] + dist(p, q))
         total = cum[-1] or 1.0
-        stops, seg_from = [], 0
+        stops, seg_from, reached = [], 0, 0.0
+        # close enough to count as passing a station: within its own track's
+        # offset from the centre line, whichever parallel rail the ride is on
+        near = self.style.stroke + self.style.bundle_gap * 2
         for k, node in enumerate(route):
             if node not in self.stations:
                 continue                     # a junction or an edge: no platform
             here = self.pos[node]
-            best = (float("inf"), cum[seg_from], seg_from)
+            best = (float("inf"), reached, seg_from)
             for i in range(seg_from, len(path) - 1):
                 p, q = path[i], path[i + 1]
                 d = sub(q, p)
                 span = d[0] * d[0] + d[1] * d[1]
-                t = 0.0 if span < EPS else max(0.0, min(1.0, (
+                seg = math.sqrt(span)
+                # never behind the stop before: a route that comes back through
+                # a station meets it again further along, not where it first was
+                t_min = 0.0 if seg < EPS else max(0.0, min(1.0, (reached - cum[i]) / seg))
+                t = t_min if span < EPS else max(t_min, min(1.0, (
                     (here[0] - p[0]) * d[0] + (here[1] - p[1]) * d[1]) / span))
                 foot = add(p, scale(d, t))
                 gap = dist(foot, here)
                 if gap < best[0] - 1e-6:
-                    best = (gap, cum[i] + t * math.sqrt(span), i)
-            seg_from = best[2]
+                    best = (gap, cum[i] + t * seg, i)
+                if gap <= near:
+                    break                    # the first pass by it, not the closest
+            seg_from, reached = best[2], best[1] + 1e-6
             into = hops[k - 1]["line"] if hops and k > 0 else None
             onto = hops[k]["line"] if hops and k < len(hops) else None
             change = into is not None and onto is not None and into != onto

@@ -411,6 +411,7 @@ function applyTransform() {
   if (!svg) return;
   svg.style.transform = `translate(${S.pan.x}px, ${S.pan.y}px) scale(${S.zoom})`;
   $("#zoom-level").textContent = `${Math.round(S.zoom * 100)}%`;
+  if (NAV.ride !== null && !NAV.follow) navBubbles();
 }
 
 function fitToView() {
@@ -2420,9 +2421,10 @@ function navStop({ quiet = false } = {}) {
   const svg = svgEl();
   if (svg) {
     svg.querySelector("#nav-overlay")?.remove();
-    svg.querySelectorAll(".traveller").forEach((t) => { t.style.visibility = ""; });
+    svg.querySelectorAll(".traveller, text.label").forEach((t) => { t.style.visibility = ""; });
     svg.classList.remove("navigating");
   }
+  $("#nav-bubbles").innerHTML = "";
   NAV.ride = null;
   $("#navboard").hidden = true;
   $("#navboard").innerHTML = "";
@@ -2436,31 +2438,104 @@ function navBuild() {
   const r = NAV.report;
   if (!svg || !r) return false;
   svg.querySelector("#nav-overlay")?.remove();
-  const vb = svg.viewBox.baseVal;
   const w = S.style.stroke || 10;
   const g = document.createElementNS(NAV_NS, "g");
   g.id = "nav-overlay";
-  g.innerHTML = `<rect class="nav-veil" x="${vb.x}" y="${vb.y}" width="${vb.width}" height="${vb.height}"/>
-    <path class="nav-route" d="${r.d}" stroke="${esc(r.color)}" stroke-width="${w * 1.1}"/>
-    <path class="nav-trail" d="${r.d}" stroke="${esc(r.color)}" stroke-width="${w * 1.1}"/>
-    <path class="nav-ahead" d="${r.d}" stroke="${esc(r.color)}" stroke-width="${w * 1.6}"/>
-    <g class="nav-stops"></g>
+  // No veil: the map keeps its own colours. The followed route is a thin line
+  // in the ride's colour down the middle of the track, solid behind the
+  // traveller and glowing on the leg ahead, so the lines it rides stay readable.
+  g.innerHTML = `<path class="nav-route" d="${r.d}"/>
+    <path class="nav-trail" d="${r.d}" stroke="${esc(r.color)}" stroke-width="${w * 0.42}"/>
+    <path class="nav-ahead" d="${r.d}" stroke="${esc(r.color)}" stroke-width="${w * 0.42}"
+          style="filter: drop-shadow(0 0 ${w * 0.6}px ${esc(r.color)})"/>
     <circle class="nav-traveller" r="${w * 1.25}" fill="${esc(r.color)}"/>`;
   svg.appendChild(g);
   svg.classList.add("navigating");
   NAV.path = g.querySelector(".nav-route");
   NAV.len = NAV.path.getTotalLength() || 1;
-  const stops = g.querySelector(".nav-stops");
-  stops.innerHTML = r.stops.map((st) => {
-    const pt = NAV.path.getPointAtLength(st.at * NAV.len);
-    return `<g class="nav-stop ${st.jump ? "jump" : ""}">
-      <circle cx="${pt.x}" cy="${pt.y}" r="${w * 0.9}" stroke="${esc(r.color)}" stroke-width="${w * 0.45}"/>
-      <text x="${pt.x}" y="${pt.y - w * 2.2}" text-anchor="middle">${esc(st.label)}</text></g>`;
-  }).join("");
+
+  // The route's stops speak in bubbles instead of their labels: a label tilted
+  // or pushed aside to fit the whole map is in the way when the camera is close,
+  // and every stop labelled at once is noise. Other stations keep their labels.
+  const ids = new Set(r.stops.map((st) => st.id));
+  svg.querySelectorAll("text.label[data-station]").forEach((t) => {
+    t.style.visibility = ids.has(t.dataset.station) ? "hidden" : "";
+  });
+  const layer = $("#nav-bubbles");
+  layer.innerHTML = r.stops.map((st, k) => `
+    <div class="nav-bubble side-${bubbleSide(st.id)}" data-bubble="${k}" style="--rc:${esc(r.color)}">
+      <span class="nav-bubble-kicker"></span>
+      <b>${esc(st.label)}</b>
+      <span class="nav-bubble-sub"></span>
+    </div>`).join("");
+  NAV.bubbles = [...layer.querySelectorAll("[data-bubble]")];
   // the ride's own traveller gives way to the one being steered
   svg.querySelectorAll(`.traveller.t${NAV.ride}`).forEach((t) => { t.style.visibility = "hidden"; });
   navDraw();
   return true;
+}
+
+/** Which side of its stop a bubble opens on: the side the map gave its label. */
+function bubbleSide(sid) {
+  const at = ((S.spec.stations[sid] || {}).label_at || "").toLowerCase();
+  if (at.startsWith("below")) return "below";
+  if (at === "left") return "left";
+  if (at === "right") return "right";
+  return "above";
+}
+
+const OPPOSITE = { above: "below", below: "above", left: "right", right: "left" };
+
+/** Show the bubbles that matter now — the stop it is at, the next, one just
+ *  passed or being ridden through — and place them over their stops. */
+function navBubbles() {
+  const svg = svgEl();
+  if (!svg || !NAV.bubbles) return;
+  const r = NAV.report;
+  const ctm = svg.getScreenCTM();
+  const stage = $("#nav-bubbles").getBoundingClientRect();
+  if (!ctm) return;
+  const here = NAV.phase === "dwell" && NAV.anchors[NAV.k].stop !== null
+    ? NAV.anchors[NAV.k].stop : null;
+  const nextStop = navNextStop();
+  const next = nextStop ? r.stops.indexOf(nextStop) : -1;
+  const prev = NAV.phase === "move" && NAV.anchors[NAV.k].stop !== null && NAV.p < 0.3
+    ? NAV.anchors[NAV.k].stop : null;
+  const near = (S.style.cell || 120) * 0.9;
+  const placed = [];
+  NAV.bubbles.forEach((el, k) => {
+    const st = r.stops[k];
+    const passing = st.jump && Math.abs(st.at - NAV.frac) * NAV.len < near;
+    const role = k === here ? "current" : k === next ? "next"
+      : (k === prev || passing) ? "passing" : "";
+    el.classList.toggle("show", !!role);
+    el.classList.toggle("current", role === "current");
+    el.classList.toggle("next", role === "next");
+    el.classList.toggle("passing", role === "passing");
+    if (!role) return;
+    const kicker = role === "current" ? (NAV.done ? "Arrived" : "Now at")
+      : role === "next" ? "Next" : st.jump ? "Passing" : "Leaving";
+    el.querySelector(".nav-bubble-kicker").textContent = kicker;
+    const date = stopDate(st);
+    const sub = [role === "current" && st.change ? `change for ${st.change}` : "",
+                 role !== "passing" ? date : ""].filter(Boolean).join(" · ");
+    el.querySelector(".nav-bubble-sub").textContent = sub;
+    const pt = NAV.path.getPointAtLength(st.at * NAV.len);
+    const screen = new DOMPoint(pt.x, pt.y).matrixTransform(ctm);
+    const x = screen.x - stage.left;
+    const y = screen.y - stage.top;
+    // two bubbles opening the same way over nearby stops would sit on each
+    // other: the later one turns to the opposite side
+    let side = bubbleSide(st.id);
+    if (placed.some((o) => o.side === side && Math.hypot(o.x - x, o.y - y) < 170)) {
+      side = OPPOSITE[side];
+    }
+    placed.push({ x, y, side });
+    ["above", "below", "left", "right"].forEach((sd) => el.classList.toggle(`side-${sd}`, sd === side));
+    el.style.left = `${x}px`;
+    el.style.top = `${y}px`;
+    el.style.setProperty("--gap", `${(S.style.stroke || 10) * 1.6 * S.zoom + 10}px`);
+  });
 }
 
 /** After a re-render: lay the route again, or stop if the ride has gone. */
@@ -2562,11 +2637,8 @@ function navDraw(dt = 0) {
   const ahead = Math.max(0, next.at * NAV.len - at);
   const aheadPath = g.querySelector(".nav-ahead");
   aheadPath.style.strokeDasharray = `0 ${at} ${ahead} ${NAV.len * 2}`;
-  g.querySelectorAll(".nav-stop").forEach((el, k) => {
-    el.classList.toggle("passed", NAV.report.stops[k].at <= NAV.frac + 1e-4);
-  });
 
-  if (!NAV.follow) return;
+  if (!NAV.follow) { navBubbles(); return; }
   const box = $("#canvas").getBoundingClientRect();
   const x0 = Number(svg.dataset.x0) || 0;
   const y0 = Number(svg.dataset.y0) || 0;
@@ -2577,6 +2649,7 @@ function navDraw(dt = 0) {
   S.pan.x += (wantX - S.pan.x) * k;
   S.pan.y += (wantY - S.pan.y) * k;
   applyTransform();
+  navBubbles();                 // after the camera: they sit where the stops now are
 }
 
 /** The next stop the traveller will wait at, or null at the end. */
