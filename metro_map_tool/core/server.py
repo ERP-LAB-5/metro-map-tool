@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -105,6 +106,18 @@ def only_local(what: str) -> None:
         abort(403, f"{what} is only available to a local client")
 
 
+def template_info() -> Dict[str, str]:
+    """Which template this tool was built on, and where to read about it."""
+    version = str(getattr(identity, "TEMPLATE_VERSION", "") or "unknown")
+    base = getattr(identity, "TEMPLATE_URL", "")
+    released = re.fullmatch(r"v\d+(\.\d+)*", version) is not None
+    return {"name": getattr(identity, "TEMPLATE_NAME", "template"),
+            "version": version, "released": released, "repo": base,
+            # a release has notes; an unreleased commit only has the history
+            "url": f"{base}/releases/tag/{version}" if released and base
+                   else (f"{base}/commits/main" if base else "")}
+
+
 # ----------------------------------------------------------------- routes ---
 
 @bp.get("/api/health")
@@ -145,6 +158,7 @@ def version_info():
         "coffee": identity.COFFEE_URL,
         "install": ver.install_kind(),
         "web_command": identity.WEB_COMMAND,
+        "template": template_info(),
         "extras": extras,
     })
 
@@ -276,7 +290,9 @@ def add_server_args(ap: argparse.ArgumentParser,
     ap.add_argument("--no-update-check", action="store_true",
                     help="never contact github.com to compare versions")
     ap.add_argument("--version", action="version",
-                    version=f"{identity.TOOL_NAME} {ver.__version__}")
+                    version=f"{identity.TOOL_NAME} {ver.__version__} "
+                            f"(built on {template_info()['name']} "
+                            f"{template_info()['version']})")
 
 
 def on_a_network(host: str) -> bool:
@@ -306,6 +322,7 @@ def serve(app: Flask, args: argparse.Namespace,
         say(line)
     say(f"  version       {ver.__version__}"
         + ("" if ver.UPDATE_CHECK else "  (update check off)"))
+    say(f"  template      {template_info()['name']} {template_info()['version']}")
     where = "localhost" if args.host in ("", "0.0.0.0", "::") else args.host
     say(f"  listening on  http://{where}:{args.port}")
 

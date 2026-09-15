@@ -40,6 +40,18 @@ def test_health_names_this_tool(client):
     assert got["version"] == version.__version__
 
 
+def test_the_template_version_is_in_the_code_and_in_about(client):
+    assert identity.TEMPLATE_VERSION and identity.TEMPLATE_VERSION != "unknown"
+    answers = ROOT / ".copier-answers.yml"
+    if answers.is_file():                     # a checkout: both must say the same
+        recorded = re.search(r"^_commit:\s*(\S+)", answers.read_text(encoding="utf-8"), re.M)
+        assert recorded and recorded.group(1) == identity.TEMPLATE_VERSION
+    about = client.get("/api/version").get_json()["template"]
+    assert about["version"] == identity.TEMPLATE_VERSION
+    assert about["name"] == "python-tool-template"
+    assert about["url"].startswith("https://github.com/ERP-LAB-5/python-tool-template")
+
+
 def test_version_answers_offline(client):
     got = client.get("/api/version").get_json()
     assert got["installed"] == version.__version__

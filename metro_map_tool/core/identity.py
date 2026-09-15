@@ -27,6 +27,15 @@ DEFAULT_BRANCH = "main"
 
 DEFAULT_PORT = 8765
 
+# The template this tool was generated from, and the version last applied to
+# it — the same value as _commit in .copier-answers.yml, which lives at the
+# repository root and is not shipped with an installed copy, so it is written
+# here too. A tag like "v0.4.0" is a published template release; anything with
+# a commit suffix ("v0.4.0-2-g1a2b3c4") was rendered from an unreleased commit.
+TEMPLATE_NAME = "python-tool-template"
+TEMPLATE_URL = "https://github.com/ERP-LAB-5/python-tool-template"
+TEMPLATE_VERSION = "v0.4.0-1-g8bc8146"
+
 CLI_COMMAND = "metro-map"
 CLI_MODULE = "metro_map"
 WEB_COMMAND = "metro-map-designer"

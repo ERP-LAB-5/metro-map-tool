@@ -232,6 +232,11 @@
     const link = (href, text) =>
       `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(text)}</a>`;
     row("Repository", link(info.repo, info.repo.replace("https://", "")));
+    if (info.template) {
+      const t = info.template;
+      const said = `${t.name} ${t.version}` + (t.released ? "" : " (unreleased)");
+      row("Built on", t.url ? link(t.url, said) : esc(said));
+    }
     row("Licence", link(info.licence_url, info.licence));
     Object.entries(info.extras || {}).forEach(([k, v]) => row(k, esc(v)));
     if (info.disclaimer) {
