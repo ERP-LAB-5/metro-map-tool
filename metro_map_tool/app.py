@@ -418,7 +418,10 @@ def render_map():
     except (KeyError, ValueError, ZeroDivisionError) as exc:
         return jsonify({"errors": [f"render failed: {exc}"]}), 400
     out = {"svg": svg, "interchanges_changed": changed,
-           "warnings": mm.spec_warnings(spec), "stations": spec["stations"]}
+           "warnings": mm.spec_warnings(spec), "stations": spec["stations"],
+           # each ride's resolved route and stops, so the designer can show them
+           # and follow a ride in navigation mode without routing it again
+           "rides": mm.ride_report(spec, style)}
     if timeline:
         out["timeline"] = timeline
     return jsonify(out)

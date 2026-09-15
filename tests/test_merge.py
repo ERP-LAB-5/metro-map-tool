@@ -247,5 +247,35 @@ class ThreeWayTest(unittest.TestCase):
         self.assertEqual(spec["stations"]["a"]["upstream"]["label"], "Alpha v2")
 
 
+
+class LaneFoldTest(unittest.TestCase):
+    """Swimlanes an import made follow it; the author's own stay theirs."""
+
+    def fresh(self, name="Platform", rows=(0, 2)):
+        spec = imported()
+        spec["swimlanes"] = [{"name": name, "rows": list(rows), "origin": "jira:P-1#lane",
+                              "upstream": {"name": name, "rows": list(rows)}}]
+        return spec
+
+    def test_an_untouched_lane_follows_and_a_renamed_one_keeps_its_name(self):
+        mine, _ = merge(None, self.fresh(), source="jira", stamp=STAMP)
+        mine = copy.deepcopy(mine)
+        spec, _ = merge(mine, self.fresh(rows=(0, 3)), source="jira", stamp=STAMP)
+        self.assertEqual(spec["swimlanes"][0]["rows"], [0, 3])
+        mine["swimlanes"][0]["name"] = "My area"
+        spec, notes = merge(mine, self.fresh(name="Platform v2"), source="jira", stamp=STAMP)
+        self.assertEqual(spec["swimlanes"][0]["name"], "My area")
+        self.assertTrue(any("changed both" in n for n in notes))
+
+    def test_a_hand_drawn_lane_survives_and_a_gone_one_goes_only_with_prune(self):
+        mine, _ = merge(None, self.fresh(), source="jira", stamp=STAMP)
+        mine = copy.deepcopy(mine)
+        mine["swimlanes"].append({"name": "Mine", "rows": [5, 6]})
+        empty = imported()
+        spec, _ = merge(mine, empty, source="jira", stamp=STAMP)
+        self.assertEqual([l["name"] for l in spec["swimlanes"]], ["Platform", "Mine"])
+        spec, _ = merge(mine, empty, source="jira", prune=True, stamp=STAMP)
+        self.assertEqual([l["name"] for l in spec["swimlanes"]], ["Mine"])
+
 if __name__ == "__main__":
     unittest.main()

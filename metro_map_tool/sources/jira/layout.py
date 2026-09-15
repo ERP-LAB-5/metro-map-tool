@@ -331,8 +331,17 @@ def build(roots: List[dict], opts: dict, model: Optional[dict] = None,
     for jid, jn in junctions.items():
         jn["upstream"] = {"gx": jn["gx"], "gy": jn["gy"]}
 
+    # one swimlane per key, around its line and every branch off it
+    swimlanes = []
+    for trunk, line in zip(trunks, lines):
+        rows = [float(st.row) for st in _walk(trunk)]
+        lane_rows = [min(rows), max(rows)]
+        swimlanes.append({"name": trunk.name, "rows": lane_rows,
+                          "origin": f"{ORIGIN}:{trunk.key}#lane",
+                          "upstream": {"name": trunk.name, "rows": lane_rows}})
+
     spec: dict = {"mode": "roadmap", "timeline": timeline, "stations": stations,
-                  "lines": lines, "legend": "bottom",
+                  "lines": lines, "legend": "bottom", "swimlanes": swimlanes,
                   "style": {"cell": 120, "stroke": 9, "label_size": 13}}
     if junctions:
         spec["junctions"] = junctions

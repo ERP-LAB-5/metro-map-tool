@@ -89,13 +89,26 @@ meeting again at the saved file. After that it reopens whatever you had last.
   are placed by date.
 - **Dates top or bottom** (Time tab) puts the ruler under the map instead of
   over it.
-- **Rides** (Rides tab) animate a traveller along a route from start to end.
-  A ride is an ordered list of stops; it follows the drawn track and changes
-  line wherever the journey does, so you can show "the migration path" across
-  three branches as one moving dot. **A ride starts on its own** as soon as it
-  has a route — the ⏸ and ↻ buttons in the Rides tab only pause and rewind it.
-  The motion is written into the exported SVG, so a file you send someone
-  animates in their browser — and honours their reduced-motion setting.
+- **Swimlanes** (Lanes tab) band the map into named rows, one per key area,
+  with the name in a gutter on the left. A station sits in the lane its row
+  falls in; click a station to stretch a lane over it, or fit a lane to a line.
+- **Rides** (Rides tab) animate a traveller from a **start** to an **end** — a
+  station, a junction, or where a line runs **past the map**. The track decides
+  the way, changing line where it has to; add a **via** to send it down a
+  particular branch, and mark stops to **jump** so it rides straight through.
+  It waits at every other stop. The 👁 on a ride hides it (and leaves it out of
+  the export); the 👁 in the tab's header hides every traveller on the canvas.
+  The motion, pauses included, is written into the exported SVG, so a file you
+  send someone animates in their browser — and honours their reduced-motion
+  setting.
+- **▶ Navigate** follows one ride like a satnav: the camera stays with the
+  traveller, a board shows the next stop, the date on a roadmap and where to
+  change, and a strip shows the whole journey. Space pauses, ← → go to the
+  previous and next stop, + − zoom, Esc stops; drag the map to look around and
+  **Re-centre** to follow again. Spoken announcements are one button away.
+  Only one ride is followed at a time; the others keep moving.
+- **Search** sits above every long list — stations, lines, zones, rides and the
+  pick lists in their editors — and filters as you type.
 - **Notes between stops** (Lines tab, *Between stops*) put a short label on the
   track between two stations — "6 weeks", "nightly batch". They rotate to follow
   the track, never read upside down, and a vertical one reads top-to-bottom.

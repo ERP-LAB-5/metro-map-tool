@@ -112,5 +112,22 @@ class BrowseOptionsTest(unittest.TestCase):
         self.assertEqual(seen["opts"]["dates"], ["ABCD-4=2026-10-01"])
 
 
+class RenderRidesTest(unittest.TestCase):
+    def test_render_hands_the_designer_each_rides_route(self):
+        designer.app.config["TESTING"] = True
+        spec = {"stations": {"a": {"label": "A", "gx": 0, "gy": 0},
+                             "b": {"label": "B", "gx": 2, "gy": 0},
+                             "c": {"label": "C", "gx": 4, "gy": 0}},
+                "lines": [{"name": "L", "color": "#0098d4", "stations": ["a", "b", "c"]}],
+                "scenarios": [{"name": "Trip", "from": "a", "to": "c", "pass": ["b"]}]}
+        got = designer.app.test_client().post("/api/render", json={"spec": spec}).get_json()
+        ride = got["rides"][0]
+        self.assertEqual(ride["route"], ["a", "b", "c"])
+        self.assertEqual([(s["label"], s["jump"]) for s in ride["stops"]],
+                         [("A", False), ("B", True), ("C", False)])
+        self.assertTrue(ride["d"].startswith("M "))
+        self.assertEqual(ride["problems"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

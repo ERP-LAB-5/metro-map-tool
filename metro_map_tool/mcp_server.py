@@ -425,6 +425,23 @@ def spec_reference() -> dict:
             "phases": 'roadmap only: {"name", "from", "to", "color"?} draws a '
                       "grey column behind everything between two dates, named "
                       "vertically — the Preparation/Test/Go-to-market bands",
+            "swimlanes": 'top-level [{"name", "rows": [first gy, last gy], '
+                         '"color"?}] — a named band of rows across the whole '
+                         "map, one per key area, with its name in a gutter on "
+                         "the left. Metro maps and roadmaps alike. Keep lanes "
+                         "from overlapping and every station inside one",
+            "rides": 'a scenario routed by the track: {"name", "color"?, '
+                     '"from", "to", "via"?: [ids], "pass"?: [station ids], '
+                     '"dwell"?: seconds at each stop (default 1.5), '
+                     '"duration"?: seconds of travel (default 12), "hidden"?}. '
+                     "from/to/via are station or junction ids, or "
+                     '{"line": name, "edge": "start" or "end"} for where a '
+                     'line with "continues" runs past the map. The shortest '
+                     "way is taken, preferring to stay on one line; a via "
+                     "forces a branch; pass rides through a stop without "
+                     "waiting; hidden leaves the ride out of the drawing. The "
+                     'older shape {"name", "stations": [...]} still draws as '
+                     "before. Problems come back as warnings",
             "axis": 'timeline.axis is "top" (default) or "bottom" — which side '
                     "of the map the dates run along",
             "dead_end": 'a station may carry "dead_end": "buffer" for a '

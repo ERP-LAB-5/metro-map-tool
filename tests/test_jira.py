@@ -422,6 +422,17 @@ class LayoutTest(unittest.TestCase):
         # st-2 and st-1 are a month apart on a monthly ruler: level is fine
         self.assertNotIn("label_angle", spec["stations"]["st-1"])
 
+    def test_each_key_gets_a_swimlane_around_its_line_and_branches(self):
+        spec, _ = mapped(trees=[("INIT-1", initiative()), ("OPS-1", operations())])
+        lanes = spec["swimlanes"]
+        self.assertEqual([l["name"] for l in lanes], ["Platform", "Operations"])
+        self.assertEqual([l["origin"] for l in lanes], ["jira:INIT-1#lane", "jira:OPS-1#lane"])
+        for lane, line in zip(lanes, spec["lines"]):
+            rows = {spec["stations"][s]["gy"] for b in line.get("branches", [])
+                    for s in b["stations"] if s in spec["stations"]}
+            self.assertTrue(all(lane["rows"][0] <= r <= lane["rows"][1] for r in rows))
+        self.assertLess(lanes[0]["rows"][1], lanes[1]["rows"][0])
+
     def test_everything_made_carries_what_jira_decided(self):
         spec, _ = mapped()
         st = spec["stations"]["st-1"]

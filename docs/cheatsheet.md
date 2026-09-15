@@ -135,8 +135,12 @@ discovered, not asked for.
 
 Tabs, in the order you should use them: **Stations** (place them first, and
 junctions live here too) → **Lines** (route through them; a branch is the same
-line going two ways) → **Zones** → **Joins** → **Rides** → **Time** →
-**Style**.
+line going two ways) → **Zones** → **Lanes** → **Joins** → **Rides** →
+**Time** → **Style**.
+
+While **navigating** a ride: `Space` pause · `←` `→` previous and next stop ·
+`+` `−` zoom · `Esc` stop. Drag the map to look around; *Re-centre* follows
+again.
 
 ---
 
@@ -283,6 +287,9 @@ sprint band, a release capsule across two lines, and a burning platform.
 | `dead_end` | `buffer` (stops here) · `smoke` (watch out) · `fire` (get off) |
 | `label_at` | `above` `below` `left` `right` and the four diagonals |
 | `label_angle` | `0` `45` `90` |
+| `swimlanes` | `[{"name", "rows": [first, last], "color"?}]` — named row bands |
+| ride | `{"name", "from", "to", "via"?, "pass"?, "dwell"?, "duration"?, "hidden"?}` |
+| ride end | a station or junction id, or `{"line": name, "edge": "start"\|"end"}` |
 
 `gx`/`gy` are **grid cells, not pixels**, and may be fractional. A **junction**
 is a bend with no platform — where a branch splits or rejoins. A line's
@@ -305,8 +312,10 @@ stops.
   designer from where you keep your maps.
 - An import lands **unsaved and unnamed** — saving is deliberate. Re-syncing
   into an open map is the checkbox in the Import dialog.
-- A **ride cannot name a junction**, and a **zone cannot hold one** — both deal
-  in stops, and a junction has no platform. Only a line's route runs through
-  one.
-- A ride's stops must be **consecutive on some line**; it does not find its own
-  way between two stops with something in between.
+- A **zone cannot hold a junction** — it bands stops, and a junction has no
+  platform. A **ride can route via one**, which is how to pick a branch.
+- A ride finds its own way between `from`, each `via` and `to`; a ride in the
+  older shape still lists every stop, and those must be **consecutive on some
+  line**.
+- A ride end **past the map** only exists on a line with `continues` at that
+  end.

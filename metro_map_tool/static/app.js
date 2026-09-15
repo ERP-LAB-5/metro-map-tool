@@ -45,6 +45,9 @@ const S = {
   autoIx: true,
   sideHidden: false,
   ridesPlaying: true,                      // the travellers run on their own
+  showRides: true,                         // a view choice, never saved with the map
+  rides: [],                               // each ride as the server routed it
+  filters: {},                             // search text per list, kept across re-renders
   snap: 1,                                 // grid step when dragging or nudging
 
   sel: { kind: null, id: null },           // "station" | "junction" | "line" | ...
@@ -191,6 +194,7 @@ function normalise(spec) {
   spec.lines = spec.lines || [];
   spec.zones = spec.zones || [];
   spec.scenarios = spec.scenarios || [];
+  spec.swimlanes = spec.swimlanes || [];
   spec.interchanges = spec.interchanges || [];
   spec.phases = spec.phases || [];
   // a hand-written or agent-written roadmap may arrive with no dates at all —
@@ -313,9 +317,12 @@ async function doRender() {
 
   lastSVG = data.svg;
   canvas.innerHTML = data.svg;
+  S.rides = data.rides || [];
   applyTransform();
   decorate();
   applyRideState();
+  renderRideRoute();           // the resolved route changes with the map, not the editor
+  navAfterRender();
 }
 
 function svgEl() { return $("#canvas svg"); }
@@ -407,6 +414,7 @@ function applyTransform() {
 }
 
 function fitToView() {
+  if (NAV.ride !== null && NAV.follow) return;     // the camera is following a ride
   const svg = svgEl();
   const box = $("#canvas").getBoundingClientRect();
   if (!svg) return;
@@ -464,6 +472,7 @@ function initCanvas() {
       pushUndo();                       // dropped again on pointerup if nothing moved
     } else {
       pan = { x0: ev.clientX, y0: ev.clientY, px: S.pan.x, py: S.pan.y };
+      if (NAV.ride !== null) NAV.follow = false;   // looking around: stop steering the camera
       canvas.classList.add("panning");
     }
     try { canvas.setPointerCapture(ev.pointerId); } catch (_) { /* stale pointer */ }
@@ -516,6 +525,7 @@ function initCanvas() {
 
   canvas.addEventListener("wheel", (ev) => {
     ev.preventDefault();
+    if (NAV.ride !== null) NAV.follow = false;
     zoomBy(ev.deltaY < 0 ? 1.12 : 1 / 1.12, { x: ev.clientX, y: ev.clientY });
   }, { passive: false });
 }
@@ -526,6 +536,11 @@ function onStationClick(id) {
   const isJunction = !!(S.spec.junctions || {})[id];
   if (tab === "lines" && S.sel.kind === "line" && S.spec.lines[S.sel.id]) {
     applyChange(() => routeBeingEdited(S.spec.lines[S.sel.id]).push(id));
+    return;
+  }
+  if (isJunction && tab === "scenarios" && S.sel.kind === "scenario"
+      && S.spec.scenarios[S.sel.id] && isRouted(S.spec.scenarios[S.sel.id])) {
+    rideClick(S.spec.scenarios[S.sel.id], id);      // a junction picks a branch
     return;
   }
   // a junction has no platform, so nothing that bands or visits stops can hold
@@ -551,12 +566,12 @@ function onStationClick(id) {
     toggleJoinMember(S.sel.id, id);
     return;
   }
+  if (tab === "lanes" && S.sel.kind === "lane" && S.spec.swimlanes[S.sel.id]) {
+    stretchLane(S.sel.id, S.spec.stations[id].gy);
+    return;
+  }
   if (tab === "scenarios" && S.sel.kind === "scenario" && S.spec.scenarios[S.sel.id]) {
-    applyChange(() => {
-      const sc = S.spec.scenarios[S.sel.id];
-      sc.stations = sc.stations || [];
-      sc.stations.push(id);
-    });
+    rideClick(S.spec.scenarios[S.sel.id], id);
     return;
   }
   select("station", id);
@@ -619,8 +634,18 @@ function setHint() {
     text = "Filling this join — click the stops the capsule should cover";
   } else if (tab === "joins") {
     text = "Pick a join to choose the stops it covers, or add one";
+  } else if (tab === "lanes" && S.sel.kind === "lane" && S.spec.swimlanes[S.sel.id]) {
+    text = `Shaping “${S.spec.swimlanes[S.sel.id].name}” — click a station to stretch the lane over its row`;
+  } else if (tab === "lanes") {
+    text = "Pick a lane to set its rows, or add one for each key area";
   } else if (tab === "scenarios" && S.sel.kind === "scenario" && S.spec.scenarios[S.sel.id]) {
-    text = `Routing “${S.spec.scenarios[S.sel.id].name}” — click stations on the canvas in the order the traveller visits them`;
+    const sc = S.spec.scenarios[S.sel.id];
+    text = !isRouted(sc) ? `Routing “${sc.name}” — click stations in the order the traveller visits them`
+      : sc.from === undefined ? `“${sc.name}” — click the station where the ride starts`
+      : sc.to === undefined ? `“${sc.name}” — click the station where the ride ends`
+      : `“${sc.name}” — click a station or junction to route the ride via it`;
+  } else if (tab === "scenarios" && NAV.ride !== null) {
+    text = "Following a ride — Space pauses · ← → previous and next stop · + − zoom · Esc stops";
   } else if (tab === "scenarios") {
     text = travellers().length
       ? "Rides are running — pause or rewind them above"
@@ -641,6 +666,7 @@ function refreshPanels() {
   renderStations();
   renderLines();
   renderZones();
+  renderLanes();
   renderJoins();
   renderScenarios();
   renderTimeline();
@@ -696,6 +722,7 @@ function renderStations() {
     list.querySelectorAll("[data-sid]").forEach((row) =>
       row.addEventListener("click", () => select("station", row.dataset.sid)));
   }
+  searchable(list, "stations");
   renderStationEditor();
   renderJunctions();
 }
@@ -1000,6 +1027,7 @@ function renderLines() {
         moveLine(Number(btn.dataset.move), Number(btn.dataset.dir));
       }));
   }
+  searchable($("#line-list"), "lines");
   renderLineEditor();
 }
 
@@ -1323,6 +1351,8 @@ function renderLineEditor() {
     S.spec.lines.splice(i, 1);
     S.sel = { kind: null, id: null };
   }));
+  searchable($("#l-pick"), "line-stops", { items: "button", min: 12 });
+  searchable($("#l-pick-j"), "line-junctions", { items: "button", min: 12 });
   setHint();
 }
 
@@ -1360,6 +1390,178 @@ function addLine() {
   if (name) { name.focus(); name.select(); }
 }
 
+/* -------------------------------------------------------------- search -- */
+
+/* Maps grow, and a list of sixty stations to find one in is a chore. Every
+   long list gets a box that filters it as you type. The text is kept per list
+   in S.filters, because these lists are rebuilt after every edit and a search
+   that emptied itself on each click would be worse than none. */
+
+function searchable(list, key, { items = ".row", min = 8 } = {}) {
+  if (!list) return;
+  // the list was just rebuilt: its old box filters rows that no longer exist
+  const old = list.previousElementSibling;
+  const typing = old && old.classList.contains("search")
+    && old.querySelector("input") === document.activeElement;
+  if (old && old.classList.contains("search")) old.remove();
+  const all = [...list.querySelectorAll(items)];
+  if (all.length < min && !S.filters[key]) return;
+  const box = document.createElement("div");
+  box.className = "search";
+  box.innerHTML = `<input type="search" placeholder="Search ${all.length}…"
+      value="${esc(S.filters[key] || "")}" spellcheck="false" aria-label="Search this list">
+    <span class="search-count"></span>`;
+  list.before(box);
+  const input = box.querySelector("input");
+  const count = box.querySelector(".search-count");
+  const apply = () => {
+    const q = input.value.trim().toLowerCase();
+    S.filters[key] = input.value;
+    let shown = 0;
+    for (const el of all) {
+      const text = `${el.textContent} ${el.dataset.search || ""}`.toLowerCase();
+      el.hidden = !!q && !text.includes(q);
+      // an open editor sits in the row after its own, and goes with it
+      const host = el.nextElementSibling;
+      if (host && host.classList.contains("edit-host")) host.hidden = el.hidden;
+      if (!el.hidden) shown += 1;
+    }
+    count.textContent = q ? `${shown} of ${all.length}` : "";
+  };
+  input.addEventListener("input", apply);
+  if (typing) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") { input.value = ""; apply(); }
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      const left = all.filter((el) => !el.hidden);
+      if (left.length === 1) left[0].click();
+    }
+  });
+  apply();
+}
+
+/* ----------------------------------------------------------- swimlanes -- */
+
+function renderLanes() {
+  const list = $("#lane-list");
+  if (!list) return;
+  const lanes = S.spec.swimlanes;
+  if (!lanes.length) {
+    list.innerHTML = `<li class="note">No lanes yet — press “+ Add” to band the rows of a key area.</li>`;
+  } else {
+    list.innerHTML = lanes.map((ln, i) => {
+      const open = S.sel.kind === "lane" && S.sel.id === i;
+      const [a, b] = ln.rows || [0, 0];
+      const inside = Object.values(S.spec.stations)
+        .filter((st) => st.gy >= a - 0.5 && st.gy <= b + 0.5).length;
+      return `<li class="row ${open ? "is-on" : ""}" data-lane="${i}">
+        <span class="swatch band" style="background:${esc(ln.color || "#8f9aa4")}"></span>
+        <span class="grow">
+          <span class="lbl">${esc(ln.name)}</span>
+          <span class="at">rows ${a}–${b} · ${inside} station${inside === 1 ? "" : "s"}</span>
+        </span>
+        <span class="caret">${open ? "▾" : "▸"}</span>
+      </li>` + (open ? `<li class="edit-host"><div id="lane-editor" class="editor"></div></li>` : "");
+    }).join("");
+    list.querySelectorAll("[data-lane]").forEach((row) =>
+      row.addEventListener("click", () => select("lane", Number(row.dataset.lane))));
+  }
+  searchable(list, "lanes");
+  renderLaneEditor();
+}
+
+function renderLaneEditor() {
+  const box = $("#lane-editor");
+  if (!box) return;
+  if (S.sel.kind !== "lane" || !S.spec.swimlanes[S.sel.id]) { box.innerHTML = ""; return; }
+  const i = S.sel.id;
+  const ln = S.spec.swimlanes[i];
+  const [a, b] = ln.rows || [0, 0];
+  box.innerHTML = `<div class="card">
+    <h3>Swimlane</h3>
+    <label class="field"><span>Name</span><input type="text" id="sl-name" value="${esc(ln.name)}"></label>
+    <div class="field"><span>Colour</span>
+      <div class="swatches">
+        <button type="button" data-color="" title="no tint — alternate light bands"
+          class="${ln.color ? "" : "is-on"} swatch-none">∅</button>
+        ${PALETTE.map((pl) =>
+          `<button type="button" data-color="${esc(pl.color)}" title="${esc(pl.name)}"
+             style="background:${esc(pl.color)}" class="${(ln.color || "").toLowerCase() === pl.color.toLowerCase() ? "is-on" : ""}"></button>`).join("")}
+      </div>
+    </div>
+    <div class="pair">
+      <label class="field"><span>First row</span>
+        <input type="number" id="sl-from" step="0.5" value="${a}"></label>
+      <label class="field"><span>Last row</span>
+        <input type="number" id="sl-to" step="0.5" value="${b}"></label>
+    </div>
+    <h3>Fit to a line</h3>
+    <div class="pick" id="sl-pick">
+      ${S.spec.lines.map((line, li) => `<button type="button" data-fit="${li}"
+         style="border-color:${esc(line.color)}">${esc(line.name)}</button>`).join("")
+        || `<p class="note">No lines yet.</p>`}
+    </div>
+    <div><button id="sl-del" class="danger">Delete lane</button></div>
+  </div>`;
+
+  const name = $("#sl-name");
+  name.addEventListener("focus", pushUndo);
+  name.addEventListener("input", () => { ln.name = name.value; markDirty(); scheduleRender(); });
+  name.addEventListener("change", refreshPanels);
+  box.querySelectorAll("[data-color]").forEach((btn) =>
+    btn.addEventListener("click", () => applyChange(() => {
+      if (btn.dataset.color) ln.color = btn.dataset.color; else delete ln.color;
+    })));
+  const rows = () => {
+    const from = Number($("#sl-from").value);
+    const to = Number($("#sl-to").value);
+    if (!Number.isFinite(from) || !Number.isFinite(to)) return;
+    applyChange(() => { ln.rows = [Math.min(from, to), Math.max(from, to)]; });
+  };
+  $("#sl-from").addEventListener("change", rows);
+  $("#sl-to").addEventListener("change", rows);
+  box.querySelectorAll("[data-fit]").forEach((btn) => btn.addEventListener("click", () => {
+    const line = S.spec.lines[Number(btn.dataset.fit)];
+    const ys = strandsOf(line).flatMap((st) => st.ids)
+      .map((id) => waypoint(id)).filter(Boolean).map((p) => p.gy);
+    if (!ys.length) return;
+    applyChange(() => { ln.rows = [Math.min(...ys), Math.max(...ys)]; });
+  }));
+  searchable($("#sl-pick"), "lane-fit", { items: "button", min: 12 });
+  $("#sl-del").addEventListener("click", () => applyChange(() => {
+    S.spec.swimlanes.splice(i, 1);
+    S.sel = { kind: null, id: null };
+  }));
+  setHint();
+}
+
+/** Widen a lane so it takes in a row, leaving it as it is if it already does. */
+function stretchLane(i, gy) {
+  const ln = S.spec.swimlanes[i];
+  if (!ln || !Number.isFinite(gy)) return;
+  const [a, b] = ln.rows || [gy, gy];
+  if (gy >= a && gy <= b) return;
+  applyChange(() => { ln.rows = [Math.min(a, gy), Math.max(b, gy)]; });
+}
+
+function addLane() {
+  const lanes = S.spec.swimlanes;
+  const i = lanes.length;
+  const ys = Object.values(S.spec.stations).map((st) => st.gy);
+  const after = lanes.length ? Math.max(...lanes.map((ln) => ln.rows[1])) + 1
+    : (ys.length ? Math.min(...ys) : 0);
+  const selected = S.sel.kind === "station" && S.spec.stations[S.sel.id];
+  const row = selected ? selected.gy : after;
+  applyChange(() => {
+    lanes.push({ name: `Lane ${i + 1}`, rows: [row, row] });
+    S.sel = { kind: "lane", id: i };
+  });
+  document.querySelector('.tab[data-tab="lanes"]').click();
+  const name = $("#sl-name");
+  if (name) { name.focus(); name.select(); }
+}
+
 /* --------------------------------------------------------------- zones -- */
 
 function renderZones() {
@@ -1382,6 +1584,7 @@ function renderZones() {
     list.querySelectorAll("[data-zone]").forEach((row) =>
       row.addEventListener("click", () => select("zone", Number(row.dataset.zone))));
   }
+  searchable($("#zone-list"), "zones");
   renderZoneEditor();
 }
 
@@ -1443,6 +1646,7 @@ function renderZoneEditor() {
     S.spec.zones.splice(i, 1);
     S.sel = { kind: null, id: null };
   }));
+  searchable($("#z-pick"), "zone-stations", { items: "button", min: 12 });
   setHint();
 }
 
@@ -1614,6 +1818,7 @@ function renderJoins() {
     list.querySelectorAll("[data-join]").forEach((row) =>
       row.addEventListener("click", () => select("join", Number(row.dataset.join))));
   }
+  searchable($("#join-list"), "joins");
   renderJoinEditor();
 }
 
@@ -1677,6 +1882,7 @@ function renderJoinEditor() {
     S.spec.interchanges.splice(i, 1);
     S.sel = { kind: null, id: null };
   }));
+  searchable($("#j-pick"), "join-stations", { items: "button", min: 12 });
   setHint();
 }
 
@@ -1831,6 +2037,14 @@ function applyRideState() {
   travellers().forEach((t) => {
     t.style.animationPlayState = S.ridesPlaying ? "running" : "paused";
   });
+  const svg = svgEl();
+  if (svg) svg.classList.toggle("rides-off", !S.showRides);
+  const eye = $("#btn-ride-show");
+  if (eye) {
+    eye.classList.toggle("is-off", !S.showRides);
+    eye.title = S.showRides ? "hide every traveller on the canvas (not saved)"
+      : "show the travellers again";
+  }
   const btn = $("#btn-ride-play");
   if (btn) {
     btn.textContent = S.ridesPlaying ? "⏸ Pause" : "▶ Play";
@@ -1862,24 +2076,119 @@ function renderScenarios() {
   const list = $("#scenario-list");
   if (!list) return;
   if (!S.spec.scenarios.length) {
-    list.innerHTML = `<li class="note">No rides yet — press “+ Add”, then click stations on the canvas in the order the traveller visits them.</li>`;
+    list.innerHTML = `<li class="note">No rides yet — press “+ Add”, then click where the traveller starts and where it ends.</li>`;
   } else {
     list.innerHTML = S.spec.scenarios.map((sc, i) => {
       const open = S.sel.kind === "scenario" && S.sel.id === i;
-      const n = (sc.stations || []).length;
-      return `<li class="row ${open ? "is-on" : ""}" data-scenario="${i}">
+      const report = rideReport(i);
+      const stops = report ? report.stops.filter((x) => !x.jump).length : 0;
+      const where = sc.from !== undefined || sc.to !== undefined || isRouted(sc)
+        ? `${pointLabel(sc.from) || "start?"} → ${pointLabel(sc.to) || "end?"}`
+        : "hand-picked stops";
+      const ok = report && report.d;
+      return `<li class="row ${open ? "is-on" : ""} ${sc.hidden ? "is-hidden" : ""}" data-scenario="${i}"
+             data-search="${esc([sc.name, pointLabel(sc.from), pointLabel(sc.to)].join(" "))}">
         <span class="swatch" style="background:${esc(sc.color || "#101820")}"></span>
         <span class="grow">
           <span class="lbl">${esc(sc.name)}</span>
-          <span class="at">${n ? `${n} stop${n === 1 ? "" : "s"} · ${sc.duration || 8}s` : "no route yet"}</span>
+          <span class="at">${esc(where)}${ok ? ` · ${stops} stop${stops === 1 ? "" : "s"}` : ""}</span>
         </span>
+        <button type="button" class="ghost" data-eye="${i}"
+          title="${sc.hidden ? "show this ride" : "hide this ride"}">${sc.hidden ? "◌" : "👁"}</button>
+        <button type="button" class="ghost" data-nav="${i}" ${ok && !sc.hidden ? "" : "disabled"}
+          title="follow this ride like a satnav">▶</button>
         <span class="caret">${open ? "▾" : "▸"}</span>
       </li>` + (open ? `<li class="edit-host"><div id="scenario-editor" class="editor"></div></li>` : "");
     }).join("");
     list.querySelectorAll("[data-scenario]").forEach((row) =>
       row.addEventListener("click", () => select("scenario", Number(row.dataset.scenario))));
+    list.querySelectorAll("[data-eye]").forEach((btn) => btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const sc = S.spec.scenarios[Number(btn.dataset.eye)];
+      applyChange(() => { if (sc.hidden) delete sc.hidden; else sc.hidden = true; });
+    }));
+    list.querySelectorAll("[data-nav]").forEach((btn) => btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      navStart(Number(btn.dataset.nav));
+    }));
   }
+  searchable(list, "rides");
   renderScenarioEditor();
+}
+
+function isRouted(sc) {
+  return ["from", "to", "via", "pass", "dwell", "hidden"].some((k) => k in sc);
+}
+
+function rideReport(i) {
+  return (S.rides || []).find((r) => r.index === i) || null;
+}
+
+/** Where a ride starts or ends, in words. */
+function pointLabel(point) {
+  if (point === undefined || point === null) return "";
+  if (typeof point === "string") {
+    if (S.spec.stations[point]) return S.spec.stations[point].label || point;
+    if ((S.spec.junctions || {})[point]) return `junction ${point}`;
+    return point;
+  }
+  return `${point.edge === "start" ? "←" : "→"} ${point.line} past the map`;
+}
+
+/** Everything a ride may start at, end at or pass through, for a picker. */
+function ridePoints() {
+  const out = [];
+  S.spec.lines.forEach((ln) => {
+    strandsOf(ln).forEach((st) => {
+      const at = st.owner.continues || "none";
+      if (["start", "both"].includes(at) && st.ids.length) {
+        out.push({ value: { line: ln.name, edge: "start" }, label: `← ${ln.name} past the map`, kind: "edge" });
+      }
+      if (["end", "both"].includes(at) && st.ids.length) {
+        out.push({ value: { line: ln.name, edge: "end" }, label: `→ ${ln.name} past the map`, kind: "edge" });
+      }
+    });
+  });
+  const seen = new Set();
+  const uniq = out.filter((p) => {
+    const k = JSON.stringify(p.value);
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  const ids = Object.keys(S.spec.stations).sort((a, b) =>
+    (S.spec.stations[a].label || a).localeCompare(S.spec.stations[b].label || b));
+  return uniq
+    .concat(ids.map((id) => ({ value: id, label: S.spec.stations[id].label || id, kind: "station", search: id })))
+    .concat(Object.keys(S.spec.junctions || {}).map((id) => ({ value: id, label: `junction ${id}`, kind: "junction", search: id })));
+}
+
+/** A small searchable menu of ride points, opened under a button. */
+function pickPoint(anchor, onPick) {
+  document.querySelectorAll(".point-menu").forEach((m) => m.remove());
+  const menu = document.createElement("div");
+  menu.className = "point-menu";
+  const points = ridePoints();
+  menu.innerHTML = `<div class="pick point-list">${points.map((p, k) =>
+    `<button type="button" data-k="${k}" class="kind-${p.kind}" data-search="${esc(p.search || "")}">${esc(p.label)}</button>`).join("")
+    || `<p class="note">No stations yet.</p>`}</div>`;
+  anchor.after(menu);
+  const list = menu.querySelector(".point-list");
+  S.filters["ride-point"] = "";
+  searchable(list, "ride-point", { items: "button", min: 0 });
+  const input = menu.querySelector("input");
+  if (input) input.focus();
+  list.querySelectorAll("[data-k]").forEach((btn) => btn.addEventListener("click", () => {
+    menu.remove();
+    onPick(points[Number(btn.dataset.k)].value);
+  }));
+  const close = (ev) => {
+    if (!menu.contains(ev.target) && ev.target !== anchor) {
+      menu.remove();
+      document.removeEventListener("pointerdown", close, true);
+    }
+  };
+  document.addEventListener("pointerdown", close, true);
 }
 
 function renderScenarioEditor() {
@@ -1888,11 +2197,7 @@ function renderScenarioEditor() {
   if (S.sel.kind !== "scenario" || !S.spec.scenarios[S.sel.id]) { box.innerHTML = ""; return; }
   const i = S.sel.id;
   const sc = S.spec.scenarios[i];
-  const route = sc.stations || [];
-  const ids = Object.keys(S.spec.stations).sort((a, b) => {
-    const A = S.spec.stations[a], B = S.spec.stations[b];
-    return A.gy - B.gy || A.gx - B.gx;
-  });
+  const routed = isRouted(sc);
 
   box.innerHTML = `<div class="card">
     <h3>Ride</h3>
@@ -1903,59 +2208,132 @@ function renderScenarioEditor() {
            style="background:${esc(pl.color)}" class="${(sc.color || "").toLowerCase() === pl.color.toLowerCase() ? "is-on" : ""}"></button>`).join("")}
       </div>
     </div>
-    <label class="field"><span>Seconds end to end — <b id="r-secs">${sc.duration || 8}</b></span>
-      <input type="range" id="r-dur" min="2" max="40" step="1" value="${sc.duration || 8}"></label>
-
-    <h3>Route — ${route.length} stop${route.length === 1 ? "" : "s"}</h3>
-    ${route.length < 2 ? `<p class="warn">A ride needs at least two stops.</p>` : ""}
-    <div class="route" id="r-route">
-      ${route.map((sid, k) => `
-        <div class="stop-row" data-pos="${k}">
-          <span class="n">${k + 1}</span>
-          <span class="grow">${esc(stopName(sid))}</span>
-          <button class="ghost" data-drop="${k}" title="remove from the route">×</button>
-        </div>`).join("") || `<p class="note">Empty — click stations on the canvas in order.</p>`}
+    ${routed ? `
+    <div class="field"><span>Start</span>
+      <button type="button" class="point-btn" id="r-from">${esc(pointLabel(sc.from) || "choose where it starts…")}</button></div>
+    <div class="field"><span>Via — in order, to send it down a particular branch</span>
+      <div class="chips via-chips">${(sc.via || []).map((v, k) =>
+        `<span class="chip">${esc(pointLabel(v))}<button type="button" class="ghost" data-unvia="${k}" title="remove">×</button></span>`).join("")}
+        <button type="button" class="ghost" id="r-via">+ via</button></div></div>
+    <div class="field"><span>End</span>
+      <button type="button" class="point-btn" id="r-to">${esc(pointLabel(sc.to) || "choose where it ends…")}</button></div>
+    <label class="field"><span>Wait at each stop — <b id="r-dwell-v">${sc.dwell ?? 1.5}</b> s</span>
+      <input type="range" id="r-dwell" min="0" max="10" step="0.5" value="${sc.dwell ?? 1.5}"></label>
+    <label class="field"><span>Travel time end to end — <b id="r-secs">${sc.duration || 12}</b> s</span>
+      <input type="range" id="r-dur" min="2" max="120" step="1" value="${sc.duration || 12}"></label>
+    <h3>Route</h3>
+    <div id="r-route" class="route"></div>` : `
+    <p class="note">This ride lists its stops by hand, the way rides used to be made.
+      Convert it to start at its first stop and end at its last — the stops between become vias.</p>
+    <p><button type="button" id="r-convert" class="primary">Convert to Start / End</button></p>
+    <div id="r-route" class="route"></div>`}
+    <label class="field"><span><input type="checkbox" id="r-hidden" ${sc.hidden ? "checked" : ""}>
+      Hide this ride — left out of the map and the exported SVG</span></label>
+    <div class="row-btns">
+      <button type="button" id="r-nav" ${rideReport(i)?.d && !sc.hidden ? "" : "disabled"}>▶ Navigate</button>
+      <button id="r-del" class="danger">Delete ride</button>
     </div>
-
-    <h3>Available stations</h3>
-    <div class="pick" id="r-pick">
-      ${ids.length ? ids.map((sid) =>
-        `<button type="button" data-add="${esc(sid)}">${esc(S.spec.stations[sid].label)}</button>`).join("")
-        : `<p class="note">No stations yet.</p>`}
-    </div>
-
-    <div><button id="r-del" class="danger">Delete ride</button></div>
   </div>`;
 
   const name = $("#r-name");
   name.addEventListener("focus", pushUndo);
   name.addEventListener("input", () => { sc.name = name.value; markDirty(); scheduleRender(); });
   name.addEventListener("change", refreshPanels);
-
-  const dur = $("#r-dur");
-  dur.addEventListener("pointerdown", pushUndo);
-  dur.addEventListener("input", () => {
-    sc.duration = Number(dur.value);
-    $("#r-secs").textContent = dur.value;
-    markDirty();
-    scheduleRender();
-  });
-
   box.querySelectorAll("[data-color]").forEach((btn) =>
     btn.addEventListener("click", () => applyChange(() => { sc.color = btn.dataset.color; })));
-  box.querySelectorAll("[data-add]").forEach((btn) =>
-    btn.addEventListener("click", () => applyChange(() => {
-      sc.stations = sc.stations || [];
-      sc.stations.push(btn.dataset.add);
-    })));
-  box.querySelectorAll("[data-drop]").forEach((btn) =>
-    btn.addEventListener("click", () => applyChange(() =>
-      sc.stations.splice(Number(btn.dataset.drop), 1))));
+  $("#r-hidden").addEventListener("change", (ev) => applyChange(() => {
+    if (ev.target.checked) sc.hidden = true; else delete sc.hidden;
+  }));
+  $("#r-nav").addEventListener("click", () => navStart(i));
   $("#r-del").addEventListener("click", () => applyChange(() => {
+    if (NAV.ride === i) navStop();
     S.spec.scenarios.splice(i, 1);
     S.sel = { kind: null, id: null };
   }));
+
+  if (routed) {
+    $("#r-from").addEventListener("click", (ev) =>
+      pickPoint(ev.currentTarget, (v) => applyChange(() => { sc.from = v; })));
+    $("#r-to").addEventListener("click", (ev) =>
+      pickPoint(ev.currentTarget, (v) => applyChange(() => { sc.to = v; })));
+    $("#r-via").addEventListener("click", (ev) =>
+      pickPoint(ev.currentTarget, (v) => applyChange(() => { sc.via = (sc.via || []).concat([v]); })));
+    box.querySelectorAll("[data-unvia]").forEach((btn) => btn.addEventListener("click", () =>
+      applyChange(() => {
+        sc.via.splice(Number(btn.dataset.unvia), 1);
+        if (!sc.via.length) delete sc.via;
+      })));
+    const dwell = $("#r-dwell");
+    dwell.addEventListener("pointerdown", pushUndo);
+    dwell.addEventListener("input", () => {
+      sc.dwell = Number(dwell.value);
+      $("#r-dwell-v").textContent = dwell.value;
+      markDirty();
+      scheduleRender();
+    });
+    const dur = $("#r-dur");
+    dur.addEventListener("pointerdown", pushUndo);
+    dur.addEventListener("input", () => {
+      sc.duration = Number(dur.value);
+      $("#r-secs").textContent = dur.value;
+      markDirty();
+      scheduleRender();
+    });
+  } else {
+    $("#r-convert").addEventListener("click", () => applyChange(() => {
+      const stops = sc.stations || [];
+      if (stops.length) sc.from = stops[0];
+      if (stops.length > 1) sc.to = stops[stops.length - 1];
+      if (stops.length > 2) sc.via = stops.slice(1, -1);
+      sc.dwell = 1.5;
+      sc.duration = Math.max(2, Number(sc.duration) || 12);
+      delete sc.stations;
+    }));
+  }
+  renderRideRoute();
   setHint();
+}
+
+/** The route the server worked out for the open ride, with a stop/jump toggle each. */
+function renderRideRoute() {
+  const host = $("#r-route");
+  if (!host || S.sel.kind !== "scenario") return;
+  const i = S.sel.id;
+  const sc = S.spec.scenarios[i];
+  const report = rideReport(i);
+  if (!sc) return;
+  if (!report) { host.innerHTML = `<p class="note">Working out the route…</p>`; return; }
+  const problems = (report.problems || []).map((p) => `<p class="warn">${esc(p)}</p>`).join("");
+  if (!report.stops.length) { host.innerHTML = problems || `<p class="note">No route yet.</p>`; return; }
+  const routed = isRouted(sc);
+  host.innerHTML = problems + report.stops.map((st, k) => `
+    <div class="stop-row ${st.jump ? "is-jump" : ""}">
+      <span class="n">${k + 1}</span>
+      <span class="grow">${esc(st.label)}${st.change ? ` <span class="chip">change for ${esc(st.change)}</span>` : ""}</span>
+      ${routed && k > 0 && k < report.stops.length - 1 ? `<button type="button" class="ghost"
+        data-jump="${esc(st.id)}" title="${st.jump ? "stop here" : "ride straight through"}"
+        >${st.jump ? "jump" : "stop"}</button>` : ""}
+    </div>`).join("");
+  host.querySelectorAll("[data-jump]").forEach((btn) => btn.addEventListener("click", () =>
+    applyChange(() => {
+      const id = btn.dataset.jump;
+      const pass = new Set(sc.pass || []);
+      if (pass.has(id)) pass.delete(id); else pass.add(id);
+      if (pass.size) sc.pass = [...pass]; else delete sc.pass;
+    })));
+}
+
+/** A station or junction clicked on the canvas while a ride is open. */
+function rideClick(sc, id) {
+  if (!isRouted(sc)) {
+    applyChange(() => { sc.stations = sc.stations || []; sc.stations.push(id); });
+    return;
+  }
+  applyChange(() => {
+    if (sc.from === undefined) sc.from = id;
+    else if (sc.to === undefined) sc.to = id;
+    else sc.via = (sc.via || []).concat([id]);
+  });
 }
 
 function addScenario() {
@@ -1965,11 +2343,385 @@ function addScenario() {
     || { color: "#7b3fb5" };
   applyChange(() => {
     S.spec.scenarios.push({ name: `Ride ${i + 1}`, color: pick.color,
-                            duration: 8, stations: [] });
+                            dwell: 1.5, duration: 12 });
     S.sel = { kind: "scenario", id: i };
   });
   const name = $("#r-name");
   if (name) { name.focus(); name.select(); }
+}
+
+/** Show or hide every traveller on the canvas. A view choice, not saved. */
+function toggleShowRides() {
+  S.showRides = !S.showRides;
+  applyRideState();
+}
+
+/* ---------------------------------------------------------- navigation -- */
+
+/* Follow one ride like a satnav: the camera stays with the traveller, it waits
+   at each stop and rides through the ones marked to pass, and a board says
+   what is next. The other rides keep animating as they are; only one ride can
+   be followed at a time.
+
+   The route and its stops come from the server (S.rides), so this is only
+   motion: a path laid over the map, a dot moved along it, and the camera. It
+   changes nothing in the map, so it runs just as well while an agent holds it. */
+
+const NAV = { ride: null, zoomPref: 2 };
+const NAV_NS = "http://www.w3.org/2000/svg";
+const NAV_VOICE_KEY = "metro-map.nav-voice";
+const reducedMotion = () => window.matchMedia
+  && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
+function navVoiceStored() {
+  try { return localStorage.getItem(NAV_VOICE_KEY) === "1"; } catch (_) { return false; }
+}
+
+function speak(text) {
+  if (!NAV.voice || !text || !window.speechSynthesis) return;
+  try {
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+  } catch (_) { /* no voice here: the board still says it */ }
+}
+
+/** The points the traveller waits at: stops it does not ride through, plus the ends. */
+function navAnchors(report) {
+  const out = [];
+  report.stops.forEach((st, k) => { if (!st.jump) out.push({ at: st.at, stop: k }); });
+  if (!out.length || out[0].at > 0.0005) out.unshift({ at: 0, stop: null });
+  if (out[out.length - 1].at < 0.9995) out.push({ at: 1, stop: null });
+  return out;
+}
+
+function navStart(i) {
+  const report = rideReport(i);
+  if (!report || !report.d) return;
+  navStop({ quiet: true });
+  Object.assign(NAV, {
+    ride: i, name: report.name, report, anchors: navAnchors(report),
+    playing: true, speed: 1, zoom: NAV.zoomPref, follow: true, voice: navVoiceStored(),
+    dwellOverride: null, k: 0, p: 0, wait: 0, frac: 0, done: false, last: null,
+    boardKey: "",
+  });
+  NAV.phase = NAV.anchors[0].stop !== null ? "dwell" : "move";
+  if (!navBuild()) { NAV.ride = null; return; }
+  renderNavBoard(true);
+  const first = report.stops[0];
+  speak(first ? `${report.name}. Starting at ${first.label}.` : report.name);
+  NAV.raf = requestAnimationFrame(navTick);
+  setHint();
+}
+
+function navStop({ quiet = false } = {}) {
+  if (NAV.ride === null) return;
+  cancelAnimationFrame(NAV.raf);
+  const svg = svgEl();
+  if (svg) {
+    svg.querySelector("#nav-overlay")?.remove();
+    svg.querySelectorAll(".traveller").forEach((t) => { t.style.visibility = ""; });
+    svg.classList.remove("navigating");
+  }
+  NAV.ride = null;
+  $("#navboard").hidden = true;
+  $("#navboard").innerHTML = "";
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
+  if (!quiet) setHint();
+}
+
+/** Lay the followed route over the map. False when there is no map to lay it on. */
+function navBuild() {
+  const svg = svgEl();
+  const r = NAV.report;
+  if (!svg || !r) return false;
+  svg.querySelector("#nav-overlay")?.remove();
+  const vb = svg.viewBox.baseVal;
+  const w = S.style.stroke || 10;
+  const g = document.createElementNS(NAV_NS, "g");
+  g.id = "nav-overlay";
+  g.innerHTML = `<rect class="nav-veil" x="${vb.x}" y="${vb.y}" width="${vb.width}" height="${vb.height}"/>
+    <path class="nav-route" d="${r.d}" stroke="${esc(r.color)}" stroke-width="${w * 1.1}"/>
+    <path class="nav-trail" d="${r.d}" stroke="${esc(r.color)}" stroke-width="${w * 1.1}"/>
+    <path class="nav-ahead" d="${r.d}" stroke="${esc(r.color)}" stroke-width="${w * 1.6}"/>
+    <g class="nav-stops"></g>
+    <circle class="nav-traveller" r="${w * 1.25}" fill="${esc(r.color)}"/>`;
+  svg.appendChild(g);
+  svg.classList.add("navigating");
+  NAV.path = g.querySelector(".nav-route");
+  NAV.len = NAV.path.getTotalLength() || 1;
+  const stops = g.querySelector(".nav-stops");
+  stops.innerHTML = r.stops.map((st) => {
+    const pt = NAV.path.getPointAtLength(st.at * NAV.len);
+    return `<g class="nav-stop ${st.jump ? "jump" : ""}">
+      <circle cx="${pt.x}" cy="${pt.y}" r="${w * 0.9}" stroke="${esc(r.color)}" stroke-width="${w * 0.45}"/>
+      <text x="${pt.x}" y="${pt.y - w * 2.2}" text-anchor="middle">${esc(st.label)}</text></g>`;
+  }).join("");
+  // the ride's own traveller gives way to the one being steered
+  svg.querySelectorAll(`.traveller.t${NAV.ride}`).forEach((t) => { t.style.visibility = "hidden"; });
+  navDraw();
+  return true;
+}
+
+/** After a re-render: lay the route again, or stop if the ride has gone. */
+function navAfterRender() {
+  if (NAV.ride === null) return;
+  const report = rideReport(NAV.ride);
+  const sc = S.spec.scenarios[NAV.ride];
+  if (!report || !report.d || !sc || sc.hidden || report.name !== NAV.name) {
+    navStop();
+    flashLive("The ride you were following changed — navigation stopped.");
+    return;
+  }
+  const frac = NAV.frac;
+  NAV.report = report;
+  NAV.anchors = navAnchors(report);
+  navSeek(frac, { keepPhase: true });
+  navBuild();
+  renderNavBoard(true);
+}
+
+/** Put the traveller at a fraction of the route, waiting there if it is a stop. */
+function navSeek(frac, { keepPhase = false } = {}) {
+  const a = NAV.anchors;
+  let k = 0;
+  while (k < a.length - 1 && a[k + 1].at <= frac + 1e-6) k += 1;
+  NAV.k = k;
+  NAV.frac = frac;
+  NAV.done = k >= a.length - 1;
+  if (NAV.done) { NAV.phase = "dwell"; NAV.p = 0; return; }
+  const onAnchor = Math.abs(a[k].at - frac) < 1e-6;
+  if (onAnchor && (!keepPhase || NAV.phase === "dwell") && a[k].stop !== null) {
+    NAV.phase = "dwell"; NAV.wait = keepPhase ? NAV.wait : 0; NAV.p = 0;
+  } else {
+    NAV.phase = "move";
+    const span = a[k + 1].at - a[k].at || 1;
+    NAV.p = Math.max(0, Math.min(1, (frac - a[k].at) / span));
+  }
+}
+
+function navDwell() {
+  return NAV.dwellOverride ?? NAV.report.dwell ?? 1.5;
+}
+
+function navSegSeconds(k) {
+  const a = NAV.anchors;
+  const travel = NAV.report.travel || 12;
+  return Math.max(0.35, travel * (a[k + 1].at - a[k].at));
+}
+
+function navTick(ts) {
+  if (NAV.ride === null) return;
+  const dt = NAV.last === null ? 0 : Math.min(0.1, (ts - NAV.last) / 1000);
+  NAV.last = ts;
+  const a = NAV.anchors;
+  if (NAV.playing && !NAV.done) {
+    if (NAV.phase === "dwell") {
+      NAV.wait += dt * NAV.speed;
+      if (NAV.wait >= navDwell()) {
+        NAV.phase = "move"; NAV.p = 0; NAV.wait = 0;
+        const next = navNextStop();
+        if (next) speak(`Next stop: ${next.label}.`);
+      }
+    } else {
+      NAV.p += dt * NAV.speed / navSegSeconds(NAV.k);
+      if (NAV.p >= 1) {
+        NAV.k += 1; NAV.p = 0;
+        NAV.frac = a[NAV.k].at;
+        const here = a[NAV.k].stop !== null ? NAV.report.stops[a[NAV.k].stop] : null;
+        if (NAV.k >= a.length - 1) {
+          NAV.done = true; NAV.phase = "dwell";
+          speak(here ? `${here.label}. This ride ends here.` : "This ride ends here.");
+        } else if (here) {
+          NAV.phase = "dwell"; NAV.wait = 0;
+          speak(here.change ? `${here.label}. Change here for ${here.change}.` : here.label);
+        }
+      }
+    }
+    if (NAV.phase === "move" && !NAV.done) {
+      NAV.frac = a[NAV.k].at + (a[NAV.k + 1].at - a[NAV.k].at) * easeInOut(NAV.p);
+    }
+  }
+  navDraw(dt);
+  renderNavBoard();
+  NAV.raf = requestAnimationFrame(navTick);
+}
+
+/** Move the dot, the trail and the look-ahead, and bring the camera along. */
+function navDraw(dt = 0) {
+  const svg = svgEl();
+  const g = svg && svg.querySelector("#nav-overlay");
+  if (!g || !NAV.path) return;
+  const at = NAV.frac * NAV.len;
+  const pt = NAV.path.getPointAtLength(at);
+  const dot = g.querySelector(".nav-traveller");
+  dot.setAttribute("cx", pt.x);
+  dot.setAttribute("cy", pt.y);
+  g.querySelector(".nav-trail").style.strokeDasharray = `${at} ${NAV.len * 2}`;
+  const next = NAV.anchors[Math.min(NAV.k + 1, NAV.anchors.length - 1)];
+  const ahead = Math.max(0, next.at * NAV.len - at);
+  const aheadPath = g.querySelector(".nav-ahead");
+  aheadPath.style.strokeDasharray = `0 ${at} ${ahead} ${NAV.len * 2}`;
+  g.querySelectorAll(".nav-stop").forEach((el, k) => {
+    el.classList.toggle("passed", NAV.report.stops[k].at <= NAV.frac + 1e-4);
+  });
+
+  if (!NAV.follow) return;
+  const box = $("#canvas").getBoundingClientRect();
+  const x0 = Number(svg.dataset.x0) || 0;
+  const y0 = Number(svg.dataset.y0) || 0;
+  const k = reducedMotion() || dt === 0 ? 1 : 1 - Math.exp(-dt * 4);
+  S.zoom += (NAV.zoom - S.zoom) * k;
+  const wantX = box.width / 2 - (pt.x - x0) * S.zoom;
+  const wantY = box.height * 0.55 - (pt.y - y0) * S.zoom;
+  S.pan.x += (wantX - S.pan.x) * k;
+  S.pan.y += (wantY - S.pan.y) * k;
+  applyTransform();
+}
+
+/** The next stop the traveller will wait at, or null at the end. */
+function navNextStop() {
+  const a = NAV.anchors;
+  const from = NAV.phase === "dwell" ? NAV.k + 1 : NAV.k + 1;
+  for (let k = from; k < a.length; k += 1) {
+    if (a[k].stop !== null) return NAV.report.stops[a[k].stop];
+  }
+  return null;
+}
+
+function navSecondsTo(stop) {
+  if (!stop) return 0;
+  const a = NAV.anchors;
+  let secs = NAV.phase === "dwell" ? Math.max(0, navDwell() - NAV.wait) : 0;
+  for (let k = NAV.k; k < a.length - 1; k += 1) {
+    secs += navSegSeconds(k) * (k === NAV.k && NAV.phase === "move" ? 1 - NAV.p : 1);
+    if (a[k + 1].stop !== null && NAV.report.stops[a[k + 1].stop] === stop) break;
+    if (a[k + 1].stop !== null) secs += navDwell();
+  }
+  return secs / NAV.speed;
+}
+
+function stopDate(stop) {
+  if (!stop) return "";
+  if (stop.date) return stop.date;
+  const st = S.spec.stations[stop.id];
+  return st && isRoadmap() ? dateForGX(st.gx) : "";
+}
+
+function renderNavBoard(full = false) {
+  const board = $("#navboard");
+  if (NAV.ride === null) return;
+  const r = NAV.report;
+  const here = NAV.phase === "dwell" && NAV.anchors[NAV.k].stop !== null
+    ? r.stops[NAV.anchors[NAV.k].stop] : null;
+  const next = navNextStop();
+  const key = [NAV.k, NAV.phase, NAV.done, NAV.playing, NAV.follow, NAV.voice, NAV.speed,
+               Math.ceil(navSecondsTo(next))].join("|");
+  if (!full && key === NAV.boardKey) return;
+  NAV.boardKey = key;
+  // the line being ridden: what the last stop passed left on, not where the next
+  // one changes to
+  const passed = r.stops.filter((st) => st.at <= NAV.frac + 1e-4);
+  const line = (here || passed[passed.length - 1] || r.stops[0] || {}).line || "";
+  const change = here && here.change ? here.change : "";
+  const when = stopDate(NAV.done ? here : next);
+  if (full || !board.firstChild) {
+    board.hidden = false;
+    board.innerHTML = `
+      <div class="nav-head">
+        <span class="swatch" style="background:${esc(r.color)}"></span>
+        <b class="grow">${esc(r.name)}</b>
+        <button type="button" class="ghost" id="nav-exit" title="stop navigating (Esc)">✕</button>
+      </div>
+      <div class="nav-now">
+        <span class="nav-kicker" id="nav-kicker"></span>
+        <span class="nav-stop" id="nav-stop"></span>
+        <span class="nav-meta" id="nav-meta"></span>
+        <span class="nav-change" id="nav-change" hidden></span>
+      </div>
+      <div class="nav-strip" id="nav-strip">${r.stops.map((st, k) =>
+        `<button type="button" class="nav-dot ${st.jump ? "jump" : ""}" data-stop="${k}"
+           title="${esc(st.label)}${st.jump ? " — rides through" : ""}"></button>`).join("")}</div>
+      <div class="nav-ctrl">
+        <button type="button" id="nav-prev" title="previous stop (←)">⏮</button>
+        <button type="button" id="nav-play" title="pause or play (Space)"></button>
+        <button type="button" id="nav-next" title="next stop (→)">⏭</button>
+        <select id="nav-speed" title="speed">${[0.5, 1, 2, 4].map((v) =>
+          `<option value="${v}" ${v === NAV.speed ? "selected" : ""}>${v}×</option>`).join("")}</select>
+        <label title="zoom (+ −)">🔍<input type="range" id="nav-zoom" min="1.5" max="6" step="0.25" value="${NAV.zoom}"></label>
+        <label title="seconds at each stop">⏱<input type="range" id="nav-wait" min="0" max="10" step="0.5" value="${navDwell()}"></label>
+        <button type="button" id="nav-voice" title="spoken announcements"></button>
+        <button type="button" id="nav-follow" hidden title="follow the traveller again">◎ Re-centre</button>
+      </div>`;
+    $("#nav-exit").addEventListener("click", () => navStop());
+    $("#nav-prev").addEventListener("click", () => navStep(-1));
+    $("#nav-next").addEventListener("click", () => navStep(1));
+    $("#nav-play").addEventListener("click", navTogglePlay);
+    $("#nav-speed").addEventListener("change", (ev) => { NAV.speed = Number(ev.target.value); });
+    $("#nav-zoom").addEventListener("input", (ev) => {
+      NAV.zoom = NAV.zoomPref = Number(ev.target.value); NAV.follow = true;
+    });
+    $("#nav-wait").addEventListener("input", (ev) => { NAV.dwellOverride = Number(ev.target.value); });
+    $("#nav-voice").addEventListener("click", () => {
+      NAV.voice = !NAV.voice;
+      try { localStorage.setItem(NAV_VOICE_KEY, NAV.voice ? "1" : "0"); } catch (_) { /* none */ }
+      if (!NAV.voice && window.speechSynthesis) window.speechSynthesis.cancel();
+      renderNavBoard(true);
+    });
+    $("#nav-follow").addEventListener("click", () => { NAV.follow = true; renderNavBoard(true); });
+    board.querySelectorAll("[data-stop]").forEach((btn) => btn.addEventListener("click", () => {
+      const st = r.stops[Number(btn.dataset.stop)];
+      navSeek(st.at);
+      NAV.playing = true;
+      navDraw();
+      renderNavBoard(true);
+    }));
+  }
+  $("#nav-kicker").textContent = NAV.done ? "Arrived" : here ? "Now at" : next ? "Next stop" : "Riding on";
+  $("#nav-stop").textContent = NAV.done ? (here ? here.label : "the end of the line")
+    : here ? here.label : next ? next.label : "past the edge of the map";
+  const secs = Math.ceil(navSecondsTo(next));
+  $("#nav-meta").textContent = [line && `on ${line}`, when, !NAV.done && next && !here ? `in ${secs} s` : "",
+    here && next ? `then ${next.label}` : ""].filter(Boolean).join(" · ");
+  const ch = $("#nav-change");
+  ch.hidden = !change;
+  ch.textContent = change ? `Change here for ${change}` : "";
+  $("#nav-play").textContent = NAV.done ? "↻" : NAV.playing ? "⏸" : "▶";
+  $("#nav-voice").textContent = NAV.voice ? "🔈" : "🔇";
+  $("#nav-follow").hidden = NAV.follow;
+  board.querySelectorAll("[data-stop]").forEach((btn, k) => {
+    const st = r.stops[k];
+    btn.classList.toggle("passed", st.at <= NAV.frac + 1e-4);
+    btn.classList.toggle("current", !!here && st === here);
+  });
+}
+
+function navTogglePlay() {
+  if (NAV.ride === null) return;
+  if (NAV.done) { navSeek(0); NAV.playing = true; navDraw(); renderNavBoard(true); return; }
+  NAV.playing = !NAV.playing;
+  renderNavBoard(true);
+}
+
+/** To the previous or next stop the traveller waits at. */
+function navStep(dir) {
+  if (NAV.ride === null) return;
+  const a = NAV.anchors;
+  let k = NAV.k;
+  if (dir > 0) {
+    k += 1;
+    while (k < a.length - 1 && a[k].stop === null) k += 1;
+  } else {
+    if (NAV.phase === "dwell" || NAV.p < 0.15) k -= 1;
+    while (k > 0 && a[k].stop === null) k -= 1;
+  }
+  k = Math.max(0, Math.min(a.length - 1, k));
+  navSeek(a[k].at);
+  NAV.playing = true;
+  navDraw();
+  renderNavBoard(true);
+  const here = a[k].stop !== null ? NAV.report.stops[a[k].stop] : null;
+  if (here) speak(here.label);
 }
 
 /* --------------------------------------------------------------- style -- */
@@ -3256,6 +4008,18 @@ function initKeys() {
     const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(ev.target.tagName);
     const mod = ev.ctrlKey || ev.metaKey;
 
+    // while a ride is being followed, the arrows steer the ride, not a station
+    if (NAV.ride !== null && !typing && !mod) {
+      const act = {
+        " ": navTogglePlay, ArrowLeft: () => navStep(-1), ArrowRight: () => navStep(1),
+        Escape: () => navStop(),
+        "+": () => { NAV.zoom = NAV.zoomPref = Math.min(6, NAV.zoom + 0.5); NAV.follow = true; },
+        "=": () => { NAV.zoom = NAV.zoomPref = Math.min(6, NAV.zoom + 0.5); NAV.follow = true; },
+        "-": () => { NAV.zoom = NAV.zoomPref = Math.max(1.5, NAV.zoom - 0.5); NAV.follow = true; },
+      }[ev.key];
+      if (act) { ev.preventDefault(); act(); return; }
+    }
+
     if (mod && ev.key.toLowerCase() === "z") {
       ev.preventDefault();
       ev.shiftKey ? redo() : undo();
@@ -3331,11 +4095,13 @@ async function boot() {
   $("#btn-settings").addEventListener("click", () => settingsDialog());
   $("#btn-add-line").addEventListener("click", addLine);
   $("#btn-add-zone").addEventListener("click", addZone);
+  $("#btn-add-lane").addEventListener("click", addLane);
   $("#btn-add-scenario").addEventListener("click", addScenario);
   $("#btn-add-join").addEventListener("click", addJoin);
   $("#btn-milestone").addEventListener("click", milestoneDialog);
   $("#btn-ride-play").addEventListener("click", toggleRides);
   $("#btn-ride-restart").addEventListener("click", restartRides);
+  $("#btn-ride-show").addEventListener("click", toggleShowRides);
   $("#btn-new").addEventListener("click", newMap);
   $("#btn-open").addEventListener("click", openDialog);
   $("#btn-save").addEventListener("click", () => saveMap());

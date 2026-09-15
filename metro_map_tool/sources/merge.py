@@ -184,6 +184,13 @@ def merge(model: Optional[dict], fresh: dict, *, source: str,
     spec["lines"] = _fold_lines(model.get("lines") or [], fresh.get("lines") or [],
                                 rename, gone, mine, prune, notes, source)
 
+    lanes = _fold_lanes(model.get("swimlanes") or [], fresh.get("swimlanes") or [],
+                        mine, prune, notes, source)
+    if lanes:
+        spec["swimlanes"] = lanes
+    else:
+        spec.pop("swimlanes", None)
+
     for key in ("zones", "interchanges"):
         folded = _fold_groups(spec.get(key) or [], fresh.get(key) or [],
                               rename, gone, mine, prune, key, notes, source)
@@ -199,7 +206,8 @@ def merge(model: Optional[dict], fresh: dict, *, source: str,
 
     # the import's own suggestions apply only where the author said nothing
     for key, value in fresh.items():
-        if key not in OWNED_TOP and key not in ("zones", "interchanges", "timeline"):
+        if key not in OWNED_TOP and key not in ("zones", "interchanges", "timeline",
+                                                 "swimlanes"):
             spec.setdefault(key, value)
     _widen(spec, fresh, notes)
 
@@ -411,6 +419,40 @@ def _fold_groups(m_items: List[dict], f_items: List[dict], rename, gone, mine,
             new["stations"] = _repoint(new.get("stations") or [], rename, gone)
             if new.get("stations"):
                 out.append(new)
+    return out
+
+
+def _fold_lanes(m_lanes: List[dict], f_lanes: List[dict], mine: str, prune: bool,
+                notes: List[str], source: str) -> List[dict]:
+    """Swimlanes: the author's in their order, then any new ones the import made.
+
+    Matched by origin. A lane the import made follows the three-way rule on
+    everything in its snapshot — name, rows, colour — so a lane the author
+    renamed or widened keeps that, and one nobody touched follows the import.
+    """
+    by_origin = {fl.get("origin"): fl for fl in f_lanes if isinstance(fl, dict)
+                 and fl.get("origin")}
+    used = set()
+    out: List[dict] = []
+    for lane in m_lanes:
+        if not isinstance(lane, dict):
+            continue
+        origin = lane.get("origin") or ""
+        match = by_origin.get(origin) if origin else None
+        if match is not None:
+            merged = dict(lane)
+            three_way(merged, match, notes, origin, source)
+            for key, value in match.items():
+                merged.setdefault(key, value)
+            used.add(origin)
+            out.append(merged)
+        elif origin.startswith(mine) and prune:
+            notes.append(f"removed swimlane '{lane.get('name') or origin}' — no longer "
+                         "upstream")
+        else:
+            out.append(dict(lane))
+    out.extend(dict(fl) for fl in f_lanes
+               if isinstance(fl, dict) and fl.get("origin") not in used)
     return out
 
 

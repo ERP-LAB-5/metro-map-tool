@@ -162,24 +162,49 @@ and the merge draw themselves.
 - **Keep it to a couple of dozen commits.** Beyond that the map is longer than
   it is useful; pick a range worth explaining.
 
-## Rides — an animated traveller
+## Rides — a traveller the track routes
 
-A `scenarios` entry is a traveller's route: `{"name", "stations": [...],
-"color"?, "duration"?}`. It is drawn as a dot riding the **existing** track from
-the first stop to the last, changing line wherever the journey does, and the
-animation is written into the SVG so an exported file moves too.
+A `scenarios` entry is a traveller's journey. Say where it starts and ends, and
+the renderer finds the way along the **existing** track — the shortest, but
+staying aboard one line rather than changing for a marginally shorter way:
 
-- **Every consecutive pair of stops must be joined by a line**, in either
-  direction. A pair with no track between them is warned about and the whole
-  ride is skipped — a traveller cannot walk across open ground.
-- It is an ordered list of *stops*, not of lines. Name the stations the traveller
-  passes through and the renderer works out which track carries each hop.
-- **There is nothing to start.** A ride animates as soon as it has a valid
-  route; the designer's buttons only pause and rewind it.
-- `duration` is seconds end to end, 8 by default. Longer for a route with many
-  stops, or the dot moves too fast to follow.
+```json
+{"name": "Pilot", "color": "#0098d4",
+ "from": {"line": "Option A · Azure", "edge": "start"},
+ "to": "s4", "via": ["sit"], "pass": ["conv"],
+ "dwell": 1.5, "duration": 12}
+```
+
+- `from`, `to` and each `via` are a station or junction id, or
+  `{"line": name, "edge": "start"|"end"}` — where a line with `continues` runs
+  past the map, so a ride can arrive from off the map or leave it.
+- **`via` picks the way** where there is more than one: name a station on a
+  branch, or the junction it forks at.
+- **`pass`** lists stops to ride straight through; everywhere else the traveller
+  waits `dwell` seconds. `duration` is the travel time, waiting not included.
+- `hidden: true` leaves the ride out of the drawing and the exported SVG.
+- A ride with no track between two of its points is a **warning**, and is not
+  drawn. So is one without both ends chosen yet.
+- The motion is written into the SVG, pauses included, so an exported file moves
+  too. The older shape, `{"name", "stations": [every stop in order]}`, still
+  draws exactly as it did.
+- In the designer, **▶ Navigate** follows one ride like a satnav — camera, next
+  stop, changes, dates. That is the designer's, not the file's.
 - One or two rides on a map. Three dots moving at once is a screensaver, not an
   explanation.
+
+## Swimlanes — one band per key area
+
+`"swimlanes": [{"name": "Finance", "rows": [0, 2], "color"?: "#00a4a7"}]` draws a
+named band across the whole map covering those rows, with the name in a gutter
+on the left. A station belongs to the lane its `gy` falls in, so moving it to
+another row moves it to another lane. Lanes suit metro maps and roadmaps alike.
+
+- Keep lanes from overlapping, and every station inside one — both are warned
+  about.
+- Plan rows by lane: give each key area its own consecutive rows before placing
+  stations, rather than banding a map that was laid out without them.
+- A Jira import makes one lane per key, and a re-sync keeps a lane you renamed.
 
 ## Roadmap mode
 

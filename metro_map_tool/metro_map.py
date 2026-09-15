@@ -329,6 +329,7 @@ class Map:
         }
         self.segments: List[dict] = []
         self.stop_seg: Dict[Tuple[int, str], dict] = {}   # (line index, station) -> touching segment
+        self._edge_legs: Dict[Tuple[int, int, int], List[dict]] = {}   # rides off the map
         self.edges = self._edges(spec)
         self._build_segments()
         assign_offsets(self.segments, style.bundle_gap)
@@ -448,6 +449,248 @@ class Map:
                 return None
             legs.extend(hop)
         return join_legs(legs) if legs else None
+
+    # -- rides from a start to an end ----------------------------------------
+    #
+    # A ride used to be every stop typed out in order. Now it can say where it
+    # starts and ends, and the track decides the rest: the network is a graph
+    # of hops, and the ride takes the shortest way through it, preferring to
+    # stay on one line. "via" points force the way through a particular
+    # branch; a line that runs past the map has a node out at its arrow, so a
+    # ride can arrive from off the map or leave it.
+
+    def edge_node(self, li: int, si: int, which: str) -> str:
+        return f"@{li}.{si}:{which}"
+
+    def ride_edges(self) -> Dict[str, List[dict]]:
+        """Every hop a traveller can take, from each node: the ride graph."""
+        graph: Dict[str, List[dict]] = {}
+
+        def link(a: str, b: str, li: int, si: int, hop: int, forward: bool,
+                 length: float) -> None:
+            graph.setdefault(a, []).append({"to": b, "line": li, "strand": si,
+                                            "hop": hop, "forward": forward,
+                                            "length": length})
+
+        for li, line in enumerate(self.lines):
+            for si, strand in enumerate(line_strands(line)):
+                ids = [sid for sid in strand["ids"] if sid in self.pos]
+                legs_of = {}
+                for g in self.segments:
+                    if g["line"] == li and g["strand"] == si:
+                        legs_of.setdefault(g["hop"], []).append(g)
+                for k, (a, b) in enumerate(zip(ids, ids[1:])):
+                    length = sum(dist(g["p"], g["q"]) for g in legs_of.get(k, [])) \
+                        or dist(self.pos[a], self.pos[b])
+                    link(a, b, li, si, k, True, length)
+                    link(b, a, li, si, k, False, length)
+                # the sentinel legs out to the edge: -1 runs edge -> first stop,
+                # -2 runs last stop -> edge
+                at = strand["at"]
+                for which, hop, wanted in (("start", -1, at in ("start", "both")),
+                                           ("end", -2, at in ("end", "both"))):
+                    if not ids or not (wanted or legs_of.get(hop)):
+                        continue
+                    legs = legs_of.get(hop) or self._arrow_leg(li, si, ids, which)
+                    node = self.edge_node(li, si, which)
+                    length = sum(dist(g["p"], g["q"]) for g in legs)
+                    self._edge_legs[(li, si, hop)] = legs
+                    stop = ids[0] if which == "start" else ids[-1]
+                    if which == "start":
+                        link(node, stop, li, si, hop, True, length)
+                        link(stop, node, li, si, hop, False, length)
+                    else:
+                        link(stop, node, li, si, hop, True, length)
+                        link(node, stop, li, si, hop, False, length)
+        return graph
+
+    def _arrow_leg(self, li: int, si: int, ids: List[str], which: str) -> List[dict]:
+        """A short run out to the arrowhead, where a line runs off the map at a stop.
+
+        With nothing to extend to — no calendar, and this stop already the
+        furthest out — the line draws its arrow right beside the stop and no
+        leg at all. A ride still needs somewhere to come from, so it gets the
+        stretch the arrow occupies, pointing the way the track leaves.
+        """
+        stop = ids[0] if which == "start" else ids[-1]
+        here = self.pos[stop]
+        if len(ids) >= 2:
+            other = self.pos[ids[1]] if which == "start" else self.pos[ids[-2]]
+            d = norm(sub(here, other)) if dist(here, other) > EPS else (-1.0, 0.0)
+        else:
+            d = (-1.0, 0.0) if which == "start" else (1.0, 0.0)
+        seg = self.stop_seg.get(sid_key(li, stop))
+        shift = seg["shift"] if seg else (0.0, 0.0)
+        far = add(here, scale(d, self.marker_radius(stop) + self.style.stroke * 2.5))
+        p, q = (far, here) if which == "start" else (here, far)
+        return [{"line": li, "strand": si, "hop": -1 if which == "start" else -2,
+                 "p": p, "q": q, "offset": 0.0, "shift": shift}]
+
+    def ride_node(self, said: object) -> Optional[str]:
+        """The graph node a ride's from/to/via names, or None when it is not one.
+
+        A string is a station or junction id. {"line": name, "edge": "start" or
+        "end"} is the arrow where that line runs past the map — its trunk, or
+        the only branch of it that continues at that end.
+        """
+        if isinstance(said, str):
+            return said if said in self.pos else None
+        if not isinstance(said, dict) or said.get("edge") not in ("start", "end"):
+            return None
+        wanted = ("start", "both") if said["edge"] == "start" else ("end", "both")
+        for li, line in enumerate(self.lines):
+            if line.get("name") != said.get("line"):
+                continue
+            ends = [si for si, st in enumerate(line_strands(line))
+                    if st["at"] in wanted and st["ids"]]
+            if ends:
+                return self.edge_node(li, ends[0], said["edge"])
+        return None
+
+    def shortest(self, graph: Dict[str, List[dict]], start: str, goal: str,
+                 penalty: float) -> Optional[List[dict]]:
+        """The cheapest run of hops from start to goal, or None.
+
+        Searched over (node, line) so a change of line can cost something: a
+        traveller would rather stay aboard than hop off and back on for a
+        marginally shorter way round.
+        """
+        import heapq
+        if start == goal:
+            return []
+        frontier = [(0.0, 0, start, -1, [])]
+        best: Dict[Tuple[str, int], float] = {}
+        tie = 0
+        while frontier:
+            cost, _, node, line, path = heapq.heappop(frontier)
+            if node == goal:
+                return path
+            if best.get((node, line), float("inf")) < cost:
+                continue
+            for hop in graph.get(node, []):
+                step = hop["length"] + (penalty if line not in (-1, hop["line"]) else 0.0)
+                total = cost + step
+                key = (hop["to"], hop["line"])
+                if total < best.get(key, float("inf")):
+                    best[key] = total
+                    tie += 1
+                    heapq.heappush(frontier, (total, tie, hop["to"], hop["line"],
+                                              path + [dict(hop, frm=node)]))
+        return None
+
+    def hop_run(self, hop: dict) -> List[Tuple[Point, Point]]:
+        """The offset legs one graph hop draws, in the direction travelled."""
+        if hop["hop"] < 0:
+            found = self._edge_legs.get((hop["line"], hop["strand"], hop["hop"])) or []
+        else:
+            found = [g for g in self.segments if g["line"] == hop["line"]
+                     and g["strand"] == hop["strand"] and g["hop"] == hop["hop"]]
+        legs = [(add(g["p"], g["shift"]), add(g["q"], g["shift"])) for g in found]
+        return legs if hop["forward"] else [(q, p) for p, q in reversed(legs)]
+
+    def ride(self, sc: dict) -> dict:
+        """Where a ride goes: its path, its stops along it, and what is wrong.
+
+        Returns {"path": points or None, "route": [node ids], "stops": [...],
+        "problems": [sentences]}. Each stop is {"id", "at" (0..1 along the
+        path), "jump", "line", "change"}. A ride without "from" is the older
+        hand-picked list of stops, walked exactly as before.
+        """
+        out: dict = {"path": None, "route": [], "stops": [], "problems": []}
+        if not is_routed_ride(sc):
+            stations = [x for x in (sc.get("stations") or []) if isinstance(x, str)]
+            out["route"] = stations
+            path = self.journey(stations) if len(stations) >= 2 else None
+            out["path"] = path
+            if path:
+                out["stops"] = self._stops_along(path, stations, [], set())
+            return out
+
+        if sc.get("from") is None or sc.get("to") is None:
+            out["problems"].append("choose where the ride starts and where it ends")
+            return out
+        graph = self.ride_edges()          # also fills the legs out to the edges
+        marks = [("start", sc.get("from"))] + [("via", v) for v in sc.get("via") or []] \
+            + [("end", sc.get("to"))]
+        nodes = []
+        for what, said in marks:
+            node = self.ride_node(said)
+            if node is None:
+                out["problems"].append(f"the {what} point {json.dumps(said)} is not a "
+                                       "station, a junction or a line's open end")
+                return out
+            nodes.append(node)
+        hops: List[dict] = []
+        for a, b in zip(nodes, nodes[1:]):
+            found = self.shortest(graph, a, b, penalty=2 * self.style.cell)
+            if found is None:
+                out["problems"].append(f"no track joins {self.node_name(a)} and "
+                                       f"{self.node_name(b)}")
+                return out
+            hops.extend(found)
+        if not hops:
+            out["problems"].append("the ride starts and ends in the same place")
+            return out
+        route = [hops[0]["frm"]] + [h["to"] for h in hops]
+        legs: List[Tuple[Point, Point]] = []
+        for h in hops:
+            legs.extend(self.hop_run(h))
+        path = join_legs(legs)
+        out.update(route=route, path=path)
+        jump = {x for x in (sc.get("pass") or []) if isinstance(x, str)}
+        stray = sorted(jump - set(route))
+        if stray:
+            out["problems"].append("marked to ride through, but not on the route: "
+                                   + ", ".join(stray))
+        out["stops"] = self._stops_along(path, route, hops, jump)
+        return out
+
+    def node_name(self, node: str) -> str:
+        if node.startswith("@"):
+            li = int(node[1:].split(".")[0])
+            end = node.rsplit(":", 1)[1]
+            return f"the {end} of {self.lines[li].get('name', 'a line')} past the map"
+        st = self.stations.get(node)
+        return f"'{st['label']}'" if isinstance(st, dict) and st.get("label") else f"'{node}'"
+
+    def _stops_along(self, path: List[Point], route: List[str], hops: List[dict],
+                     jump: set) -> List[dict]:
+        """The stations a path passes, in order, with how far along each one is.
+
+        Measured by projecting each station onto the drawn path, searching
+        forward from the last one, so a traveller parks on the marker rather
+        than wherever a sum of leg lengths happened to land.
+        """
+        cum = [0.0]
+        for p, q in zip(path, path[1:]):
+            cum.append(cum[-1] + dist(p, q))
+        total = cum[-1] or 1.0
+        stops, seg_from = [], 0
+        for k, node in enumerate(route):
+            if node not in self.stations:
+                continue                     # a junction or an edge: no platform
+            here = self.pos[node]
+            best = (float("inf"), cum[seg_from], seg_from)
+            for i in range(seg_from, len(path) - 1):
+                p, q = path[i], path[i + 1]
+                d = sub(q, p)
+                span = d[0] * d[0] + d[1] * d[1]
+                t = 0.0 if span < EPS else max(0.0, min(1.0, (
+                    (here[0] - p[0]) * d[0] + (here[1] - p[1]) * d[1]) / span))
+                foot = add(p, scale(d, t))
+                gap = dist(foot, here)
+                if gap < best[0] - 1e-6:
+                    best = (gap, cum[i] + t * math.sqrt(span), i)
+            seg_from = best[2]
+            into = hops[k - 1]["line"] if hops and k > 0 else None
+            onto = hops[k]["line"] if hops and k < len(hops) else None
+            change = into is not None and onto is not None and into != onto
+            line = onto if onto is not None else into
+            stops.append({"id": node, "at": round(best[1] / total, 5),
+                          "jump": node in jump,
+                          "line": self.lines[line].get("name", "") if line is not None else "",
+                          "change": self.lines[onto].get("name", "") if change else ""})
+        return stops
 
     # -- stations ----------------------------------------------------------
 
@@ -1171,6 +1414,150 @@ def lighten(hex_color: str, floor: float = 0.58) -> str:
 THEMES = ("auto", "light", "dark")
 
 
+RIDE_FIELDS = ("from", "to", "via", "pass", "dwell", "hidden")
+RIDE_DWELL = 1.5            # seconds a routed ride waits at each stop by default
+RIDE_TRAVEL = 12.0          # seconds of travel end to end, waiting not included
+
+
+def is_routed_ride(sc: dict) -> bool:
+    """A ride that says where it starts and ends, rather than listing its stops.
+
+    Only these get the new animation. A ride in the older shape draws exactly
+    as it always did, so a map nobody has touched comes out byte for byte the
+    same.
+    """
+    return any(k in sc for k in RIDE_FIELDS)
+
+
+def ride_timing(sc: dict) -> Tuple[float, float]:
+    travel = sc.get("duration")
+    travel = float(travel) if isinstance(travel, (int, float)) and not isinstance(
+        travel, bool) and 0 < travel <= 600 else RIDE_TRAVEL
+    dwell = sc.get("dwell", RIDE_DWELL)
+    dwell = float(dwell) if isinstance(dwell, (int, float)) and not isinstance(
+        dwell, bool) and 0 <= dwell <= 30 else RIDE_DWELL
+    return travel, dwell
+
+
+def routed_ride_css(m: "Map", sc: dict, si: int, s: Style) -> Optional[Tuple[str, str]]:
+    """The keyframes and traveller for a ride with a start and an end.
+
+    The traveller waits `dwell` seconds at each stop and rides straight through
+    the ones marked to pass, easing out of each stop and into the next. Time
+    between stops is shared out by distance, so it moves at one speed.
+    """
+    found = m.ride(sc)
+    path = found["path"]
+    if not path or len(path) < 2:
+        return None
+    travel, dwell = ride_timing(sc)
+    anchors: List[Tuple[float, float]] = []
+    stops = [x for x in found["stops"] if not x["jump"]]
+    if not stops or stops[0]["at"] > 0.0005:
+        anchors.append((0.0, 0.0))            # rolling in from off the map
+    anchors.extend((x["at"], dwell) for x in stops)
+    if anchors[-1][0] < 0.9995:
+        anchors.append((1.0, 0.0))            # rolling out past the edge
+    frames: List[Tuple[float, float, str]] = []
+    t = 0.0
+    for k, (at, wait) in enumerate(anchors):
+        if k:
+            t += travel * max(0.0, at - anchors[k - 1][0])
+        frames.append((t, at, "linear" if wait > 0 else "ease-in-out"))
+        if wait > 0:
+            t += wait
+            frames.append((t, at, "ease-in-out"))
+    total = t if t > 0 else travel
+    steps = "\n".join(
+        f"      {min(100.0, when / total * 100):.3f}% {{ offset-distance: {at * 100:.3f}%; "
+        f"animation-timing-function: {ease}; }}"
+        for when, at, ease in frames)
+    d = rounded_path(path, s.corner)
+    colour = sc.get("color") if isinstance(sc.get("color"), str) else "#101820"
+    css = (f"    @keyframes ride{si} {{\n{steps}\n    }}\n"
+           f'    .t{si} {{ offset-path: path("{d}"); animation-name: ride{si}; '
+           f"animation-duration: {total:g}s; fill: {colour}; }}")
+    dot = (f'    <circle class="traveller t{si}" cx="0" cy="0" '
+           f'r="{s.stop_r * 1.15:.1f}"><title>{esc(sc.get("name") or "ride")}'
+           f'</title></circle>')
+    return css, dot
+
+
+def ride_field_errors(sc: dict, where: str, stations: dict, junctions: dict,
+                      lines: list) -> List[str]:
+    """What is wrong with a routed ride's own fields. Reachability is a warning."""
+    errors = []
+    names = {ln.get("name") for ln in lines if isinstance(ln, dict)}
+    points = {**stations, **junctions}
+
+    def point(said: object, what: str) -> None:
+        if isinstance(said, str):
+            if said not in points:
+                errors.append(f"{where}: {what} '{said}' is not a station or junction")
+        elif isinstance(said, dict):
+            if said.get("edge") not in ("start", "end"):
+                errors.append(f'{where}: {what} needs "edge": "start" or "end"')
+            if said.get("line") not in names:
+                errors.append(f"{where}: {what} names no line called "
+                              f"'{said.get('line')}'")
+        else:
+            errors.append(f'{where}: {what} must be a station id, or {{"line": name, '
+                          f'"edge": "start" or "end"}} for where a line runs off the map')
+
+    for key in ("from", "to"):
+        if sc.get(key) is not None:          # not chosen yet is a warning, not an error
+            point(sc[key], key)
+    for key in ("via", "pass"):
+        said = sc.get(key)
+        if said is None:
+            continue
+        if not isinstance(said, list):
+            errors.append(f"{where}: {key} must be a list")
+            continue
+        for x in said:
+            if key == "via":
+                point(x, "via")
+            elif x not in stations:
+                errors.append(f"{where}: pass '{x}' is not a station")
+    wait = sc.get("dwell")
+    if wait is not None and (not isinstance(wait, (int, float)) or isinstance(wait, bool)
+                             or not 0 <= wait <= 30):
+        errors.append(f"{where}: dwell must be seconds between 0 and 30")
+    if sc.get("hidden") is not None and not isinstance(sc["hidden"], bool):
+        errors.append(f"{where}: hidden must be true or false")
+    return errors
+
+
+def ride_report(spec: dict, style: Style) -> List[dict]:
+    """Every ride as the designer needs it: route, stops, path and problems.
+
+    The designer shows the route a ride resolves to and follows it in
+    navigation mode, and it gets both from here rather than repeating the
+    pathfinding in the browser.
+    """
+    m = Map(spec, style)
+    out = []
+    for si, sc in enumerate(spec.get("scenarios", []) or []):
+        if not isinstance(sc, dict):
+            continue
+        found = m.ride(sc)
+        path = found["path"]
+        travel, dwell = ride_timing(sc) if is_routed_ride(sc) else (
+            float(sc.get("duration") or 8), 0.0)
+        stops = []
+        for x in found["stops"]:
+            st = m.stations.get(x["id"]) or {}
+            stops.append(dict(x, label=st.get("label") or x["id"], date=st.get("date")))
+        out.append({"index": si, "name": sc.get("name") or f"Ride {si + 1}",
+                    "color": sc.get("color") or "#101820",
+                    "routed": is_routed_ride(sc), "hidden": bool(sc.get("hidden")),
+                    "route": found["route"], "stops": stops,
+                    "d": rounded_path(path, style.corner) if path else "",
+                    "travel": travel, "dwell": dwell,
+                    "problems": found["problems"]})
+    return out
+
+
 def render(spec: dict, style: Style, theme: str = "auto") -> str:
     m = Map(spec, style)
     s = style
@@ -1261,6 +1648,14 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
     travellers, scenario_css = [], []
     for si, sc in enumerate(spec.get("scenarios", []) or []):
         if not isinstance(sc, dict):
+            continue
+        if is_routed_ride(sc):
+            if sc.get("hidden"):
+                continue                     # a hidden ride is left out of the file
+            drawn = routed_ride_css(m, sc, si, s)
+            if drawn:
+                scenario_css.append(drawn[0])
+                travellers.append(drawn[1])
             continue
         stops = sc.get("stations") or []
         path = m.journey(stops) if len(stops) >= 2 else None
@@ -1589,6 +1984,54 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
     cx1 = max(b[2] for b in bounds)
     cy1 = max(b[3] for b in bounds)
 
+    # Swimlanes: named bands of rows across the whole width, the horizontal twin
+    # of a roadmap's phases. They are laid out against the drawing so far, and
+    # before the ruler, so the ruler reaches over them as it does over stations.
+    lane_group = lane_css = ""
+    tl_early = spec_timeline(spec)
+    lanes = [ln for ln in (spec.get("swimlanes") or []) if isinstance(ln, dict)
+             and isinstance(ln.get("rows"), list) and len(ln["rows"]) == 2
+             and all(isinstance(r, (int, float)) and not isinstance(r, bool)
+                     for r in ln["rows"])]
+    if lanes:
+        left = min(cx0, 0.0) if tl_early else cx0
+        right = max(cx1, tl_early.columns * s.cell) if tl_early else cx1
+        bands, gutter = [], 0.0
+        for k, lane in enumerate(lanes):
+            a, b = sorted(float(r) for r in lane["rows"])
+            y0, y1 = (a - 0.5) * s.cell, (b + 0.5) * s.cell
+            name = (lane.get("name") or "").strip()
+            tint = f' style="--lc: {lane["color"]}"' if isinstance(lane.get("color"), str) \
+                and HEX_RE.match(lane.get("color") or "") else ""
+            cls = f"lane lane{k}" + (" alt" if k % 2 else "") + (" tinted" if tint else "")
+            bands.append(f'    <g class="{cls}"{tint}>'
+                         f'<rect x="{left:.1f}" y="{y0:.1f}" width="{right - left:.1f}" '
+                         f'height="{y1 - y0:.1f}"><title>{esc(name)}</title></rect>'
+                         f'<line class="lane-rule" x1="{left:.1f}" y1="{y1:.1f}" '
+                         f'x2="{right:.1f}" y2="{y1:.1f}"/>')
+            if name:
+                width = len(name) * s.zone_label_size * 0.66 + s.zone_label_size
+                gutter = max(gutter, width)
+                bands.append(f'<text class="lane-name" x="{left - s.zone_label_size * 0.8:.1f}" '
+                             f'y="{(y0 + y1) / 2 + s.zone_label_size * 0.36:.1f}" '
+                             f'text-anchor="end">{esc(name)}</text>')
+            bands.append("</g>")
+            cy0, cy1 = min(cy0, y0), max(cy1, y1)
+        cx0 = left - gutter
+        cx1 = right
+        lane_css = f"""    .lane rect {{ fill: var(--lc, var(--ink)); opacity: .045; }}
+    .lane.alt rect {{ opacity: .015; }}
+    .lane.tinted rect {{ opacity: .09; }}
+    .lane-rule {{ stroke: var(--lc, var(--ink)); stroke-width: 1; opacity: .18; }}
+    .lane-name {{ font-family: {s.font}; font-size: {s.zone_label_size}px; font-weight: 700;
+                 letter-spacing: .09em; text-transform: uppercase;
+                 fill: var(--lc, var(--ink)); opacity: .6; }}
+"""
+        lane_group = f"""  <g id="swimlanes">
+{chr(10).join(bands)}
+  </g>
+"""
+
     # the ruler spans its whole declared range, whether or not a station reaches
     # the far end, and its header is stacked above everything else
     timeline_group = timeline_css = ""
@@ -1733,6 +2176,9 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
         [f"      .l{i} {{ stroke: {lighten(ln['color'])}; }}" for i, ln in enumerate(m.lines)]
         + [f"      .z{i} {{ --zc: {lighten(zn['color'])}; }}"
            for i, zn in enumerate(spec.get("zones", []) or [])]
+        + [f"      .lane{k} {{ --lc: {lighten(ln['color'])}; }}"
+           for k, ln in enumerate(lanes) if isinstance(ln.get("color"), str)
+           and HEX_RE.match(ln.get("color") or "")]
     )
 
     # "auto" ships both palettes behind a media query — the default, and what an
@@ -1786,13 +2232,13 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
                  stroke-width: 2; stroke-dasharray: 7 6; opacity: .9; }}
 {open_zone_css}    .zone-label {{ font-family: {s.font}; font-size: {s.zone_label_size}px; font-weight: 700;
                   letter-spacing: .09em; text-transform: uppercase; fill: var(--zc); }}
-{timeline_css}    .stop {{ fill: var(--paper); stroke-width: {s.stop_ring}; }}
+{timeline_css}{lane_css}    .stop {{ fill: var(--paper); stroke-width: {s.stop_ring}; }}
     .interchange {{ fill: var(--paper); stroke: var(--ink); stroke-width: {s.stop_ring}; }}
     .capsule {{ fill: var(--paper); stroke: var(--ink); stroke-width: {s.stop_ring};
                stroke-linejoin: round; }}
     .label {{ font-family: {s.font}; font-size: {s.label_size}px; font-weight: 600; fill: var(--ink); }}
 {note_css}{traveller_css}{legend_css}{theme_block}  </style>
-{timeline_group}{zone_group}  <g id="routes">
+{timeline_group}{lane_group}{zone_group}  <g id="routes">
 {chr(10).join(routes)}
   </g>
 {junction_group}{note_group}  <g id="stations">
@@ -1817,7 +2263,7 @@ MODES = ("metro", "roadmap")
 # apart later; a file without it predates the stamp, which is unambiguous only
 # because the stamping started before any migration was needed. Raise this when
 # a change cannot be read by the old code, and add the step to migrate().
-SPEC_FORMAT = 2
+SPEC_FORMAT = 3
 
 
 def spec_format(spec: dict) -> int:
@@ -1854,6 +2300,14 @@ def needs_format(spec: dict) -> int:
     actually having a junction or a branch — which an older renderer would drop
     silently, drawing a different network and saying nothing.
     """
+    # Format 3: swimlanes, and rides routed from a start to an end. An older
+    # renderer would draw neither — no bands, and no traveller for a ride that
+    # lists no stops of its own.
+    if spec.get("swimlanes"):
+        return 3
+    if any(isinstance(sc, dict) and is_routed_ride(sc)
+           for sc in spec.get("scenarios") or []):
+        return 3
     if spec.get("junctions"):
         return 2
     for ln in spec.get("lines") or []:
@@ -2069,6 +2523,10 @@ def validate_spec(spec: object) -> List[str]:
         if secs is not None and (not isinstance(secs, (int, float))
                                  or isinstance(secs, bool) or not 0 < secs <= 600):
             errors.append(f"{where}: duration must be seconds between 0 and 600")
+        if is_routed_ride(sc):
+            errors.extend(ride_field_errors(sc, where, stations, junctions,
+                                            spec.get("lines") or []))
+            continue
         route = sc.get("stations")
         if not isinstance(route, list):
             errors.append(f"{where}: stations must be a list of ids")
@@ -2076,6 +2534,30 @@ def validate_spec(spec: object) -> List[str]:
         for sid in route:
             if sid not in stations:
                 errors.append(f"{where}: unknown station '{sid}'")
+
+    lanes = spec.get("swimlanes", []) or []
+    if not isinstance(lanes, list):
+        errors.append("spec.swimlanes must be a list")
+        lanes = []
+    for i, lane in enumerate(lanes, 1):
+        where = f"swimlane {i}"
+        if not isinstance(lane, dict):
+            errors.append(f"{where}: must be an object")
+            continue
+        where = f"swimlane {i} ('{lane.get('name', '')}')"
+        if not isinstance(lane.get("name"), str) or not lane["name"].strip():
+            errors.append(f"{where}: needs a non-empty name")
+        rows = lane.get("rows")
+        if not (isinstance(rows, list) and len(rows) == 2
+                and all(isinstance(r, (int, float)) and not isinstance(r, bool) for r in rows)):
+            errors.append(f"{where}: rows must be [first row, last row], two numbers")
+        elif rows[0] > rows[1]:
+            errors.append(f"{where}: its first row {rows[0]} comes after its last "
+                          f"row {rows[1]}")
+        if lane.get("color") is not None and (not isinstance(lane["color"], str)
+                                              or not HEX_RE.match(lane["color"])):
+            errors.append(f"{where}: colour must be #rrggbb")
+        errors.extend(origin_errors(lane, where))
 
     lines = spec.get("lines")
     if not isinstance(lines, list):
@@ -2239,8 +2721,34 @@ def spec_warnings(spec: dict) -> List[str]:
         out.append("phases are placed by date, so they only draw on a roadmap — "
                    "set mode to roadmap and give it a timeline")
 
+    routed = [(i, sc) for i, sc in enumerate(spec.get("scenarios", []) or [], 1)
+              if isinstance(sc, dict) and is_routed_ride(sc)]
+    if routed:
+        try:
+            rider = Map(spec, Style())
+        except (KeyError, TypeError, ValueError):
+            rider = None
+        for i, sc in routed:
+            for problem in (rider.ride(sc)["problems"] if rider else []):
+                out.append(f"scenario {i} ('{sc.get('name', '')}'): {problem}")
+
+    lanes = [ln for ln in spec.get("swimlanes") or [] if isinstance(ln, dict)
+             and isinstance(ln.get("rows"), list) and len(ln["rows"]) == 2]
+    for a_i, a in enumerate(lanes):
+        for b in lanes[a_i + 1:]:
+            if a["rows"][0] <= b["rows"][1] and b["rows"][0] <= a["rows"][1]:
+                out.append(f"swimlanes '{a.get('name')}' and '{b.get('name')}' overlap")
+    if lanes:
+        outside = [sid for sid, st in (spec.get("stations") or {}).items()
+                   if isinstance(st, dict) and isinstance(st.get("gy"), (int, float))
+                   and not any(ln["rows"][0] - 0.5 <= st["gy"] <= ln["rows"][1] + 0.5
+                               for ln in lanes)]
+        if outside:
+            out.append(f"{len(outside)} station(s) sit outside every swimlane: "
+                       + ", ".join(outside[:5]) + (" …" if len(outside) > 5 else ""))
+
     for i, sc in enumerate(spec.get("scenarios", []) or [], 1):
-        if not isinstance(sc, dict):
+        if not isinstance(sc, dict) or is_routed_ride(sc):
             continue
         route = sc.get("stations") or []
         name = sc.get("name", "")

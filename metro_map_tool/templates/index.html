@@ -51,6 +51,7 @@
       <button class="tab is-on" data-tab="stations">Stations</button>
       <button class="tab" data-tab="lines">Lines</button>
       <button class="tab" data-tab="zones">Zones</button>
+      <button class="tab" data-tab="lanes">Lanes</button>
       <button class="tab" data-tab="joins">Joins</button>
       <button class="tab" data-tab="scenarios">Rides</button>
       <button class="tab" data-tab="timeline" hidden>Time</button>
@@ -92,6 +93,15 @@
       <ul id="zone-list" class="list"></ul>
     </section>
 
+    <section class="pane" data-pane="lanes">
+      <div class="pane-head">
+        <h2>Swimlanes</h2>
+        <button id="btn-add-lane" class="primary">+ Add</button>
+      </div>
+      <p class="note">A named band of rows across the whole map, one for each key area. A station belongs to the lane its row falls in, so dragging it into another band moves it there. Pick a lane, then click a station to stretch the lane over its row, or fit the lane to a line.</p>
+      <ul id="lane-list" class="list"></ul>
+    </section>
+
     <section class="pane" data-pane="joins">
       <div class="pane-head">
         <h2>Joins</h2>
@@ -108,10 +118,11 @@
         <span class="ride-controls">
           <button id="btn-ride-play" title="pause or resume the travellers">⏸ Pause</button>
           <button id="btn-ride-restart" title="send them back to the start">↻</button>
+          <button id="btn-ride-show" title="show or hide every traveller on the canvas (not saved)">👁</button>
         </span>
         <button id="btn-add-scenario" class="primary">+ Add</button>
       </div>
-      <p class="note">A traveller's route from start to end. It rides the drawn track and changes line wherever the journey does, so every pair of stops needs a line between them. <b>Rides play as soon as they have a route</b> — the buttons above only pause and rewind them.</p>
+      <p class="note">A traveller's journey: pick where it starts and ends — a station, a junction, or where a line runs off the map — and the track decides the way, changing line where it has to. Add a via to send it down a particular branch, and mark stops to ride straight through. <b>▶ Navigate</b> follows one ride like a satnav.</p>
       <ul id="scenario-list" class="list"></ul>
     </section>
 
@@ -131,6 +142,7 @@
   <section class="stage">
     <div id="canvas" class="canvas"></div>
     <div id="empty" class="empty">Add a station to start drawing.</div>
+    <div id="navboard" class="navboard" hidden></div>
     <div id="lockbar" class="live lockbar" hidden></div>
     <div id="live" class="live" hidden></div>
     <div id="problems" class="problems" hidden></div>
