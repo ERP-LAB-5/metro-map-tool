@@ -1,6 +1,6 @@
 # metro-map-tool
 
-**v3.5.1** · GPL-3.0 · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
+**v3.5.2** · GPL-3.0 · [releases](https://github.com/ERP-LAB-5/metro-map-tool/releases)
 
 Transit-map diagrams for landscapes, pipelines and migrations: a JSON spec of
 **stations** on a grid, **lines** routed through them and **zones** banding
@@ -172,8 +172,8 @@ If it saves you an afternoon, [buy me a coffee](https://www.buymeacoffee.com/dla
 with Windows 10 and later, and with every Linux and macOS:
 
 ```bash
-curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v3.5.1.tar.gz | tar xz
-cd metro-map-tool-3.5.1
+curl -L https://github.com/ERP-LAB-5/metro-map-tool/archive/refs/tags/v3.5.2.tar.gz | tar xz
+cd metro-map-tool-3.5.2
 ./run.sh                 # or run.cmd on Windows
 ```
 
@@ -181,7 +181,7 @@ cd metro-map-tool-3.5.1
 commands on your PATH in their own virtual environment:
 
 ```bash
-pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v3.5.1
+pipx install git+https://github.com/ERP-LAB-5/metro-map-tool@v3.5.2
 metro-map-designer                    # the browser designer
 metro-map spec.json -o map.svg        # the renderer
 metro-map-mcp                         # the MCP server, for agents
@@ -228,13 +228,13 @@ into the new version only if the install actually succeeded.
 
 ```bash
 # name the new tag — the dependable form
-pip install --upgrade git+https://github.com/ERP-LAB-5/metro-map-tool@v3.5.1
+pip install --upgrade git+https://github.com/ERP-LAB-5/metro-map-tool@v3.5.2
 
 # or drop the tag to track the default branch and always get the newest
 pip install --upgrade git+https://github.com/ERP-LAB-5/metro-map-tool
 ```
 
-`--upgrade` on its own will not move you if you pinned a tag: `@v3.5.1` means
+`--upgrade` on its own will not move you if you pinned a tag: `@v3.5.2` means
 that commit for good, so re-running it reinstalls the same version. Change the
 tag, or leave it off.
 
@@ -242,7 +242,7 @@ With pipx, `pipx upgrade` re-runs whatever spec you first installed and has the
 same pinned-tag problem, so name the tag and force it:
 
 ```bash
-pipx install --force git+https://github.com/ERP-LAB-5/metro-map-tool@v3.5.1
+pipx install --force git+https://github.com/ERP-LAB-5/metro-map-tool@v3.5.2
 ```
 
 **After any update**, if you use the agent skill, refresh your copy — it is a
