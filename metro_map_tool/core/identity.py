@@ -34,7 +34,7 @@ DEFAULT_PORT = 8765
 # a commit suffix ("v0.4.0-2-g1a2b3c4") was rendered from an unreleased commit.
 TEMPLATE_NAME = "python-tool-template"
 TEMPLATE_URL = "https://github.com/ERP-LAB-5/python-tool-template"
-TEMPLATE_VERSION = "v0.4.0-1-g8bc8146"
+TEMPLATE_VERSION = "v0.4.1"
 
 CLI_COMMAND = "metro-map"
 CLI_MODULE = "metro_map"

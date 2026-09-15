@@ -1,5 +1,5 @@
 # Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
-_commit: v0.4.0-1-g8bc8146
+_commit: v0.4.1
 _src_path: gh:ERP-LAB-5/python-tool-template
 author: ERP-LAB-5
 cli_command: metro-map
