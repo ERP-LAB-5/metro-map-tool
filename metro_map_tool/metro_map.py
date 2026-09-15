@@ -3003,6 +3003,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                     version=f"metro-map-tool {__version__}")
     ap.add_argument("--auto-interchange", action="store_true",
                     help="flag every stop shared by two or more lines as an interchange")
+    ap.add_argument("--lane", action="append", metavar="NAME",
+                    help="draw only this swimlane (repeat for more; default: all)")
+    ap.add_argument("--phase", action="append", metavar="NAME",
+                    help="draw only this phase of a roadmap (repeat for more; default: all)")
     args = ap.parse_args(argv)
 
     # --from-git is the original spelling and stays exactly as short. The legacy
@@ -3056,6 +3060,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         for e in errors:
             print(f"  ! {e}", file=sys.stderr)
         return 2
+
+    if args.lane is not None or args.phase is not None:
+        from .cut import cut
+        try:
+            spec = cut(spec, args.lane, args.phase)
+        except ValueError as exc:
+            for e in str(exc).split("; "):
+                print(f"  ! {e}", file=sys.stderr)
+            return 2
 
     if args.auto_interchange:
         auto_interchanges(spec)

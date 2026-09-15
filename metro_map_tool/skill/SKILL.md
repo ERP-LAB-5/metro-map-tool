@@ -293,7 +293,7 @@ The `metro-map` server (`.mcp.json` in the repo) starts the designer on demand.
 | `read_map(name, folder="")` | the whole spec, to edit; empty folder searches mymaps then shared |
 | `save_map(name, spec, folder="", replace=False)` | write it back — validates first, refuses a spec that will not draw, and refuses to replace a map changed since you read it; an empty folder updates the map where it already lives |
 | `validate_map(spec)` | check before saving; returns `errors` (fatal) and `warnings` (a line with one stop, an empty zone, a station on no line) |
-| `render_map(name, out_path=…)` | write the SVG to a file; pass `out_path` rather than pulling markup through the transcript |
+| `render_map(name, out_path=…, swimlanes=None, phases=None)` | write the SVG to a file; pass `out_path` rather than pulling markup through the transcript. `swimlanes` / `phases` (lists of names) draw only those — the others close up, the saved map is untouched |
 | `resolve_timeline(timeline)` | a roadmap's columns: snapped start, count, and the gx, date and name of each — use it to place milestones on dates |
 | `spec_reference` | palette, label sides and angles, line states, modes, intervals, legend positions, style defaults |
 | `designer_url` | hand the human a link to take over in the browser |

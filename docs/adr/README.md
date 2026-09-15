@@ -25,6 +25,7 @@ status says so.
 | [0011](0011-swimlanes-and-rides-routed-by-the-track.md) | Swimlanes are row bands, and rides are routed by the track from a start to an end | Accepted | 2026-09-15 |
 | [0012](0012-navigation-is-a-designer-feature.md) | Navigation mode belongs to the designer, not to the SVG | Accepted | 2026-09-15 |
 | [0013](0013-archimate-import.md) | Read an ArchiMate implementation-and-migration model as a roadmap | Accepted | 2026-09-12 |
+| [0014](0014-a-cut-is-made-on-the-spec.md) | Exporting some swimlanes and phases cuts the spec, not the picture | Accepted | 2026-09-15 |
 
 ## Writing one
 

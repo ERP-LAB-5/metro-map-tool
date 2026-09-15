@@ -224,18 +224,27 @@ def delete_map(name: str, folder: str = "") -> dict:
 
 @server.tool()
 def render_map(name: str = "", spec: Optional[dict] = None,
-               out_path: str = "", folder: str = "") -> dict:
+               out_path: str = "", folder: str = "",
+               swimlanes: Optional[list[str]] = None,
+               phases: Optional[list[str]] = None) -> dict:
     """Render a saved map (by name) or a spec you pass, to SVG.
 
     Give out_path to write the SVG to a file and get the path back instead of
     the markup — better than carrying tens of kilobytes through the transcript.
+
+    swimlanes and phases cut the drawing down to those names (leave them out
+    for all): stations outside are dropped, the other lanes close up and the
+    ruler covers only the chosen phases. The saved map is not changed.
     """
     ensure_designer()
     if not spec:
         if not name:
             raise web.ToolError("pass either name or spec")
         spec = read_map(name, folder)
-    out = call("POST", "/api/render", {"spec": spec})
+    payload: dict[str, Any] = {"spec": spec}
+    if swimlanes is not None or phases is not None:
+        payload["cut"] = {"swimlanes": swimlanes, "phases": phases}
+    out = call("POST", "/api/render", payload)
     svg = out.get("svg", "")
     result: dict[str, Any] = {"warnings": out.get("warnings", []),
                               "bytes": len(svg)}

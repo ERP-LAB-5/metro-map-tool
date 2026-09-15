@@ -429,6 +429,8 @@ function fitToView() {
 }
 
 function zoomBy(factor, anchor) {
+  // while a ride is followed the camera owns the zoom: change what it aims for
+  if (NAV.ride !== null && NAV.follow) { navZoomTo(NAV.zoom * factor); return; }
   const box = $("#canvas").getBoundingClientRect();
   const ax = anchor ? anchor.x - box.left : box.width / 2;
   const ay = anchor ? anchor.y - box.top : box.height / 2;
@@ -526,7 +528,6 @@ function initCanvas() {
 
   canvas.addEventListener("wheel", (ev) => {
     ev.preventDefault();
-    if (NAV.ride !== null) NAV.follow = false;
     zoomBy(ev.deltaY < 0 ? 1.12 : 1 / 1.12, { x: ev.clientX, y: ev.clientY });
   }, { passive: false });
 }
@@ -2368,12 +2369,33 @@ function toggleShowRides() {
    motion: a path laid over the map, a dot moved along it, and the camera. It
    changes nothing in the map, so it runs just as well while an agent holds it. */
 
-const NAV = { ride: null, zoomPref: 2 };
+const NAV = { ride: null, zoomPref: 2, sideBefore: null, mini: navMiniStored() };
+const NAV_ZOOM = { min: 0.5, max: 8 };
 const NAV_NS = "http://www.w3.org/2000/svg";
 const NAV_VOICE_KEY = "metro-map.nav-voice";
+const NAV_MINI_KEY = "metro-map.nav-mini";
 const reducedMotion = () => window.matchMedia
   && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
+function navMiniStored() {
+  try { return localStorage.getItem("metro-map.nav-mini") === "1"; } catch (_) { return false; }
+}
+
+/** Set the navigation zoom and keep following; the slider shows it however it changed. */
+function navZoomTo(z) {
+  NAV.zoom = NAV.zoomPref = Math.min(NAV_ZOOM.max, Math.max(NAV_ZOOM.min, z));
+  NAV.follow = true;
+  const slider = $("#nav-zoom");
+  if (slider && Number(slider.value) !== NAV.zoom) slider.value = NAV.zoom;
+}
+
+function navToggleMini() {
+  if (NAV.ride === null) return;
+  NAV.mini = !NAV.mini;
+  try { localStorage.setItem(NAV_MINI_KEY, NAV.mini ? "1" : "0"); } catch (_) { /* none */ }
+  renderNavBoard(true);
+}
 
 function navVoiceStored() {
   try { return localStorage.getItem(NAV_VOICE_KEY) === "1"; } catch (_) { return false; }
@@ -2399,7 +2421,12 @@ function navAnchors(report) {
 function navStart(i) {
   const report = rideReport(i);
   if (!report || !report.d) return;
-  navStop({ quiet: true });
+  // the side panel folds away for the ride and comes back as it was; a switch
+  // from one ride to another keeps it folded rather than flashing it back
+  const sideBefore = NAV.ride !== null ? NAV.sideBefore : S.sideHidden;
+  navStop({ quiet: true, keepSide: true });
+  NAV.sideBefore = sideBefore;
+  applySide(true, { remember: false });
   Object.assign(NAV, {
     ride: i, name: report.name, report, anchors: navAnchors(report),
     playing: true, speed: 1, zoom: NAV.zoomPref, follow: true, voice: navVoiceStored(),
@@ -2415,8 +2442,15 @@ function navStart(i) {
   setHint();
 }
 
-function navStop({ quiet = false } = {}) {
+function navStop({ quiet = false, keepSide = false } = {}) {
   if (NAV.ride === null) return;
+  if (!keepSide && NAV.sideBefore !== null && NAV.sideBefore !== undefined) {
+    // an agent's lock that came mid-ride keeps the panel folded; it restores
+    // what was there before the ride when it lets go
+    if (S.locked) S.sideBeforeLock = NAV.sideBefore;
+    else applySide(NAV.sideBefore, { remember: false });
+    NAV.sideBefore = null;
+  }
   cancelAnimationFrame(NAV.raf);
   const svg = svgEl();
   if (svg) {
@@ -2688,7 +2722,7 @@ function renderNavBoard(full = false) {
   const here = NAV.phase === "dwell" && NAV.anchors[NAV.k].stop !== null
     ? r.stops[NAV.anchors[NAV.k].stop] : null;
   const next = navNextStop();
-  const key = [NAV.k, NAV.phase, NAV.done, NAV.playing, NAV.follow, NAV.voice, NAV.speed,
+  const key = [NAV.k, NAV.phase, NAV.done, NAV.playing, NAV.follow, NAV.voice, NAV.speed, NAV.mini,
                Math.ceil(navSecondsTo(next))].join("|");
   if (!full && key === NAV.boardKey) return;
   NAV.boardKey = key;
@@ -2700,10 +2734,15 @@ function renderNavBoard(full = false) {
   const when = stopDate(NAV.done ? here : next);
   if (full || !board.firstChild) {
     board.hidden = false;
+    board.classList.toggle("mini", !!NAV.mini);
     board.innerHTML = `
       <div class="nav-head">
         <span class="swatch" style="background:${esc(r.color)}"></span>
         <b class="grow">${esc(r.name)}</b>
+        <button type="button" class="ghost nav-mini-play" id="nav-mini-play" title="pause or play (Space)"></button>
+        <button type="button" class="ghost" id="nav-mini"
+                title="${NAV.mini ? "show the whole board (M)" : "shrink the board to one line (M)"}"
+                aria-expanded="${!NAV.mini}">${NAV.mini ? "▢" : "▁"}</button>
         <button type="button" class="ghost" id="nav-exit" title="stop navigating (Esc)">✕</button>
       </div>
       <div class="nav-now">
@@ -2721,19 +2760,19 @@ function renderNavBoard(full = false) {
         <button type="button" id="nav-next" title="next stop (→)">⏭</button>
         <select id="nav-speed" title="speed">${[0.5, 1, 2, 4].map((v) =>
           `<option value="${v}" ${v === NAV.speed ? "selected" : ""}>${v}×</option>`).join("")}</select>
-        <label title="zoom (+ −)">🔍<input type="range" id="nav-zoom" min="1.5" max="6" step="0.25" value="${NAV.zoom}"></label>
+        <label title="zoom (+ −)">🔍<input type="range" id="nav-zoom" min="${NAV_ZOOM.min}" max="${NAV_ZOOM.max}" step="0.05" value="${NAV.zoom}"></label>
         <label title="seconds at each stop">⏱<input type="range" id="nav-wait" min="0" max="10" step="0.5" value="${navDwell()}"></label>
         <button type="button" id="nav-voice" title="spoken announcements"></button>
         <button type="button" id="nav-follow" hidden title="follow the traveller again">◎ Re-centre</button>
       </div>`;
     $("#nav-exit").addEventListener("click", () => navStop());
+    $("#nav-mini").addEventListener("click", navToggleMini);
+    $("#nav-mini-play").addEventListener("click", navTogglePlay);
     $("#nav-prev").addEventListener("click", () => navStep(-1));
     $("#nav-next").addEventListener("click", () => navStep(1));
     $("#nav-play").addEventListener("click", navTogglePlay);
     $("#nav-speed").addEventListener("change", (ev) => { NAV.speed = Number(ev.target.value); });
-    $("#nav-zoom").addEventListener("input", (ev) => {
-      NAV.zoom = NAV.zoomPref = Number(ev.target.value); NAV.follow = true;
-    });
+    $("#nav-zoom").addEventListener("input", (ev) => navZoomTo(Number(ev.target.value)));
     $("#nav-wait").addEventListener("input", (ev) => { NAV.dwellOverride = Number(ev.target.value); });
     $("#nav-voice").addEventListener("click", () => {
       NAV.voice = !NAV.voice;
@@ -2760,6 +2799,7 @@ function renderNavBoard(full = false) {
   ch.hidden = !change;
   ch.textContent = change ? `Change here for ${change}` : "";
   $("#nav-play").textContent = NAV.done ? "↻" : NAV.playing ? "⏸" : "▶";
+  $("#nav-mini-play").textContent = $("#nav-play").textContent;
   $("#nav-voice").textContent = NAV.voice ? "🔈" : "🔇";
   $("#nav-follow").hidden = NAV.follow;
   board.querySelectorAll("[data-stop]").forEach((btn, k) => {
@@ -3844,11 +3884,60 @@ async function saveMap(name, folder) {
   }
 }
 
-async function exportSVG() {
+/** The swimlane and phase names a map can be cut to, for the export dialog. */
+function cutChoices() {
+  const named = (items) => (items || []).map((it) => (it && it.name || "").trim()).filter(Boolean);
+  return { swimlanes: named(S.spec.swimlanes), phases: isRoadmap() ? named(S.spec.phases) : [] };
+}
+
+/** Export SVG: straight away, or first ask which swimlanes and phases go in. */
+function exportSVG() {
   if (!Object.keys(S.spec.stations).length) {
     showProblems(["nothing rendered to export yet"]);
     return;
   }
+  const choices = cutChoices();
+  if (!choices.swimlanes.length && !choices.phases.length) { downloadSVG(null); return; }
+  const group = (key, title, list) => !list.length ? "" : `
+    <fieldset class="cut-group" data-cut="${key}">
+      <legend>${esc(title)}</legend>
+      <label class="cut-all"><input type="checkbox" data-all checked> All</label>
+      ${list.map((n) => `<label><input type="checkbox" data-name="${esc(n)}" checked> ${esc(n)}</label>`).join("")}
+    </fieldset>`;
+  dialog("Export SVG", `
+    <p class="note">The file holds only what is ticked. Stations outside are left out, the other
+      lanes close up and the ruler covers just the phases chosen. The map itself is not changed.</p>
+    ${group("swimlanes", "Swimlanes", choices.swimlanes)}
+    ${group("phases", "Phases", choices.phases)}
+    <div class="actions"><button value="cancel">Cancel</button>
+      <button type="button" class="primary" id="cut-go">Export</button></div>`, (form, dlg) => {
+    form.querySelectorAll("[data-cut]").forEach((fs) => {
+      const all = fs.querySelector("[data-all]");
+      const each = [...fs.querySelectorAll("[data-name]")];
+      all.addEventListener("change", () => each.forEach((box) => { box.checked = all.checked; }));
+      each.forEach((box) => box.addEventListener("change", () => {
+        all.checked = each.every((b) => b.checked);
+        all.indeterminate = !all.checked && each.some((b) => b.checked);
+      }));
+    });
+    form.querySelector("#cut-go").addEventListener("click", async () => {
+      const part = {};
+      for (const fs of form.querySelectorAll("[data-cut]")) {
+        const each = [...fs.querySelectorAll("[data-name]")];
+        const picked = each.filter((b) => b.checked).map((b) => b.dataset.name);
+        if (!picked.length) {
+          showProblems([`choose at least one of the ${fs.dataset.cut}`]);
+          return;
+        }
+        if (picked.length < each.length) part[fs.dataset.cut] = picked;   // all is no cut
+      }
+      dlg.close();
+      await downloadSVG(Object.keys(part).length ? part : null);
+    });
+  });
+}
+
+async function downloadSVG(part) {
   // Re-render rather than reuse the preview: the preview is baked to whatever
   // theme the toolbar is showing, and a file that leaves here has to keep both
   // palettes so it suits whoever opens it.
@@ -3856,6 +3945,7 @@ async function exportSVG() {
   try {
     const data = await api("POST", "/api/render", {
       spec: S.spec, style: S.style, auto_interchange: S.autoIx, theme: "auto",
+      ...(part ? { cut: part } : {}),
     });
     svg = data.svg;
   } catch (err) { showProblems(err.errors); return; }
@@ -3864,7 +3954,9 @@ async function exportSVG() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${S.name || "map"}.svg`;
+  const suffix = part ? "-" + [...(part.swimlanes || []), ...(part.phases || [])]
+    .join("-").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") : "";
+  a.download = `${S.name || "map"}${suffix}.svg`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -4086,9 +4178,10 @@ function initKeys() {
       const act = {
         " ": navTogglePlay, ArrowLeft: () => navStep(-1), ArrowRight: () => navStep(1),
         Escape: () => navStop(),
-        "+": () => { NAV.zoom = NAV.zoomPref = Math.min(6, NAV.zoom + 0.5); NAV.follow = true; },
-        "=": () => { NAV.zoom = NAV.zoomPref = Math.min(6, NAV.zoom + 0.5); NAV.follow = true; },
-        "-": () => { NAV.zoom = NAV.zoomPref = Math.max(1.5, NAV.zoom - 0.5); NAV.follow = true; },
+        "+": () => navZoomTo(NAV.zoom * 1.25),
+        "=": () => navZoomTo(NAV.zoom * 1.25),
+        "-": () => navZoomTo(NAV.zoom / 1.25),
+        m: navToggleMini, M: navToggleMini,
       }[ev.key];
       if (act) { ev.preventDefault(); act(); return; }
     }

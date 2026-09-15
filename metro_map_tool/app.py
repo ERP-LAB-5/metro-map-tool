@@ -41,6 +41,7 @@ from typing import Dict, Optional, Tuple
 
 from flask import Response, abort, jsonify, render_template, request
 
+from . import cut as cutting
 from . import metro_map as mm
 from .core import server
 from .core import services
@@ -397,6 +398,15 @@ def render_map():
     errors = mm.validate_spec(spec)
     if errors:
         return jsonify({"errors": errors}), 400
+    # an export of some swimlanes or phases: the cut is a copy, never the map
+    part = data.get("cut")
+    if part:
+        if not isinstance(part, dict):
+            return jsonify({"errors": ["cut must be an object"]}), 400
+        try:
+            spec = cutting.cut(spec, part.get("swimlanes"), part.get("phases"))
+        except ValueError as exc:
+            return jsonify({"errors": str(exc).split("; ")}), 400
     changed = mm.auto_interchanges(spec) if data.get("auto_interchange", True) else 0
     # the resolved ruler, so the browser can name dates without redoing the
     # maths. It rides on the empty answer too: a roadmap with no stations yet

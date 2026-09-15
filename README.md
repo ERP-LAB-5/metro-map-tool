@@ -103,10 +103,18 @@ meeting again at the saved file. After that it reopens whatever you had last.
   setting.
 - **▶ Navigate** follows one ride like a satnav: the camera stays with the
   traveller, a board shows the next stop, the date on a roadmap and where to
-  change, and a strip shows the whole journey. Space pauses, ← → go to the
-  previous and next stop, + − zoom, Esc stops; drag the map to look around and
-  **Re-centre** to follow again. Spoken announcements are one button away.
-  Only one ride is followed at a time; the others keep moving.
+  change, and a strip shows the whole journey. The side panel folds away while
+  you ride and comes back when you stop. Space pauses, ← → go to the previous
+  and next stop, + − (or the mouse wheel, or the zoom slider) zoom without losing
+  the traveller, M shrinks the board to one line and back, Esc stops; drag the
+  map to look around and **Re-centre** to follow again. Spoken announcements
+  are one button away. Only one ride is followed at a time; the others keep
+  moving.
+- **Export SVG** on a map with swimlanes or phases asks which of them go in the
+  file — all, by default. Untick some and the file holds only the rest: stations
+  outside are left out, the other lanes close up, the ruler covers just the
+  chosen phases, and a line cut short runs on past the edge. The map you are
+  editing is not changed.
 - **Search** sits above every long list — stations, lines, zones, rides and the
   pick lists in their editors — and filters as you type.
 - **Notes between stops** (Lines tab, *Between stops*) put a short label on the
@@ -529,12 +537,15 @@ metro-map spec.json -o map.svg
 metro-map spec.json --cell 140 -o big.svg
 metro-map spec.json --legend hide -o plain.svg      # or top/left/right
 cat spec.json | metro-map - > map.svg
+metro-map plan.json --lane Delivery --phase "Wave 1" -o part.svg   # some lanes/phases only
 
 # from a checkout, without installing
 python3 -m metro_map_tool.metro_map spec.json -o map.svg
 ```
 
-Flags override the `style` block saved in the spec. A spec that would not draw
+Flags override the `style` block saved in the spec. `--lane` and `--phase`
+(each repeatable) cut the drawing down to those swimlanes and phases, the way
+the designer's export does. A spec that would not draw
 is reported line by line and exits 2, so it fails loudly in CI.
 
 Command-line renders always carry both palettes, so an SVG follows the reader's
