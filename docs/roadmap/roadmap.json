@@ -1,0 +1,239 @@
+{
+  "interchanges": [
+    {
+      "stations": [
+        "p0_1",
+        "s0_1"
+      ]
+    },
+    {
+      "stations": [
+        "t3_4_0",
+        "p0_3",
+        "s0_2"
+      ]
+    },
+    {
+      "stations": [
+        "t3_4_2",
+        "p0_4"
+      ]
+    }
+  ],
+  "legend": "bottom",
+  "lines": [
+    {
+      "color": "#0098d4",
+      "name": "metro-map-tool",
+      "stations": [
+        "t1_0",
+        "t2_5",
+        "t2_6",
+        "t2_14",
+        "t2_17",
+        "t3_0",
+        "t3_4_0",
+        "t3_4_2",
+        "t3_5_0",
+        "t3_5_2"
+      ]
+    },
+    {
+      "color": "#0098d4",
+      "continues": "end",
+      "name": "Next station",
+      "onward": {
+        "end": "see PARKING-LOT.md"
+      },
+      "stations": [
+        "t3_5_2",
+        "t3_6"
+      ],
+      "status": "planned"
+    },
+    {
+      "color": "#7b3fb5",
+      "name": "python-tool-template",
+      "stations": [
+        "p0_1",
+        "p0_3",
+        "p0_4"
+      ]
+    },
+    {
+      "color": "#00a4a7",
+      "continues": "end",
+      "name": "sap-di-tools",
+      "onward": {
+        "end": "on template v0.3.0"
+      },
+      "stations": [
+        "s0_0",
+        "s0_1",
+        "s0_2"
+      ]
+    }
+  ],
+  "mode": "roadmap",
+  "stations": {
+    "p0_1": {
+      "gx": 11.5,
+      "gy": 4,
+      "label": "v0.1",
+      "label_angle": 0,
+      "label_at": "above"
+    },
+    "p0_3": {
+      "gx": 12.5,
+      "gy": 4,
+      "label": "v0.3.0",
+      "label_angle": 0,
+      "label_at": "above-right"
+    },
+    "p0_4": {
+      "gx": 15.15,
+      "gy": 4,
+      "label": "v0.4.1",
+      "label_angle": 0,
+      "label_at": "below"
+    },
+    "s0_0": {
+      "gx": 10.5,
+      "gy": 7,
+      "label": "first tool",
+      "label_angle": 0,
+      "label_at": "below"
+    },
+    "s0_1": {
+      "gx": 11.5,
+      "gy": 7,
+      "label": "0.1.0",
+      "label_angle": 0,
+      "label_at": "below"
+    },
+    "s0_2": {
+      "gx": 12.5,
+      "gy": 7,
+      "label": "0.2.0",
+      "label_angle": 0,
+      "label_at": "below"
+    },
+    "t1_0": {
+      "gx": 2.5,
+      "gy": 1,
+      "label": "1.0 designer \u00b7 MCP",
+      "label_angle": 45,
+      "label_at": "above"
+    },
+    "t2_14": {
+      "gx": 4.5,
+      "gy": 1,
+      "label": "2.14 format stamp \u00b7 GPL",
+      "label_angle": 45,
+      "label_at": "above"
+    },
+    "t2_17": {
+      "gx": 4.85,
+      "gy": 1,
+      "label": "2.17 git history import",
+      "label_angle": 45,
+      "label_at": "above"
+    },
+    "t2_5": {
+      "gx": 3.5,
+      "gy": 1,
+      "label": "2.5 About \u00b7 legend",
+      "label_angle": 45,
+      "label_at": "above"
+    },
+    "t2_6": {
+      "gx": 4.15,
+      "gy": 1,
+      "label": "2.6 rides \u00b7 dead ends",
+      "label_angle": 45,
+      "label_at": "above"
+    },
+    "t3_0": {
+      "gx": 5.5,
+      "gy": 1,
+      "label": "3.0 importers \u00b7 Jira",
+      "label_angle": 45,
+      "label_at": "above"
+    },
+    "t3_4_0": {
+      "gx": 12.5,
+      "gy": 1,
+      "label": "3.4.0 Jira keys \u00b7 ArchiMate",
+      "label_angle": 45,
+      "label_at": "above"
+    },
+    "t3_4_2": {
+      "gx": 15.15,
+      "gy": 1,
+      "label": "3.4.2 About status \u00b7 agent lock",
+      "label_angle": 45,
+      "label_at": "above"
+    },
+    "t3_5_0": {
+      "gx": 15.5,
+      "gy": 1,
+      "label": "3.5.0 lanes \u00b7 rides \u00b7 navigation",
+      "label_angle": 45,
+      "label_at": "above"
+    },
+    "t3_5_2": {
+      "gx": 15.85,
+      "gy": 1,
+      "label": "3.5.2 bubbles",
+      "label_angle": 45,
+      "label_at": "above"
+    },
+    "t3_6": {
+      "gx": 29.5,
+      "gy": 1,
+      "label": "3.6 parking lot",
+      "label_angle": 45,
+      "label_at": "above"
+    }
+  },
+  "style": {
+    "bundle_gap": 11,
+    "cell": 80,
+    "corner": 16,
+    "label_size": 13,
+    "onward_reach": 0.5,
+    "stroke": 8,
+    "zone_pad": 24
+  },
+  "swimlanes": [
+    {
+      "color": "#0098d4",
+      "name": "metro-map-tool",
+      "rows": [
+        0,
+        2
+      ]
+    },
+    {
+      "color": "#7b3fb5",
+      "name": "python-tool-template",
+      "rows": [
+        3,
+        5
+      ]
+    },
+    {
+      "color": "#00a4a7",
+      "name": "sap-di-tools",
+      "rows": [
+        6,
+        8
+      ]
+    }
+  ],
+  "timeline": {
+    "end": "2026-10-04",
+    "interval": "day",
+    "start": "2026-08-31"
+  }
+}

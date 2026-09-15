@@ -153,6 +153,15 @@ meeting again at the saved file. After that it reopens whatever you had last.
 Any stop shared by two or more lines is drawn as a white interchange ring while
 the *interchanges* toggle is on.
 
+## Roadmap and decisions
+
+- [Roadmap](docs/roadmap/README.md): this tool, python-tool-template and
+  sap-di-tools on one map, drawn by this tool.
+- [Decisions](docs/adr/README.md): why it is built the way it is, with the
+  commits that did it.
+- [Next station](docs/specs/PARKING-LOT.md): what is parked, and how a release
+  gets scoped ([specs](docs/specs/README.md)).
+
 ## Licence and credits
 
 GPL-3.0-or-later. © 2026 D-LAB-5 — *Twin. Experiment. Automate.*
