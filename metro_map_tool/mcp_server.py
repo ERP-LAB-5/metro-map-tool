@@ -240,7 +240,9 @@ def render_map(name: str = "", spec: Optional[dict] = None,
     if not spec:
         if not name:
             raise web.ToolError("pass either name or spec")
-        spec = read_map(name, folder)
+        # fetched, not read_map: rendering is looking, so it neither locks the
+        # map in the person's designer nor counts as a read a save can build on
+        spec = call("GET", qualify(name, folder))["spec"]
     payload: dict[str, Any] = {"spec": spec}
     if swimlanes is not None or phases is not None:
         payload["cut"] = {"swimlanes": swimlanes, "phases": phases}

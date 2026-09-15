@@ -246,6 +246,18 @@ class SharedEditingTest(unittest.TestCase):
         self.assertIn("an agent is updating", str(caught.exception))
         self.assertEqual(self.label_on_disk(), "A")
 
+    def test_rendering_a_map_only_looks_at_it(self):
+        ms.save_map("plan", self.copy(MAP))
+        ms._seen.clear()                        # a new session, which has only looked
+        with mock.patch.object(self.designer.mm, "render", return_value="<svg/>"):
+            ms.render_map("plan")
+        self.assertIsNone(self.lock_on_disk())
+        self.person_saves("Still mine to edit", take_over=False)
+        self.assertEqual(self.label_on_disk(), "Still mine to edit")
+        with self.assertRaises(ValueError) as caught:    # looking is not reading
+            ms.save_map("plan", self.copy(MAP))
+        self.assertIn("has not been read", str(caught.exception))
+
     def test_the_agents_save_hands_the_map_back(self):
         ms.save_map("plan", self.copy(MAP))
         mine = ms.read_map("plan")

@@ -116,16 +116,3 @@ the bubble shows the date of the stop it is at.
 
 **What we would need to know.** Which date the board should show while waiting. Probably the
 current stop's date, with the next stop's date after "then".
-
-## render_map locks the map it only looks at
-
-**What.** The MCP `render_map(name=…)` reads the map through `read_map`, which takes the agent
-lock ([ADR 0002](../adr/0002-one-server-version-checked-saves-and-an-agent-lock.md)). The
-person's panel folds away for two minutes, although the tool's own guidance says render is only
-for looking.
-
-**Why parked.** Noticed while building 3.6.0; not part of its scope.
-
-**What we would need to know.** Nothing: read the map without the lock in `render_map`, and add
-a test. A candidate for the next patch.
-
