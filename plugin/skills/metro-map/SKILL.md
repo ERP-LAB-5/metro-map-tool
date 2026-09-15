@@ -266,7 +266,7 @@ The `metro-map` server (`.mcp.json` in the repo) starts the designer on demand.
 |---|---|
 | `list_maps` | what already exists, with each map's folder and mode |
 | `read_map(name, folder="")` | the whole spec, to edit; empty folder searches mymaps then shared |
-| `save_map(name, spec, folder="")` | write it back — validates first, refuses a spec that will not draw; an empty folder updates the map where it already lives |
+| `save_map(name, spec, folder="", replace=False)` | write it back — validates first, refuses a spec that will not draw, and refuses to replace a map changed since you read it; an empty folder updates the map where it already lives |
 | `validate_map(spec)` | check before saving; returns `errors` (fatal) and `warnings` (a line with one stop, an empty zone, a station on no line) |
 | `render_map(name, out_path=…)` | write the SVG to a file; pass `out_path` rather than pulling markup through the transcript |
 | `resolve_timeline(timeline)` | a roadmap's columns: snapped start, count, and the gx, date and name of each — use it to place milestones on dates |
@@ -287,9 +287,14 @@ no folder updates the map where it already lives, and creates a new one in
 `mymaps` — which is what you want almost every time. Name a folder only to move
 a map, or to put a new one in `shared` because it belongs to the repo.
 
-**Read immediately before you write.** Someone may have the same map open in the
-browser; `read_map` → edit → `save_map` keeps that window short. Saving a spec
-you read minutes ago silently drops whatever they did in between.
+**Read before you write — the save is checked.** Someone may have the same map
+open in the browser. `save_map` only replaces the version you last got from
+`read_map` (or from `import_map` with `into`, or your own previous save). If
+they saved in between, nothing is written and the error says so: `read_map`
+again, re-apply your change to what is there now, and save. Saving over a map
+you have not read in this session is refused the same way. `replace=True`
+skips the check — only when the user has asked for the map on disk to be
+thrown away, never to get past a refusal.
 
 ## Without MCP
 

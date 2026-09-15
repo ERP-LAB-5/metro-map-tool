@@ -405,11 +405,16 @@ def import_map():
         return jsonify({"errors": errors}), 400
 
     model = None
+    base = None
     into = data.get("into") or {}
     if into.get("name"):
         path, folder = find_map(into["name"], into.get("folder"))
-        if not path:
+        if not path.exists():
             abort(404, f"no map called '{into['name']}' to sync into")
+        # read together with the version it was read at: the result is built on
+        # this copy, so saving it must not replace a newer one somebody saved
+        # while the import ran — the caller passes it back as base_version
+        base = spec_version(path)
         model = read_spec(path)
 
     try:
@@ -424,9 +429,11 @@ def import_map():
                        refresh=opts.get("refresh") or list(src.refresh_default),
                        prune=bool(opts.get("prune")),
                        stamp=S.stamp(src, opts))
-    return jsonify({"spec": spec, "notes": notes + more,
-                    "warnings": mm.spec_warnings(spec),
-                    "errors": mm.validate_spec(spec)})
+    out = {"spec": spec, "notes": notes + more,
+           "warnings": mm.spec_warnings(spec), "errors": mm.validate_spec(spec)}
+    if base is not None:
+        out.update(base_version=base, into={"name": into["name"], "folder": folder})
+    return jsonify(out)
 
 
 @app.get("/api/settings/<name>")

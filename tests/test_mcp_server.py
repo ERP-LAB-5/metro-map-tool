@@ -78,12 +78,148 @@ class SaveGoesThroughTheBridgeTest(unittest.TestCase):
             return {"name": "my map", "folder": "mymaps",
                     "spec": {"stations": {}}, "warnings": []}
 
+        def routed(method, path, payload=None):
+            if method == "GET" and path == "/api/maps":
+                return []                       # a new map: nothing to replace
+            return fake_call(method, path, payload)
+
         with mock.patch.object(ms.web, "ensure_server"), \
-             mock.patch.object(ms, "call", side_effect=fake_call):
+             mock.patch.object(ms, "call", side_effect=routed):
             ms.save_map("my map", {"stations": {}})
         self.assertEqual(seen["method"], "PUT")
         self.assertEqual(seen["path"], "/api/maps/my%20map")
         self.assertEqual(seen["payload"]["auto_interchange"], True)
+
+
+MAP = {"stations": {"a": {"label": "A", "gx": 0, "gy": 0},
+                    "b": {"label": "B", "gx": 2, "gy": 0}},
+       "lines": [{"name": "One", "color": "#0098d4", "stations": ["a", "b"]}]}
+
+
+class SharedEditingTest(unittest.TestCase):
+    """An agent and a person on one map: the agent must not eat the person's save.
+
+    The bridge is pointed at the real designer app, with its maps in a temp
+    directory, so the version check that refuses a stale save is the server's
+    own — not a stub's idea of it.
+    """
+
+    def setUp(self):
+        import copy
+        import json
+        import tempfile
+        from pathlib import Path
+        from metro_map_tool import app as designer
+        self.copy = copy.deepcopy
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        folders = {"mymaps": root / "mymaps", "shared": root / "shared"}
+        for d in folders.values():
+            d.mkdir()
+        self.patches = [mock.patch.object(designer, "FOLDERS", folders),
+                        mock.patch.object(ms.web, "ensure_server"),
+                        mock.patch.object(ms, "call", side_effect=self.bridge),
+                        mock.patch.dict(ms._seen, clear=True)]
+        for patch in self.patches:
+            patch.start()
+        designer.app.config["TESTING"] = True
+        self.client = designer.app.test_client()
+        self.json = json
+
+    def tearDown(self):
+        for patch in reversed(self.patches):
+            patch.stop()
+        self.tmp.cleanup()
+
+    def bridge(self, method, path, payload=None):
+        """What core's call does: JSON in, JSON out, errors as a ValueError."""
+        res = self.client.open(path, method=method, json=payload,
+                               environ_base={"REMOTE_ADDR": "127.0.0.1"})
+        data = res.get_json(silent=True)
+        if res.status_code >= 400:
+            raise ValueError("; ".join((data or {}).get("errors") or [str(data)]))
+        return data
+
+    def person_saves(self, label):
+        """The designer's save: the version it loaded, then its own edit."""
+        now = self.bridge("GET", "/api/maps/plan")
+        spec = self.copy(now["spec"])
+        spec["stations"]["a"]["label"] = label
+        return self.bridge("PUT", "/api/maps/plan",
+                           {"spec": spec, "base_version": now["version"]})
+
+    def label_on_disk(self):
+        return self.bridge("GET", "/api/maps/plan")["spec"]["stations"]["a"]["label"]
+
+    def test_a_save_made_in_the_designer_after_the_agent_read_is_not_overwritten(self):
+        ms.save_map("plan", self.copy(MAP))
+        mine = ms.read_map("plan")
+        self.person_saves("Edited by a person")
+        mine["stations"]["b"]["label"] = "Edited by the agent"
+        with self.assertRaises(ValueError) as caught:
+            ms.save_map("plan", mine)
+        self.assertIn("read_map", str(caught.exception))
+        self.assertEqual(self.label_on_disk(), "Edited by a person")
+
+    def test_reading_again_and_reapplying_then_goes_through(self):
+        ms.save_map("plan", self.copy(MAP))
+        ms.read_map("plan")
+        self.person_saves("Edited by a person")
+        again = ms.read_map("plan")
+        again["stations"]["b"]["label"] = "Edited by the agent"
+        ms.save_map("plan", again)
+        spec = self.bridge("GET", "/api/maps/plan")["spec"]
+        self.assertEqual(spec["stations"]["a"]["label"], "Edited by a person")
+        self.assertEqual(spec["stations"]["b"]["label"], "Edited by the agent")
+
+    def test_the_agents_own_save_is_the_base_for_its_next_one(self):
+        ms.save_map("plan", self.copy(MAP))
+        first = self.copy(MAP)
+        first["stations"]["a"]["label"] = "one"
+        ms.save_map("plan", first)
+        first["stations"]["a"]["label"] = "two"
+        ms.save_map("plan", first)
+        self.assertEqual(self.label_on_disk(), "two")
+
+    def test_a_map_never_read_is_not_replaced_blind(self):
+        self.bridge("PUT", "/api/maps/plan", {"spec": self.copy(MAP)})
+        self.person_saves("Somebody's work")
+        with self.assertRaises(ValueError) as caught:
+            ms.save_map("plan", self.copy(MAP))
+        self.assertIn("has not been read", str(caught.exception))
+        self.assertEqual(self.label_on_disk(), "Somebody's work")
+
+    def test_replace_is_the_deliberate_way_to_throw_it_away(self):
+        self.bridge("PUT", "/api/maps/plan", {"spec": self.copy(MAP)})
+        self.person_saves("Somebody's work")
+        ms.save_map("plan", self.copy(MAP), replace=True)
+        self.assertEqual(self.label_on_disk(), "A")
+
+    def test_a_new_map_needs_no_read(self):
+        ms.save_map("fresh", self.copy(MAP))
+        self.assertEqual(self.bridge("GET", "/api/maps/fresh")["name"], "fresh")
+
+    def test_an_import_into_a_map_counts_as_reading_it(self):
+        ms.save_map("plan", self.copy(MAP))
+        ms._seen.clear()                        # a new session
+        version = self.bridge("GET", "/api/maps/plan")["version"]
+        with mock.patch.object(ms, "call", return_value={
+                "spec": self.copy(MAP), "base_version": version,
+                "into": {"name": "plan", "folder": "mymaps"}}):
+            ms.import_map("jira", {"roots": ["ABCD-1"]}, into="plan")
+        self.assertEqual(ms._seen[("plan", "mymaps")], version)
+
+    def test_the_import_endpoint_reports_the_version_it_built_on(self):
+        ms.save_map("plan", self.copy(MAP))
+        version = self.bridge("GET", "/api/maps/plan")["version"]
+        from metro_map_tool import sources as S
+        fake = S.Source(name="jira", title="t", summary="s", options=(),
+                        fetch=lambda o, m: {}, build=lambda d, o, m: (self.copy(MAP), []))
+        with mock.patch.object(S, "get", return_value=fake):
+            out = self.bridge("POST", "/api/import",
+                              {"source": "jira", "options": {}, "into": {"name": "plan"}})
+        self.assertEqual(out["base_version"], version)
+        self.assertEqual(out["into"], {"name": "plan", "folder": "mymaps"})
 
 
 if __name__ == "__main__":

@@ -51,7 +51,12 @@ server = MCPServer(
         "default) and 'shared' (what the repo ships). Set mode to 'roadmap' "
         "with a timeline block to turn the x axis into a calendar; 'legend' "
         "names the lines on the drawing, and a line's 'notes' label the track "
-        "between two of its stops."
+        "between two of its stops. "
+        "A person may be editing the same map in the designer: save_map only "
+        "replaces the version you last read, so read_map before changing a map, "
+        "and if a save is refused because the map changed, read it again and "
+        "re-apply your change to what is there now — never replace=True unless "
+        "the user asked for their changes to be discarded."
     ),
 )
 
@@ -65,6 +70,35 @@ def ensure_designer() -> None:
 
 
 # ----------------------------------------------------------------- tools ----
+
+# The version of each map this session last read or wrote, by (name, folder).
+#
+# The designer's save carries the version it loaded, and the server refuses it
+# if the file has moved on since. An agent's save used to carry nothing, so it
+# always won: read a map, let a person edit and save it in the browser, save
+# the copy you read — and their work was gone, with the browser quietly
+# reloading the agent's version as "updated elsewhere". Remembering what was
+# read here puts the agent under the same rule, without asking every caller to
+# carry a token it would forget.
+_seen: dict = {}
+
+
+def remember(name: str, folder: str, version: str) -> None:
+    if name and folder and version:
+        _seen[(name, folder)] = version
+
+
+def where(name: str, folder: str = "") -> Optional[dict]:
+    """The saved map a name refers to, as the list reports it — or None.
+
+    Mirrors the server's own lookup: a pinned folder, else mymaps before shared.
+    """
+    maps = call("GET", "/api/maps") or []
+    hits = [m for m in maps if m.get("name") == name
+            and (not folder or m.get("folder") == folder)]
+    hits.sort(key=lambda m: m.get("folder") != "mymaps")
+    return hits[0] if hits else None
+
 
 def qualify(name: str, folder: str) -> str:
     """A map URL, with the folder as a query when the caller pinned one."""
@@ -86,18 +120,30 @@ def read_map(name: str, folder: str = "") -> dict:
     folder is 'mymaps' or 'shared'; left empty, mymaps is searched first.
     """
     ensure_designer()
-    return call("GET", qualify(name, folder))["spec"]
+    data = call("GET", qualify(name, folder))
+    remember(data.get("name") or name, data.get("folder") or folder,
+             data.get("version") or "")
+    return data["spec"]
 
 
 @server.tool()
 def save_map(name: str, spec: dict, auto_interchange: bool = True,
-             folder: str = "") -> dict:
-    """Write a spec to <folder>/<name>.json, replacing it if it exists.
+             folder: str = "", replace: bool = False) -> dict:
+    """Write a spec to <folder>/<name>.json.
 
     folder is 'mymaps' (git-ignored, the user's own work) or 'shared' (maps that
     belong to the repo). Left empty it updates the map where it already lives,
     and a name that exists in neither folder is created in mymaps — so pass a
     folder only to move a map or to put a new one somewhere other than mymaps.
+
+    A person may have the same map open in the designer. An existing map is
+    only replaced if it is still the version you last got from read_map (or
+    from import_map with `into`, or your own last save_map). If it changed
+    since — someone saved it in the browser — nothing is written and the error
+    says so: call read_map, re-apply your change to what is there now, and save
+    again. Saving over an existing map you have not read is refused the same
+    way. `replace=True` skips both checks; use it only when the user has asked
+    for the map on disk to be thrown away.
 
     The spec is validated first and rejected with a list of problems if it will
     not draw. With auto_interchange on, any stop two or more lines share is
@@ -107,7 +153,26 @@ def save_map(name: str, spec: dict, auto_interchange: bool = True,
     payload = {"spec": spec, "auto_interchange": auto_interchange}
     if folder:
         payload["folder"] = folder
-    out = call("PUT", f"/api/maps/{urllib.parse.quote(name)}", payload)
+    there = where(name, folder)
+    if there and not replace:
+        base = _seen.get((name, there["folder"]))
+        if base is None:
+            raise ValueError(
+                f"'{name}' already exists in {there['folder']} and has not been "
+                "read in this session, so saving would replace whatever is in it "
+                "— call read_map first and build on that. Nothing was written.")
+        payload["base_version"] = base
+    try:
+        out = call("PUT", f"/api/maps/{urllib.parse.quote(name)}", payload)
+    except ValueError as exc:
+        if "changed since you loaded it" not in str(exc):
+            raise
+        raise ValueError(
+            f"'{name}' was changed after you read it — most likely someone saved "
+            "it in the designer. Nothing was written, so their work is intact. "
+            "Call read_map to get the current map, re-apply your change to it, "
+            "and save again.") from None
+    remember(out["name"], out.get("folder") or "", out.get("version") or "")
     return {"name": out["name"], "folder": out.get("folder"), "saved": True,
             "warnings": out.get("warnings", []), "spec": out["spec"]}
 
@@ -116,7 +181,10 @@ def save_map(name: str, spec: dict, auto_interchange: bool = True,
 def delete_map(name: str, folder: str = "") -> dict:
     """Delete a saved map."""
     ensure_designer()
-    return call("DELETE", qualify(name, folder))
+    out = call("DELETE", qualify(name, folder))
+    for key in [k for k in _seen if k[0] == name and (not folder or k[1] == folder)]:
+        _seen.pop(key, None)
+    return out
 
 
 @server.tool()
@@ -225,6 +293,9 @@ def import_map(source: str, options: dict, into: str = "",
     element carries an `upstream` snapshot, what only Jira changed is applied (a
     stop nobody moved follows its new date), what only the map changed is kept,
     and a change on both sides keeps the map's and is reported in the notes.
+    Save the result with save_map under the same name: it is checked against
+    the map as it was when the import read it, so an edit someone made in the
+    designer meanwhile is not lost — if the save is refused, run the import again.
 
     Options naming a file on the designer's machine (from_file, to_file, model)
     are only available on the command line.
@@ -233,7 +304,14 @@ def import_map(source: str, options: dict, into: str = "",
     payload = {"source": source, "options": options or {}}
     if into:
         payload["into"] = {"name": into, "folder": folder}
-    return call("POST", "/api/import", payload)
+    out = call("POST", "/api/import", payload)
+    # the re-sync was built on the map as it was read; saving it back is then
+    # checked against that version, like any other read
+    if into and out.get("base_version"):
+        target = out.get("into") or {}
+        remember(target.get("name") or into, target.get("folder") or folder,
+                 out["base_version"])
+    return out
 
 
 @server.tool()
