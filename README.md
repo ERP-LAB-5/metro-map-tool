@@ -134,7 +134,7 @@ meeting again at the saved file. After that it reopens whatever you had last.
   **exported SVG is never themed by it**: it keeps both palettes and adapts to
   whoever opens it, so the same file suits a light README and a dark slide.
 - **Every SVG says what drew it**: the root element carries
-  `data-generator="metro-map 3.5.0"` and `data-format`, the oldest spec format
+  `data-generator="metro-map <version>"` and `data-format`, the oldest spec format
   that can hold the map, and a comment at the top says the same for a person
   opening the file. Older maps need no converting — every field added since the
   first release is optional, and a map is only saved as a newer format once it
