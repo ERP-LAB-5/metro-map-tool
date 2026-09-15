@@ -1,6 +1,6 @@
 {
   "name": "metro-map",
-  "version": "3.5.2",
+  "version": "3.6.0",
   "description": "Transit-map diagrams for landscapes, pipelines and roadmaps, rendered to a standalone SVG",
   "author": {
     "name": "D-LAB-5"
