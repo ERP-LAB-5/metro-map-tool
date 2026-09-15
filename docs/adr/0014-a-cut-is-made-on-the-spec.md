@@ -50,4 +50,4 @@ at a time. There are two ways to export only part of a map:
 
 ## Carried out in
 
-- 3.6.0 (in progress)
+- [`cc37eb0`](https://github.com/ERP-LAB-5/metro-map-tool/commit/cc37eb0), released in 3.6.0

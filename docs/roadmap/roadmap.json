@@ -35,7 +35,8 @@
         "t3_4_0",
         "t3_4_2",
         "t3_5_0",
-        "t3_5_2"
+        "t3_5_2",
+        "t3_6_0"
       ]
     },
     {
@@ -46,8 +47,8 @@
         "end": "see PARKING-LOT.md"
       },
       "stations": [
-        "t3_5_2",
-        "t3_6"
+        "t3_6_0",
+        "t3_7"
       ],
       "status": "planned"
     },
@@ -168,30 +169,37 @@
       "label_at": "above"
     },
     "t3_4_2": {
-      "gx": 15.15,
+      "gx": 15.12,
       "gy": 1,
       "label": "3.4.2 About status \u00b7 agent lock",
       "label_angle": 45,
       "label_at": "above"
     },
     "t3_5_0": {
-      "gx": 15.5,
+      "gx": 15.37,
       "gy": 1,
       "label": "3.5.0 lanes \u00b7 rides \u00b7 navigation",
       "label_angle": 45,
       "label_at": "above"
     },
     "t3_5_2": {
-      "gx": 15.85,
+      "gx": 15.62,
       "gy": 1,
       "label": "3.5.2 bubbles",
       "label_angle": 45,
       "label_at": "above"
     },
-    "t3_6": {
+    "t3_6_0": {
+      "gx": 15.87,
+      "gy": 1,
+      "label": "3.6.0 export lanes \u00b7 phases",
+      "label_angle": 45,
+      "label_at": "above"
+    },
+    "t3_7": {
       "gx": 29.5,
       "gy": 1,
-      "label": "3.6 parking lot",
+      "label": "3.7 parking lot",
       "label_angle": 45,
       "label_at": "above"
     }

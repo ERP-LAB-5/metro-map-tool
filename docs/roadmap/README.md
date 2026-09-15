@@ -18,7 +18,7 @@ One map for the three repositories that move together, drawn by this tool from
   - metro-map-tool 3.4.2 took v0.4.1 (service status in About, and the template version shown).
 
   The template was extracted from metro-map-tool and sap-di-tools on 11 September.
-- **Dotted track is planned.** "3.6 parking lot" is not a date. It stands for the
+- **Dotted track is planned.** "3.7 parking lot" is not a date. It stands for the
   [parking lot](../specs/PARKING-LOT.md) until a release is scoped.
 - An arrow off the right edge means the line carries on. sap-di-tools stays on template v0.3.0
   until it next changes.
@@ -29,7 +29,7 @@ One map for the three repositories that move together, drawn by this tool from
    by hand. Use the tag date's day column (`gx` = days since 31 August 2026, plus 0.5), and put
    it on the tool line before the Next station stretch. If the release took a template version,
    add a capsule to that template stop.
-2. Move "3.6 parking lot" on, or rename it to the next scoped release.
+2. Move the parking-lot station ("3.7 parking lot") on, or rename it to the next scoped release.
 3. Re-draw it:
 
    ```bash

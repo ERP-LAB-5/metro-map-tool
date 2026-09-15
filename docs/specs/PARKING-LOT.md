@@ -1,7 +1,7 @@
-# Parking lot — the next station (3.6)
+# Parking lot — the next station (3.7)
 
 > **Status:** Parked. Nothing here is scheduled.
-> **Since:** 3.5.2, 2026-09-15
+> **Since:** 3.5.2, 2026-09-15 (3.6.0 took nothing from here)
 
 The tool is being used as it is for a while; what comes next is decided from that use. When a
 release is scoped, the items it takes move from here into `vX.Y.Z.md`
@@ -95,3 +95,37 @@ template change (ADR 0009), and other tools on the template do not keep a roadma
 
 **What we would need to know.** Whether other template tools want a roadmap too — then it
 belongs in the template.
+
+## Save a cut as a map of its own
+
+**What.** Export can cut a map down to some swimlanes and phases
+([ADR 0014](../adr/0014-a-cut-is-made-on-the-spec.md)), but only as an SVG. *Save as… a cut* would
+keep the part as a map to edit.
+
+**Why parked.** An open question in the 3.6.0 spec, left out of the release.
+
+**What we would need to know.** Whether a saved cut should stay linked to the whole map (and
+re-cut when the whole changes) or become a separate copy.
+
+## The navigation board's date while waiting at a stop
+
+**What.** While the traveller waits at a stop, the board's line shows the *next* stop's date, and
+the bubble shows the date of the stop it is at.
+
+**Why parked.** Noticed while building 3.6.0; small, and it predates it.
+
+**What we would need to know.** Which date the board should show while waiting. Probably the
+current stop's date, with the next stop's date after "then".
+
+## render_map locks the map it only looks at
+
+**What.** The MCP `render_map(name=…)` reads the map through `read_map`, which takes the agent
+lock ([ADR 0002](../adr/0002-one-server-version-checked-saves-and-an-agent-lock.md)). The
+person's panel folds away for two minutes, although the tool's own guidance says render is only
+for looking.
+
+**Why parked.** Noticed while building 3.6.0; not part of its scope.
+
+**What we would need to know.** Nothing: read the map without the lock in `render_map`, and add
+a test. A candidate for the next patch.
+

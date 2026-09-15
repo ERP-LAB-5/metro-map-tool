@@ -20,5 +20,5 @@ not into a spec for the release after.
 
 ## Now
 
-No release is scoped. **3.6** is the parking lot: the tool is being used as it is, and what
+3.6.0 is released ([spec](v3.6.0.md), frozen). No release is scoped after it. **3.7** is the parking lot: the tool is being used as it is, and what
 comes next will be decided from that use.

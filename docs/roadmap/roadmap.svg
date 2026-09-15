@@ -169,15 +169,15 @@
 </g>
   </g>
   <g id="routes">
-    <path class="route l0" d="M 200.00 80.00 L 1268.00 80.00" stroke="#0098d4"><title>metro-map-tool</title></path>
-    <path class="route status-plan l1" d="M 1268.00 80.00 L 2760.00 80.00" stroke="#0098d4"><title>Next station · planned</title></path>
+    <path class="route l0" d="M 200.00 80.00 L 1269.60 80.00" stroke="#0098d4"><title>metro-map-tool</title></path>
+    <path class="route status-plan l1" d="M 1269.60 80.00 L 2760.00 80.00" stroke="#0098d4"><title>Next station · planned</title></path>
     <path class="route l2" d="M 920.00 320.00 L 1212.00 320.00" stroke="#7b3fb5"><title>python-tool-template</title></path>
     <path class="route l3" d="M 840.00 560.00 L 2760.00 560.00" stroke="#00a4a7"><title>sap-di-tools</title></path>
   </g>
   <g id="stations">
     <rect class="capsule" data-station="p0_1" x="908.7" y="308.7" width="22.6" height="262.6" rx="11.3"><title>v0.1</title></rect>
     <rect class="capsule" data-station="t3_4_0" x="988.7" y="68.7" width="22.6" height="502.6" rx="11.3"><title>3.4.0 Jira keys · ArchiMate</title></rect>
-    <rect class="capsule" data-station="t3_4_2" x="1200.7" y="68.7" width="22.6" height="262.6" rx="11.3"><title>3.4.2 About status · agent lock</title></rect>
+    <rect class="capsule" data-station="t3_4_2" x="1198.3" y="68.7" width="25.0" height="262.6" rx="12.5"><title>3.4.2 About status · agent lock</title></rect>
     <circle class="stop" data-station="s0_0" cx="840.0" cy="560.0" r="7.5" stroke="#00a4a7"/>
     <circle class="stop" data-station="t1_0" cx="200.0" cy="80.0" r="7.5" stroke="#0098d4"/>
     <circle class="stop" data-station="t2_14" cx="360.0" cy="80.0" r="7.5" stroke="#0098d4"/>
@@ -185,9 +185,10 @@
     <circle class="stop" data-station="t2_5" cx="280.0" cy="80.0" r="7.5" stroke="#0098d4"/>
     <circle class="stop" data-station="t2_6" cx="332.0" cy="80.0" r="7.5" stroke="#0098d4"/>
     <circle class="stop" data-station="t3_0" cx="440.0" cy="80.0" r="7.5" stroke="#0098d4"/>
-    <circle class="stop" data-station="t3_5_0" cx="1240.0" cy="80.0" r="7.5" stroke="#0098d4"/>
-    <circle class="stop" data-station="t3_5_2" cx="1268.0" cy="80.0" r="7.5" stroke="#0098d4"/>
-    <circle class="stop" data-station="t3_6" cx="2360.0" cy="80.0" r="7.5" stroke="#0098d4"/>
+    <circle class="stop" data-station="t3_5_0" cx="1229.6" cy="80.0" r="7.5" stroke="#0098d4"/>
+    <circle class="stop" data-station="t3_5_2" cx="1249.6" cy="80.0" r="7.5" stroke="#0098d4"/>
+    <circle class="stop" data-station="t3_6_0" cx="1269.6" cy="80.0" r="7.5" stroke="#0098d4"/>
+    <circle class="stop" data-station="t3_7" cx="2360.0" cy="80.0" r="7.5" stroke="#0098d4"/>
   </g>
   <g id="labels">
     <text class="label" data-station="p0_1" x="920.0" y="300.5" text-anchor="middle">v0.1</text>
@@ -203,10 +204,11 @@
     <text class="label" data-station="t2_6" x="335.3" y="63.8" transform="rotate(-45 335.3 63.8)" text-anchor="start">2.6 rides · dead ends</text>
     <text class="label" data-station="t3_0" x="443.3" y="63.8" transform="rotate(-45 443.3 63.8)" text-anchor="start">3.0 importers · Jira</text>
     <text class="label" data-station="t3_4_0" x="1003.3" y="63.8" transform="rotate(-45 1003.3 63.8)" text-anchor="start">3.4.0 Jira keys · ArchiMate</text>
-    <text class="label" data-station="t3_4_2" x="1215.3" y="63.8" transform="rotate(-45 1215.3 63.8)" text-anchor="start">3.4.2 About status · agent lock</text>
-    <text class="label" data-station="t3_5_0" x="1243.3" y="63.8" transform="rotate(-45 1243.3 63.8)" text-anchor="start">3.5.0 lanes · rides · navigation</text>
-    <text class="label" data-station="t3_5_2" x="1271.3" y="63.8" transform="rotate(-45 1271.3 63.8)" text-anchor="start">3.5.2 bubbles</text>
-    <text class="label" data-station="t3_6" x="2363.3" y="63.8" transform="rotate(-45 2363.3 63.8)" text-anchor="start">3.6 parking lot</text>
+    <text class="label" data-station="t3_4_2" x="1212.9" y="63.8" transform="rotate(-45 1212.9 63.8)" text-anchor="start">3.4.2 About status · agent lock</text>
+    <text class="label" data-station="t3_5_0" x="1232.9" y="63.8" transform="rotate(-45 1232.9 63.8)" text-anchor="start">3.5.0 lanes · rides · navigation</text>
+    <text class="label" data-station="t3_5_2" x="1252.9" y="63.8" transform="rotate(-45 1252.9 63.8)" text-anchor="start">3.5.2 bubbles</text>
+    <text class="label" data-station="t3_6_0" x="1272.9" y="63.8" transform="rotate(-45 1272.9 63.8)" text-anchor="start">3.6.0 export lanes · phases</text>
+    <text class="label" data-station="t3_7" x="2363.3" y="63.8" transform="rotate(-45 2363.3 63.8)" text-anchor="start">3.7 parking lot</text>
   </g>
   <g id="onward">
     <g class="onward-mark" stroke="#0098d4"><title>Next station continues — see PARKING-LOT.md</title><path class="onward l1" fill="none" d="M 2764.0 86.8 L 2773.2 80.0 L 2764.0 73.2"/><text class="onward-say" x="2778.8" y="84.7" text-anchor="start">see PARKING-LOT.md</text></g>
