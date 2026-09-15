@@ -251,6 +251,7 @@ def test_a_bridge_error_is_one_the_mcp_sdk_delivers_to_the_model():
     assert issubclass(mcp_bridge.ToolError, ValueError)        # old catches still work
     assert issubclass(mcp_bridge.NotAnswering, ConnectionError)
 
+
 def test_the_about_box_asks_for_the_services(client):
     js = (PKG / "core" / "static" / "core.js").read_text(encoding="utf-8")
     assert "/api/services" in js
