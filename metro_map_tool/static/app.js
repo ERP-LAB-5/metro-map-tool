@@ -2731,7 +2731,10 @@ function renderNavBoard(full = false) {
   const passed = r.stops.filter((st) => st.at <= NAV.frac + 1e-4);
   const line = (here || passed[passed.length - 1] || r.stops[0] || {}).line || "";
   const change = here && here.change ? here.change : "";
-  const when = stopDate(NAV.done ? here : next);
+  // the date belongs to the stop the board names: the one it waits at, else the
+  // next one; while waiting, the next stop's date follows its name after "then"
+  const when = stopDate(here || next);
+  const nextWhen = here && next ? stopDate(next) : "";
   if (full || !board.firstChild) {
     board.hidden = false;
     board.classList.toggle("mini", !!NAV.mini);
@@ -2794,7 +2797,7 @@ function renderNavBoard(full = false) {
     : here ? here.label : next ? next.label : "past the edge of the map";
   const secs = Math.ceil(navSecondsTo(next));
   $("#nav-meta").textContent = [line && `on ${line}`, when, !NAV.done && next && !here ? `in ${secs} s` : "",
-    here && next ? `then ${next.label}` : ""].filter(Boolean).join(" · ");
+    here && next ? `then ${next.label}${nextWhen ? ` (${nextWhen})` : ""}` : ""].filter(Boolean).join(" · ");
   const ch = $("#nav-change");
   ch.hidden = !change;
   ch.textContent = change ? `Change here for ${change}` : "";

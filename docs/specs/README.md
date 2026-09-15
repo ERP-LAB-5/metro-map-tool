@@ -20,5 +20,5 @@ not into a spec for the release after.
 
 ## Now
 
-3.6.1 is released ([3.6.0](v3.6.0.md), [3.6.1](v3.6.1.md), both frozen). No release is scoped after it. **3.7** is the parking lot: the tool is being used as it is, and what
+3.6.2 is released ([3.6.0](v3.6.0.md), [3.6.1](v3.6.1.md), [3.6.2](v3.6.2.md), all frozen). No release is scoped after it. **3.7** is the parking lot: the tool is being used as it is, and what
 comes next will be decided from that use.

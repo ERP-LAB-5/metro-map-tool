@@ -106,13 +106,3 @@ keep the part as a map to edit.
 
 **What we would need to know.** Whether a saved cut should stay linked to the whole map (and
 re-cut when the whole changes) or become a separate copy.
-
-## The navigation board's date while waiting at a stop
-
-**What.** While the traveller waits at a stop, the board's line shows the *next* stop's date, and
-the bubble shows the date of the stop it is at.
-
-**Why parked.** Noticed while building 3.6.0; small, and it predates it.
-
-**What we would need to know.** Which date the board should show while waiting. Probably the
-current stop's date, with the next stop's date after "then".
