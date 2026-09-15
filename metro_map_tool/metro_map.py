@@ -2209,7 +2209,12 @@ def render(spec: dict, style: Style, theme: str = "auto") -> str:
   </g>
 """ if zones else ""
 
-    return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="{x0:.0f} {y0:.0f} {x1 - x0:.0f} {y1 - y0:.0f}" width="{x1 - x0:.0f}" height="{y1 - y0:.0f}" role="img" data-cell="{s.cell:g}" data-x0="{x0:.0f}" data-y0="{y0:.0f}">
+    # Which tool drew this, and the spec format it needed — so a file that turns
+    # up months later says where it came from and what can open its source.
+    made_by = f"metro-map {__version__}"
+    fmt = needs_format(spec)
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="{x0:.0f} {y0:.0f} {x1 - x0:.0f} {y1 - y0:.0f}" width="{x1 - x0:.0f}" height="{y1 - y0:.0f}" role="img" data-cell="{s.cell:g}" data-x0="{x0:.0f}" data-y0="{y0:.0f}" data-generator="{made_by}" data-format="{fmt}">
+  <!-- drawn by {made_by} · spec format {fmt} · {REPO_URL} -->
   <style>
     svg {{ {ground} background: var(--paper); color: var(--ink); }}
     .route {{ fill: none; stroke-width: {s.stroke}; stroke-linecap: round; stroke-linejoin: round; }}

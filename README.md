@@ -133,6 +133,12 @@ meeting again at the saved file. After that it reopens whatever you had last.
   browser — *auto*, the default, follows Windows or your desktop setting. An
   **exported SVG is never themed by it**: it keeps both palettes and adapts to
   whoever opens it, so the same file suits a light README and a dark slide.
+- **Every SVG says what drew it**: the root element carries
+  `data-generator="metro-map 3.5.0"` and `data-format`, the oldest spec format
+  that can hold the map, and a comment at the top says the same for a person
+  opening the file. Older maps need no converting — every field added since the
+  first release is optional, and a map is only saved as a newer format once it
+  uses something that format brought (format 3: swimlanes and start/end rides).
 - **Style** (cell size, route width, corner radius, track spacing, label size,
   zone padding) is saved with the map.
 - Upgrading from before the folder split? Anything still in `maps/` is no longer

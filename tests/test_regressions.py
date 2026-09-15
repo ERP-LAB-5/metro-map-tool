@@ -27,6 +27,25 @@ class ShippedMapsTest(unittest.TestCase):
                 svg = mm.render(spec, mm.style_from(spec.get("style") or {}))
                 self.assertIn("<svg", svg)
 
+    def test_a_drawing_says_which_version_drew_it_and_what_format_it_needs(self):
+        spec = json.loads((SHARED / "roadmap-example.json").read_text(encoding="utf-8"))
+        svg = mm.render(spec, mm.style_from(spec.get("style") or {}))
+        head = svg.split("<style>", 1)[0]
+        self.assertIn(f'data-generator="metro-map {mm.__version__}"', head)
+        self.assertIn(f'data-format="{mm.needs_format(spec)}"', head)
+        self.assertIn(f"<!-- drawn by metro-map {mm.__version__}", head)
+
+    def test_the_cheat_sheet_picture_is_what_its_spec_draws(self):
+        import re
+        md = (ROOT / "docs" / "cheatsheet.md").read_text(encoding="utf-8")
+        block = re.search(r"cheatsheet-example.svg\)\s*```json\n(.*?)\n```", md, re.S).group(1)
+        spec = json.loads(block)
+        drawn = mm.render(spec, mm.style_from(spec.get("style") or {}))
+        committed = (ROOT / "docs" / "cheatsheet-example.svg").read_text(encoding="utf-8")
+        # the version in the stamp moves with every release; the drawing must not
+        unstamp = lambda svg: re.sub(r"metro-map \d+(\.\d+)*", "metro-map X", svg)
+        self.assertEqual(unstamp(drawn), unstamp(committed))
+
 
 class ProvenanceTest(unittest.TestCase):
     def test_an_origin_does_not_earn_a_newer_format(self):
