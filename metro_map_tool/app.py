@@ -32,6 +32,9 @@ import os
 import re
 import sys
 import tempfile
+import threading
+import time
+import uuid
 from datetime import timedelta
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -40,6 +43,7 @@ from flask import Response, abort, jsonify, render_template, request
 
 from . import metro_map as mm
 from .core import server
+from .core import services
 from .core.server import only_local
 
 app = server.create_app(__name__)
@@ -142,6 +146,61 @@ server.about_extras(lambda: {f"{label} maps": str(FOLDERS[key])
                                                 ("shared", "Shared"))})
 
 
+# ---------------------------------------------------------------- services --
+#
+# The About box's service list comes from core; these are the parts only this
+# tool has. Each importer is grey until it is configured — most people never
+# connect one, and red for "you did not set up Jira" would be crying wolf —
+# and once it is, one cheap authenticated call says whether it still works.
+
+def _maps_folders():
+    problems = []
+    for key, path in FOLDERS.items():
+        if not path.is_dir():
+            problems.append(f"{key} is missing: {path}")
+        elif not os.access(path, os.W_OK):
+            problems.append(f"{key} is read-only: {path}")
+    return (not problems, "; ".join(problems) or f"saving to {FOLDERS[DEFAULT_FOLDER]}")
+
+
+def _importer(name: str, label: str, probe) -> None:
+    def enabled():
+        from . import sources as S
+        missing = [e["name"] for e in S.env_status(S.get(name))
+                   if e["required"] and not e["present"]]
+        return (not missing, "not set up — " + ", ".join(missing)
+                + " under Settings, or in the environment" if missing else "")
+
+    def check():
+        from . import sources as S
+        src = S.get(name)
+        try:
+            return True, probe(src, S.credentials(src))
+        except (S.SourceError, OSError) as exc:
+            return False, str(exc)
+
+    services.register(name, label, check=check, enabled=enabled)
+
+
+def _jira_probe(src, creds) -> str:
+    from .sources.jira import client as jira_client
+    conn = jira_client.connect(creds)
+    me = conn.myself()
+    return f"{conn.site} as {me.get('displayName') or me.get('emailAddress') or 'you'}"
+
+
+def _github_probe(src, creds) -> str:
+    from .sources import github, http
+    token = next((v for v in creds.values() if v), "")
+    me = http.get_json(f"{github.API}/user", github._headers(token), timeout=5)
+    return f"api.github.com as {me.get('login') or 'you'}"
+
+
+services.register("maps", "Maps folders", check=_maps_folders)
+_importer("jira", "Jira importer", _jira_probe)
+_importer("github", "GitHub importer", _github_probe)
+
+
 # ------------------------------------------------------------------ page ----
 
 @app.get("/")
@@ -157,6 +216,74 @@ def favicon():
 
 # ------------------------------------------------------------------- api ----
 
+# ------------------------------------------------------------------- locks --
+#
+# While an agent works on a map, the person's designer goes read-only, so the
+# two cannot edit the same map at once. One user on one machine, so this is a
+# dict in memory: nothing to persist, nothing to clean up after a restart.
+#
+# The agent takes the lock when it reads a map and gives it back when its save
+# lands. It lapses by itself after LOCK_FOR seconds, so an agent that crashed
+# or wandered off never leaves a map stuck. "Take over" in the designer ends it
+# at once and leaves a marker behind: the agent's next save carries the lock it
+# was given, finds the marker, and is refused until it reads the map again —
+# otherwise it would write straight over what the person started doing.
+
+LOCK_FOR = 120
+_locks: Dict[Tuple[str, str], dict] = {}
+_locks_guard = threading.Lock()
+
+
+def lock_of(name: str, folder: str) -> Optional[dict]:
+    """The live lock or take-over marker on a map, or None."""
+    with _locks_guard:
+        entry = _locks.get((name, folder))
+        if entry and time.time() - entry["at"] > LOCK_FOR:
+            _locks.pop((name, folder), None)
+            return None
+        return entry
+
+
+def lock_view(entry: Optional[dict]) -> Optional[dict]:
+    """What the page is told: who holds it and for how much longer."""
+    if not entry or entry.get("taken_over"):
+        return None
+    return {"holder": entry["holder"],
+            "seconds_left": max(0, int(LOCK_FOR - (time.time() - entry["at"])))}
+
+
+@app.post("/api/maps/<name>/lock")
+def take_lock(name: str):
+    """An agent starting work on a map. Taking it again renews it."""
+    only_local("locking a map")
+    path, folder = find_map(name, request.args.get("folder"))
+    if not path.exists():
+        abort(404, f"no map called '{name}'")
+    entry = {"id": uuid.uuid4().hex, "holder": request.headers.get("X-Agent") or "an agent",
+             "at": time.time()}
+    with _locks_guard:
+        _locks[(name, folder)] = entry
+    return jsonify({"name": name, "folder": folder, "lock_id": entry["id"],
+                    "seconds": LOCK_FOR})
+
+
+@app.delete("/api/maps/<name>/lock")
+def drop_lock(name: str):
+    """Give a lock back. From the designer, that is taking the map over."""
+    only_local("unlocking a map")
+    path, folder = find_map(name, request.args.get("folder"))
+    held = lock_of(name, folder)
+    with _locks_guard:
+        if held and not request.headers.get("X-Agent"):
+            # the person took it: remember which lock that was, so its holder
+            # cannot save on as if nothing had happened
+            _locks[(name, folder)] = {"id": held["id"], "holder": held["holder"],
+                                      "at": time.time(), "taken_over": True}
+        else:
+            _locks.pop((name, folder), None)
+    return jsonify({"name": name, "folder": folder, "locked": False})
+
+
 @app.get("/api/maps")
 def list_maps():
     out = []
@@ -164,7 +291,8 @@ def list_maps():
         base.mkdir(parents=True, exist_ok=True)
         for path in sorted(base.glob("*.json")):
             entry = {"name": path.stem, "folder": folder,
-                     "mtime": path.stat().st_mtime, "version": spec_version(path)}
+                     "mtime": path.stat().st_mtime, "version": spec_version(path),
+                     "lock": lock_view(lock_of(path.stem, folder))}
             try:
                 spec = read_spec(path)
                 entry["stations"] = len(spec["stations"])
@@ -184,7 +312,8 @@ def get_map(name: str):
         abort(404, f"no map called '{name}'")
     try:
         return jsonify({"name": name, "folder": folder, "spec": read_spec(path),
-                        "version": spec_version(path)})
+                        "version": spec_version(path),
+                        "lock": lock_view(lock_of(name, folder))})
     except (OSError, ValueError) as exc:
         abort(400, f"could not read '{name}': {exc}")
 
@@ -202,6 +331,16 @@ def put_map(name: str):
     errors = mm.validate_spec(spec)
     if errors:
         return jsonify({"errors": errors}), 400
+    held = lock_of(name, folder)
+    agent = bool(request.headers.get("X-Agent"))
+    if held and not held.get("taken_over") and not agent:
+        return jsonify({"locked": True, "lock": lock_view(held),
+                        "errors": [f"an agent is updating '{name}' — take it over "
+                                   "in the designer to edit it yourself"]}), 423
+    if held and held.get("taken_over") and agent and data.get("lock_id") == held["id"]:
+        return jsonify({"locked": True,
+                        "errors": [f"'{name}' was taken over in the designer while "
+                                   "you were working on it"]}), 423
     # Optimistic concurrency: a client that read version X may only overwrite
     # version X. Anything else means someone — the other editor, or an agent —
     # saved in between, and last-writer-wins would silently eat their work.
@@ -229,6 +368,9 @@ def put_map(name: str):
         write_spec(path, spec)
     except OSError as exc:
         abort(500, f"could not write '{name}': {exc}")
+    if agent and held and data.get("lock_id") == held["id"]:
+        with _locks_guard:                  # the work landed: hand the map back
+            _locks.pop((name, folder), None)
     return jsonify({"name": name, "folder": folder, "spec": spec, "saved": True,
                     "version": spec_version(path),
                     "warnings": mm.spec_warnings(spec)})
@@ -243,6 +385,8 @@ def delete_map(name: str):
         path.unlink()
     except OSError as exc:
         abort(500, f"could not delete '{name}': {exc}")
+    with _locks_guard:
+        _locks.pop((name, folder), None)
     return jsonify({"name": name, "folder": folder, "deleted": True})
 
 

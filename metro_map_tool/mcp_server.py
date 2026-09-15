@@ -52,7 +52,8 @@ server = MCPServer(
         "with a timeline block to turn the x axis into a calendar; 'legend' "
         "names the lines on the drawing, and a line's 'notes' label the track "
         "between two of its stops. "
-        "A person may be editing the same map in the designer: save_map only "
+        "A person may be editing the same map in the designer: read_map locks "
+        "the map for you until your save_map lands, and save_map only "
         "replaces the version you last read, so read_map before changing a map, "
         "and if a save is refused because the map changed, read it again and "
         "re-apply your change to what is there now — never replace=True unless "
@@ -81,11 +82,29 @@ def ensure_designer() -> None:
 # read here puts the agent under the same rule, without asking every caller to
 # carry a token it would forget.
 _seen: dict = {}
+# The lock this session was given on each map, by (name, folder). The designer
+# goes read-only while it is held; the save that lands hands it back.
+_locked: dict = {}
 
 
 def remember(name: str, folder: str, version: str) -> None:
     if name and folder and version:
         _seen[(name, folder)] = version
+
+
+def lock(name: str, folder: str) -> None:
+    """Pause the person's editing of a map while this agent works on it.
+
+    Best effort: a designer too old to know about locks, or any other failure,
+    leaves the version check as the only guard, which still loses nothing.
+    """
+    try:
+        got = call("POST", f"{qualify(name, '')}/lock"
+                   + (f"?folder={urllib.parse.quote(folder)}" if folder else ""))
+    except (ValueError, ConnectionError):
+        return
+    if got and got.get("lock_id"):
+        _locked[(got.get("name") or name, got.get("folder") or folder)] = got["lock_id"]
 
 
 def where(name: str, folder: str = "") -> Optional[dict]:
@@ -118,11 +137,17 @@ def read_map(name: str, folder: str = "") -> dict:
     """Read one saved map's spec: stations, lines, zones, style.
 
     folder is 'mymaps' or 'shared'; left empty, mymaps is searched first.
+
+    Reading a map also locks it: the person's designer shows that an agent is
+    updating it and pauses their editing, until your save_map lands or two
+    minutes pass without one. So read a map when you mean to change it, and
+    save when you are done — use list_maps or render_map just to look.
     """
     ensure_designer()
     data = call("GET", qualify(name, folder))
-    remember(data.get("name") or name, data.get("folder") or folder,
-             data.get("version") or "")
+    found_name, found_folder = data.get("name") or name, data.get("folder") or folder
+    remember(found_name, found_folder, data.get("version") or "")
+    lock(found_name, found_folder)
     return data["spec"]
 
 
@@ -157,22 +182,32 @@ def save_map(name: str, spec: dict, auto_interchange: bool = True,
     if there and not replace:
         base = _seen.get((name, there["folder"]))
         if base is None:
-            raise ValueError(
+            raise web.ToolError(
                 f"'{name}' already exists in {there['folder']} and has not been "
                 "read in this session, so saving would replace whatever is in it "
                 "— call read_map first and build on that. Nothing was written.")
         payload["base_version"] = base
+    if there and _locked.get((name, there["folder"])):
+        payload["lock_id"] = _locked[(name, there["folder"])]
     try:
         out = call("PUT", f"/api/maps/{urllib.parse.quote(name)}", payload)
     except ValueError as exc:
+        if "taken over in the designer" in str(exc):
+            _locked.pop((name, there["folder"]), None)
+            raise web.ToolError(
+                f"'{name}' was taken over in the designer while you were working "
+                "on it, so your save was not written — the person is editing it "
+                "now. Tell them what you meant to change; if they want you to go "
+                "on, call read_map again and re-apply your change.") from None
         if "changed since you loaded it" not in str(exc):
             raise
-        raise ValueError(
+        raise web.ToolError(
             f"'{name}' was changed after you read it — most likely someone saved "
             "it in the designer. Nothing was written, so their work is intact. "
             "Call read_map to get the current map, re-apply your change to it, "
             "and save again.") from None
     remember(out["name"], out.get("folder") or "", out.get("version") or "")
+    _locked.pop((out["name"], out.get("folder") or ""), None)     # handed back
     return {"name": out["name"], "folder": out.get("folder"), "saved": True,
             "warnings": out.get("warnings", []), "spec": out["spec"]}
 
@@ -198,7 +233,7 @@ def render_map(name: str = "", spec: Optional[dict] = None,
     ensure_designer()
     if not spec:
         if not name:
-            raise ValueError("pass either name or spec")
+            raise web.ToolError("pass either name or spec")
         spec = read_map(name, folder)
     out = call("POST", "/api/render", {"spec": spec})
     svg = out.get("svg", "")
@@ -311,6 +346,7 @@ def import_map(source: str, options: dict, into: str = "",
         target = out.get("into") or {}
         remember(target.get("name") or into, target.get("folder") or folder,
                  out["base_version"])
+        lock(target.get("name") or into, target.get("folder") or folder)
     return out
 
 
@@ -447,6 +483,8 @@ def main() -> int:
 
     web.configure(port=args.port, url=args.url, autostart=not args.no_autostart)
     log(f"serving MCP over stdio, designer at {web.BASE}")
+    # tells the designer this server is running, for the About box
+    web.start_heartbeat()
     server.run()
     return 0
 

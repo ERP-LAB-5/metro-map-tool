@@ -287,8 +287,16 @@ no folder updates the map where it already lives, and creates a new one in
 `mymaps` — which is what you want almost every time. Name a folder only to move
 a map, or to put a new one in `shared` because it belongs to the repo.
 
-**Read before you write — the save is checked.** Someone may have the same map
-open in the browser. `save_map` only replaces the version you last got from
+**Read when you mean to change, save when you are done.** `read_map` locks the
+map: the person's designer folds its panel away, shows "An agent is updating
+this map" and pauses their editing until your `save_map` lands — or two minutes
+pass without one. So do not `read_map` just to look (use `list_maps` or
+`render_map`), and do not leave a read map unsaved. The person can press
+**Take over**; your next save is then refused with a message saying so — tell
+them what you meant to change, and only `read_map` again if they want you to
+go on.
+
+**The save is checked as well.** `save_map` only replaces the version you last got from
 `read_map` (or from `import_map` with `into`, or your own previous save). If
 they saved in between, nothing is written and the error says so: `read_map`
 again, re-apply your change to what is there now, and save. Saving over a map

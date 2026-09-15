@@ -17,7 +17,7 @@ import pytest
 
 from metro_map_tool import app as web
 from metro_map_tool import metro_map as cli
-from metro_map_tool.core import agent, identity, skill_install, version
+from metro_map_tool.core import agent, identity, services, skill_install, version
 
 ROOT = Path(__file__).resolve().parent.parent
 PKG = ROOT / identity.PACKAGE
@@ -154,6 +154,106 @@ def test_an_agent_calling_marks_itself_seen(client):
     assert status["connected"] is True and status["client"] == "test-harness"
     # and the page must never claim it can start one
     assert status["startable"] is False
+
+
+# -------------------------------------------------------------- services ----
+
+@pytest.fixture
+def fresh_services(monkeypatch):
+    monkeypatch.setattr(services, "_registered", [])
+    monkeypatch.setitem(services._beat, "at", 0.0)
+    monkeypatch.setitem(services._beat, "pid", None)
+    return services
+
+
+def by_id(client):
+    rows = client.get("/api/services").get_json()["services"]
+    return {row["id"]: row for row in rows}
+
+
+def test_every_part_is_listed_with_a_state(client, fresh_services):
+    rows = by_id(client)
+    assert {"web", "mcp", "updates", "skill", "workspace"} <= set(rows)
+    assert all(row["state"] in ("up", "down", "off") for row in rows.values())
+    assert rows["web"]["state"] == "up"
+    assert rows["updates"]["state"] == "off"          # the fixture turns it off
+
+
+def test_a_part_this_tool_was_built_without_is_grey(client, fresh_services):
+    rows = by_id(client)
+    assert (rows["mcp"]["state"] == "off") is not bool(identity.WITH_MCP)
+    assert (rows["workspace"]["state"] == "off") is not bool(identity.WITH_WORKSPACE)
+
+
+@pytest.mark.skipif(not identity.WITH_MCP, reason="no MCP server in this tool")
+def test_the_mcp_server_is_up_while_it_beats(client, fresh_services, monkeypatch):
+    assert by_id(client)["mcp"]["state"] == "down"
+    got = client.post("/api/mcp/heartbeat", json={"pid": 4242},
+                      headers={"X-Agent": "test-mcp"}, environ_base=LOCAL)
+    assert got.status_code == 200
+    row = by_id(client)["mcp"]
+    assert row["state"] == "up" and "4242" in row["detail"]
+    monkeypatch.setitem(services._beat, "at", services._beat["at"] - services.ALIVE_FOR - 5)
+    assert by_id(client)["mcp"]["state"] == "down"
+
+
+def test_a_heartbeat_does_not_count_as_an_agent_working(client, fresh_services, monkeypatch):
+    monkeypatch.setitem(agent._seen, "at", 0.0)
+    client.post("/api/mcp/heartbeat", json={}, headers={"X-Agent": "test-mcp"},
+                environ_base=LOCAL)
+    assert client.get("/api/agent").get_json()["status"]["connected"] is False
+
+
+def test_a_heartbeat_from_off_the_machine_is_refused(client, fresh_services):
+    got = client.post("/api/mcp/heartbeat", json={}, environ_base=FAR_AWAY)
+    assert got.status_code == 403
+
+
+def test_a_tools_own_service_reports_all_three_states(client, fresh_services):
+    services.register("on", "Working", check=lambda: (True, "fine"))
+    services.register("bad", "Broken", check=lambda: (False, "refused the token"))
+    services.register("unset", "Unset", check=lambda: (True, ""),
+                      enabled=lambda: (False, "add a token under Settings"))
+    services.register("boom", "Exploding", check=lambda: 1 / 0)
+    rows = by_id(client)
+    assert (rows["on"]["state"], rows["on"]["detail"]) == ("up", "fine")
+    assert (rows["bad"]["state"], rows["bad"]["detail"]) == ("down", "refused the token")
+    assert (rows["unset"]["state"], rows["unset"]["detail"]) == ("off", "add a token under Settings")
+    assert rows["boom"]["state"] == "down" and "division" in rows["boom"]["detail"]
+
+
+def test_a_slow_service_cannot_hold_the_about_box_open(client, fresh_services, monkeypatch):
+    import time
+    monkeypatch.setattr(services, "CHECK_TIMEOUT", 0.3)
+    services.register("slow", "Slow", check=lambda: (time.sleep(3), (True, ""))[1])
+    started = time.monotonic()
+    rows = by_id(client)
+    assert time.monotonic() - started < 2
+    assert rows["slow"]["state"] == "down" and "did not answer" in rows["slow"]["detail"]
+
+
+def test_the_skill_counts_as_installed_in_a_checkout_that_carries_it(
+        client, fresh_services, monkeypatch, tmp_path):
+    monkeypatch.setattr(skill_install, "destination", lambda *a: tmp_path / "SKILL.md")
+    row = by_id(client)["skill"]
+    if skill_install.checkout_copies():               # a checkout: its own copy counts
+        assert row["state"] == "up" and "checkout" in row["detail"]
+    monkeypatch.setattr(skill_install, "checkout_copies", lambda: [])
+    row = by_id(client)["skill"]
+    assert row["state"] == "down" and "not installed" in row["detail"]
+
+
+@pytest.mark.skipif(not identity.WITH_MCP, reason="no MCP server in this tool")
+def test_a_bridge_error_is_one_the_mcp_sdk_delivers_to_the_model():
+    from mcp.server.mcpserver.exceptions import ToolError as Delivered
+    from metro_map_tool.core import mcp_bridge
+    assert issubclass(mcp_bridge.ToolError, Delivered)
+    assert issubclass(mcp_bridge.ToolError, ValueError)        # old catches still work
+    assert issubclass(mcp_bridge.NotAnswering, ConnectionError)
+
+def test_the_about_box_asks_for_the_services(client):
+    js = (PKG / "core" / "static" / "core.js").read_text(encoding="utf-8")
+    assert "/api/services" in js
 
 
 def test_the_page_offers_connect_only_when_there_is_an_mcp_server(client):

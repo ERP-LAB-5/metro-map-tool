@@ -116,10 +116,13 @@ class SharedEditingTest(unittest.TestCase):
         folders = {"mymaps": root / "mymaps", "shared": root / "shared"}
         for d in folders.values():
             d.mkdir()
+        self.designer = designer
         self.patches = [mock.patch.object(designer, "FOLDERS", folders),
                         mock.patch.object(ms.web, "ensure_server"),
-                        mock.patch.object(ms, "call", side_effect=self.bridge),
-                        mock.patch.dict(ms._seen, clear=True)]
+                        mock.patch.object(ms, "call", side_effect=self.agent),
+                        mock.patch.dict(ms._seen, clear=True),
+                        mock.patch.dict(ms._locked, clear=True),
+                        mock.patch.dict(designer._locks, clear=True)]
         for patch in self.patches:
             patch.start()
         designer.app.config["TESTING"] = True
@@ -131,22 +134,33 @@ class SharedEditingTest(unittest.TestCase):
             patch.stop()
         self.tmp.cleanup()
 
-    def bridge(self, method, path, payload=None):
+    def bridge(self, method, path, payload=None, agent=False):
         """What core's call does: JSON in, JSON out, errors as a ValueError."""
-        res = self.client.open(path, method=method, json=payload,
+        headers = {"X-Agent": "metro-map-mcp"} if agent else {}
+        res = self.client.open(path, method=method, json=payload, headers=headers,
                                environ_base={"REMOTE_ADDR": "127.0.0.1"})
         data = res.get_json(silent=True)
         if res.status_code >= 400:
             raise ValueError("; ".join((data or {}).get("errors") or [str(data)]))
         return data
 
-    def person_saves(self, label):
-        """The designer's save: the version it loaded, then its own edit."""
+    def agent(self, method, path, payload=None):
+        """The MCP server's calls, which name themselves as core's bridge does."""
+        return self.bridge(method, path, payload, agent=True)
+
+    def person_saves(self, label, take_over=True):
+        """The designer: take the map over if an agent holds it, then save an edit."""
         now = self.bridge("GET", "/api/maps/plan")
+        if take_over and now.get("lock"):
+            self.bridge("DELETE", "/api/maps/plan/lock")
         spec = self.copy(now["spec"])
         spec["stations"]["a"]["label"] = label
         return self.bridge("PUT", "/api/maps/plan",
                            {"spec": spec, "base_version": now["version"]})
+
+    def lock_on_disk(self):
+        entry = next(m for m in self.bridge("GET", "/api/maps") if m["name"] == "plan")
+        return entry["lock"]
 
     def label_on_disk(self):
         return self.bridge("GET", "/api/maps/plan")["spec"]["stations"]["a"]["label"]
@@ -160,6 +174,18 @@ class SharedEditingTest(unittest.TestCase):
             ms.save_map("plan", mine)
         self.assertIn("read_map", str(caught.exception))
         self.assertEqual(self.label_on_disk(), "Edited by a person")
+
+    def test_a_person_who_saves_without_the_designer_still_wins_the_version_check(self):
+        # a script or another tab that ignores the lock: the lock was released
+        # some other way, and the version check is what is left
+        ms.save_map("plan", self.copy(MAP))
+        mine = ms.read_map("plan")
+        self.bridge("DELETE", "/api/maps/plan/lock", agent=True)
+        ms._locked.clear()
+        self.person_saves("Edited by a person")
+        with self.assertRaises(ValueError) as caught:
+            ms.save_map("plan", mine)
+        self.assertIn("changed after you read it", str(caught.exception))
 
     def test_reading_again_and_reapplying_then_goes_through(self):
         ms.save_map("plan", self.copy(MAP))
@@ -208,6 +234,62 @@ class SharedEditingTest(unittest.TestCase):
                 "into": {"name": "plan", "folder": "mymaps"}}):
             ms.import_map("jira", {"roots": ["ABCD-1"]}, into="plan")
         self.assertEqual(ms._seen[("plan", "mymaps")], version)
+
+    # ------------------------------------------------------------- the lock --
+
+    def test_reading_a_map_locks_it_and_the_designer_cannot_save(self):
+        ms.save_map("plan", self.copy(MAP))
+        ms.read_map("plan")
+        self.assertEqual(self.lock_on_disk()["holder"], "metro-map-mcp")
+        with self.assertRaises(ValueError) as caught:
+            self.person_saves("Sneaking in", take_over=False)
+        self.assertIn("an agent is updating", str(caught.exception))
+        self.assertEqual(self.label_on_disk(), "A")
+
+    def test_the_agents_save_hands_the_map_back(self):
+        ms.save_map("plan", self.copy(MAP))
+        mine = ms.read_map("plan")
+        mine["stations"]["a"]["label"] = "Agent's"
+        ms.save_map("plan", mine)
+        self.assertIsNone(self.lock_on_disk())
+        self.person_saves("And now mine", take_over=False)
+        self.assertEqual(self.label_on_disk(), "And now mine")
+
+    def test_taking_over_refuses_the_agents_save_until_it_reads_again(self):
+        ms.save_map("plan", self.copy(MAP))
+        mine = ms.read_map("plan")
+        self.bridge("DELETE", "/api/maps/plan/lock")          # Take over
+        self.assertIsNone(self.lock_on_disk())
+        mine["stations"]["b"]["label"] = "Agent's"
+        with self.assertRaises(ValueError) as caught:
+            ms.save_map("plan", mine)
+        self.assertIn("taken over", str(caught.exception))
+        self.assertEqual(self.bridge("GET", "/api/maps/plan")["spec"]["stations"]["b"]["label"], "B")
+        again = ms.read_map("plan")                            # asked to go on
+        again["stations"]["b"]["label"] = "Agent's"
+        ms.save_map("plan", again)
+        self.assertEqual(self.bridge("GET", "/api/maps/plan")["spec"]["stations"]["b"]["label"],
+                         "Agent's")
+
+    def test_a_lock_nobody_comes_back_for_lapses(self):
+        ms.save_map("plan", self.copy(MAP))
+        ms.read_map("plan")
+        with mock.patch.object(self.designer, "LOCK_FOR", -1):
+            self.assertIsNone(self.lock_on_disk())
+            self.person_saves("After the lapse", take_over=False)
+        self.assertEqual(self.label_on_disk(), "After the lapse")
+
+    def test_deleting_a_map_forgets_its_lock(self):
+        ms.save_map("plan", self.copy(MAP))
+        ms.read_map("plan")
+        ms.delete_map("plan")
+        self.assertNotIn(("plan", "mymaps"), self.designer._locks)
+
+    def test_locking_is_refused_from_off_the_machine(self):
+        ms.save_map("plan", self.copy(MAP))
+        res = self.client.post("/api/maps/plan/lock",
+                               environ_base={"REMOTE_ADDR": "10.1.2.3"})
+        self.assertEqual(res.status_code, 403)
 
     def test_the_import_endpoint_reports_the_version_it_built_on(self):
         ms.save_map("plan", self.copy(MAP))

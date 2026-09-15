@@ -12,7 +12,8 @@
 
 {% block brand %}
   <button id="btn-side" class="icon" title="show or hide the panel (Ctrl+\)"
-          aria-label="Toggle the side panel">&#9776;</button>
+          aria-label="Toggle the side panel">&#9776;<span id="side-lock" class="side-lock" hidden
+          title="an agent is updating this map — the panel is paused">agent lock</span></button>
   <span class="brand">metro&nbsp;map</span>
 
   <span class="name-slot">
@@ -130,6 +131,7 @@
   <section class="stage">
     <div id="canvas" class="canvas"></div>
     <div id="empty" class="empty">Add a station to start drawing.</div>
+    <div id="lockbar" class="live lockbar" hidden></div>
     <div id="live" class="live" hidden></div>
     <div id="problems" class="problems" hidden></div>
     <div class="stage-foot">

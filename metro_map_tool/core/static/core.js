@@ -197,6 +197,8 @@
           <dt>Latest</dt><dd id="core-a-latest">checking…</dd>
         </dl>
         <p class="core-note" id="core-a-note"></p>
+        <h3 class="about-h">Services</h3>
+        <ul class="svc" id="core-a-svc"><li class="svc-wait">checking…</li></ul>
         <p class="about-disclaimer" id="core-a-disclaimer" hidden></p>
         <pre class="about-log" id="core-a-log" hidden></pre>
         <p class="about-foot" id="core-a-foot"></p>
@@ -205,6 +207,10 @@
         <button type="button" id="core-a-update" class="warn-btn" hidden>Update and restart</button>
         <button value="cancel" class="primary">Close</button>
       </div>`);
+
+    // asked alongside the version, not after it: a tool's own checks may take
+    // a few seconds to reach their backends, and the rest of the box need not wait
+    showServices();
 
     let info;
     try { info = await api("GET", "/api/version"); } catch (_) { info = null; }
@@ -259,6 +265,27 @@
       latest.textContent = info.latest;
       note.textContent = "Up to date.";
     }
+  }
+
+  /** Each part of the tool with a dot: green up, red down, grey not part of it. */
+  async function showServices() {
+    let rows;
+    try { rows = (await api("GET", "/api/services")).services || []; }
+    catch (_) { rows = null; }
+    const list = $("#core-a-svc");
+    if (!list) return;                            // dialog closed while we asked
+    if (!rows) {
+      list.innerHTML = `<li class="svc-wait">The server did not say.</li>`;
+      return;
+    }
+    const word = { up: "up", down: "down", off: "not enabled" };
+    list.innerHTML = rows.map((s) => `
+      <li class="svc-row is-${esc(s.state)}">
+        <span class="svc-dot" role="img" aria-label="${esc(word[s.state] || s.state)}"
+              title="${esc(word[s.state] || s.state)}"></span>
+        <span class="svc-name">${esc(s.name)}</span>
+        <span class="svc-detail">${esc(s.detail)}</span>
+      </li>`).join("");
   }
 
   /** Ask the server to pip-upgrade itself, then restart into it if that worked. */

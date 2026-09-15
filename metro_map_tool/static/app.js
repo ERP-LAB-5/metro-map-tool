@@ -53,6 +53,8 @@ const S = {
   dirty: false,
   version: null,                           // content hash of the map as loaded
   ignoreVersion: null,                     // an external change we chose to keep out
+  locked: null,                            // {holder, seconds_left} while an agent works
+  sideBeforeLock: null,                    // the panel as it was when the lock came
   undo: [],
   redo: [],
   zoom: 1,
@@ -86,10 +88,14 @@ const SIDE_KEY = "metro-map:side";
 /* ---------------------------------------------------------- side panel -- */
 
 /** Fold the panel away for a wider canvas. Remembered per browser. */
-function applySide(hidden) {
+function applySide(hidden, { remember = true } = {}) {
   S.sideHidden = !!hidden;
   document.body.classList.toggle("side-hidden", S.sideHidden);
-  try { localStorage.setItem(SIDE_KEY, S.sideHidden ? "1" : "0"); } catch (_) { /* none */ }
+  // a lock folding the panel away is not the person's preference, so it is not
+  // stored: a reload mid-lock must not leave the panel hidden for good
+  if (remember) {
+    try { localStorage.setItem(SIDE_KEY, S.sideHidden ? "1" : "0"); } catch (_) { /* none */ }
+  }
   const btn = $("#btn-side");
   if (btn) btn.setAttribute("aria-expanded", String(!S.sideHidden));
 }
@@ -207,8 +213,16 @@ function pushUndo() {
   syncToolbar();
 }
 
+/** While an agent holds the open map, say so instead of changing it. True if paused. */
+function pausedForAgent() {
+  if (!S.locked) return false;
+  flashLive("An agent is updating this map — take it over to edit.");
+  return true;
+}
+
 /** The one door every mutation goes through. */
 function applyChange(fn, { undo = true } = {}) {
+  if (pausedForAgent()) return;
   if (undo) pushUndo();
   fn();
   markDirty();
@@ -440,7 +454,8 @@ function initCanvas() {
     if (ev.button !== 0) return;
     const hit = ev.target.closest("[data-station], [data-junction]");
     const hitId = hit && (hit.dataset.station || hit.dataset.junction);
-    if (hit && waypoint(hitId)) {
+    // while an agent holds the map the canvas can still be panned, not edited
+    if (hit && waypoint(hitId) && !S.locked) {
       const id = hitId;
       const g = gridAt(ev);
       const st = waypoint(id);
@@ -2921,6 +2936,7 @@ async function loadMap(name, { force = false, folder = null } = {}) {
   S.folder = data.folder || DEFAULT_FOLDER;
   S.version = data.version || null;
   S.ignoreVersion = null;
+  setLock(data.lock || null);
   S.spec = normalise(data.spec);
   S.style = { ...DEFAULT_STYLE, ...(data.spec.style || {}) };
   S.snap = Number((data.spec.editor || {}).snap) || 1;
@@ -2960,6 +2976,7 @@ async function saveMap(name, folder) {
   spec.editor = { snap: S.snap };
   const body = { spec, auto_interchange: S.autoIx, folder };
   const sameMap = name === S.name && folder === S.folder;
+  if (sameMap && pausedForAgent()) return;
   if (sameMap && S.version) body.base_version = S.version;
   // Saving under a different name or into the other folder carries no base
   // version, so the server's concurrency check cannot fire — nothing else
@@ -3103,6 +3120,7 @@ async function checkForExternalSave() {
   try { maps = await api("GET", "/api/maps"); }
   catch (_) { return; }                    // server stopped or restarting; try later
   const mine = maps.find((m) => m.name === S.name && m.folder === S.folder);
+  setLock((mine && mine.lock) || null);
   if (!mine || !mine.version) return;
   if (mine.version === S.version || mine.version === S.ignoreVersion) return;
 
@@ -3119,6 +3137,70 @@ async function checkForExternalSave() {
       } },
     { label: "Keep mine", fn: () => { S.ignoreVersion = mine.version; hideLive(); } },
   ]);
+}
+
+/* An agent that reads the open map locks it until its save lands. The page
+   follows along read-only — its saves still arrive as live reloads — and
+   "Take over" ends the lock at once. The server then refuses the agent's next
+   save until it reads the map again, so nothing either side did is lost. */
+function setLock(lock) {
+  const was = !!S.locked;
+  S.locked = lock;
+  document.body.classList.toggle("is-locked", !!lock);
+  $("#side-lock").hidden = !lock;
+  const bar = $("#lockbar");
+  if (!lock) {
+    bar.hidden = true;
+    if (was) {
+      restoreSideAfterLock();
+      flashLive(`The agent is done with “${S.name}” — editing is back on.`);
+    }
+    return;
+  }
+  if (!was) {
+    // nothing in the panel can be used while the agent works, so fold it away
+    // and give the canvas the room — and put it back as it was afterwards
+    S.sideBeforeLock = S.sideHidden;
+    applySide(true, { remember: false });
+  }
+  if (was && !bar.hidden) {                // already showing: only the countdown moves
+    const left = bar.querySelector(".left");
+    if (left) left.textContent = lockLeft(lock);
+    return;
+  }
+  bar.hidden = false;
+  bar.innerHTML = `<span class="grow"><b>An agent is updating “${esc(S.name)}”.</b>
+    Editing is paused and its changes appear here as they are saved${S.dirty
+      ? " — your unsaved edits are kept, but cannot be saved until you take over" : ""}.
+    <span class="left note">${esc(lockLeft(lock))}</span></span>`;
+  const btn = document.createElement("button");
+  btn.textContent = "Take over";
+  btn.className = "primary";
+  btn.title = "end the agent's lock and edit the map yourself";
+  btn.addEventListener("click", takeOver);
+  bar.appendChild(btn);
+}
+
+function restoreSideAfterLock() {
+  if (S.sideBeforeLock === null) return;
+  applySide(S.sideBeforeLock, { remember: false });
+  S.sideBeforeLock = null;
+}
+
+function lockLeft(lock) {
+  return `The lock ends by itself in ${Math.max(0, lock.seconds_left)} s if the agent stops.`;
+}
+
+async function takeOver() {
+  const where = S.folder ? `?folder=${encodeURIComponent(S.folder)}` : "";
+  try { await api("DELETE", `/api/maps/${encodeURIComponent(S.name)}/lock${where}`); }
+  catch (err) { showProblems(err.errors); return; }
+  S.locked = null;                          // quietly: this was the person's own doing
+  document.body.classList.remove("is-locked");
+  $("#lockbar").hidden = true;
+  $("#side-lock").hidden = true;
+  restoreSideAfterLock();
+  flashLive(`You have “${S.name}” — the agent will be told if it tries to save.`);
 }
 
 function showLive(message, actions) {
@@ -3148,7 +3230,7 @@ function flashLive(message) {
 /* ------------------------------------------------------------ undo/redo -- */
 
 function undo() {
-  if (!S.undo.length) return;
+  if (pausedForAgent() || !S.undo.length) return;
   S.redo.push(snapshot());
   restore(S.undo.pop());
   markDirty();
@@ -3158,7 +3240,7 @@ function undo() {
 }
 
 function redo() {
-  if (!S.redo.length) return;
+  if (pausedForAgent() || !S.redo.length) return;
   S.undo.push(snapshot());
   restore(S.redo.pop());
   markDirty();

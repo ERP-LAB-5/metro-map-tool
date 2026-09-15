@@ -542,6 +542,23 @@ seconds** with no reload. Unsaved edits of your own are never overwritten — yo
 get *Load theirs* / *Keep mine*. And a Save that would clobber a version you
 never saw is refused by the server (HTTP 409), offering the same choice.
 
+**While an agent works on a map, the map is locked.** `read_map` takes the lock
+and the agent's `save_map` gives it back; it also lapses by itself after two
+minutes without a save. Meanwhile the designer folds the panel away (and brings
+it back afterwards if it was open), the panel button shows **agent lock**, and
+editing and Save are paused while the agent's changes keep arriving on the
+canvas. **Take over** ends the lock at once; the agent's next save is then
+refused with a message telling it so, and nothing either side did is lost.
+
+The agent's saves are checked the same way yours are: `save_map` only replaces
+the version the agent last read, and refuses otherwise with a sentence the
+agent can act on — re-read the map and re-apply its change.
+
+**About** lists what the tool is made of, with a dot each — green up, red down,
+grey not part of this install: the web server, the MCP server (it reports in
+every 20 seconds while an agent has it open), the update check, the agent
+skill, the maps folders, and the Jira and GitHub importers once configured.
+
 [**The skill**](metro_map_tool/skill/SKILL.md) teaches an agent the spec, the
 design order and the judgement calls. **It ships inside the package**, so an
 install already has it — one command puts it where Claude Code looks:

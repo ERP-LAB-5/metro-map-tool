@@ -11,7 +11,9 @@ this module is the client:
     from .core import mcp_bridge as web
     web.configure(port=args.port, autostart=True)
     web.call("GET", "/api/things")              # ensure_server() first
+    raise web.ToolError("what the agent should read")   # its text reaches the model
     web.add_core_tools(server)                  # server_url, stop_server
+    web.start_heartbeat()                       # so About can say it is running
 
 Nothing may be written to stdout here or anywhere in an MCP server: stdout is
 the transport. log() goes to stderr.
@@ -20,8 +22,10 @@ the transport. log() goes to stderr.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -29,6 +33,30 @@ import urllib.request
 from typing import Any, Optional
 
 from . import identity
+
+try:
+    from mcp.server.mcpserver.exceptions import ToolError as _Delivered
+except ImportError:                 # core imported where the mcp package is not
+    _Delivered = Exception
+
+
+class ToolError(_Delivered, ValueError):
+    """A failure the agent is meant to read — raise this, not ValueError.
+
+    The MCP SDK treats any other exception from a tool as a crash: it logs a
+    traceback, and the model is told only "Error executing tool <name>", with
+    the text left behind on the server. So every sentence written for the agent
+    — a validation problem, "changed since you read it", "not configured" — was
+    being thrown away. Only the SDK's own ToolError is delivered.
+
+    It is also a ValueError, so code that already catches ValueError around a
+    bridge call keeps working unchanged.
+    """
+
+
+class NotAnswering(ToolError, ConnectionError):
+    """The web server is not there. A ConnectionError too, for existing catches."""
+
 
 BASE = f"http://127.0.0.1:{identity.DEFAULT_PORT}"
 AUTOSTART = True
@@ -39,6 +67,39 @@ def configure(port: Optional[int] = None, url: Optional[str] = None,
     global BASE, AUTOSTART
     BASE = (url or f"http://127.0.0.1:{port or identity.DEFAULT_PORT}").rstrip("/")
     AUTOSTART = autostart
+
+
+def start_heartbeat(every: Optional[float] = None) -> threading.Thread:
+    """Tell the web server, every so often, that this MCP server is running.
+
+    A stdio server has no port the web server could knock on, so without this
+    the About box could only guess from tool calls, and an agent that is open
+    but idle would look dead. The beat never starts a web server — an MCP
+    server someone left open must not bring one back after it was stopped. A
+    failed beat is tried again after a couple of seconds rather than a whole
+    interval, so a web server that has just come up sees it straight away.
+    """
+    from . import services
+    interval = float(every or services.BEAT_EVERY)
+    body = json.dumps({"pid": os.getpid()}).encode()
+
+    def pulse() -> None:
+        while True:
+            req = urllib.request.Request(
+                BASE + "/api/mcp/heartbeat", data=body, method="POST",
+                headers={"X-Agent": f"{identity.TOOL_NAME}-mcp",
+                         "Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(req, timeout=3):
+                    pass
+                wait = interval
+            except Exception:            # noqa: BLE001 - not running is fine
+                wait = min(2.0, interval)
+            time.sleep(wait)
+
+    thread = threading.Thread(target=pulse, name="mcp-heartbeat", daemon=True)
+    thread.start()
+    return thread
 
 
 def log(msg: str) -> None:
@@ -68,9 +129,9 @@ def call(method: str, path: str, payload: Optional[dict] = None,
             errors = data.get("errors") or [data.get("description") or detail]
         except ValueError:
             errors = [detail]
-        raise ValueError("; ".join(str(e) for e in errors)) from None
+        raise ToolError("; ".join(str(e) for e in errors)) from None
     except urllib.error.URLError as exc:
-        raise ConnectionError(
+        raise NotAnswering(
             f"{identity.TITLE} at {BASE} is not answering: {exc.reason}") from None
 
 
@@ -92,8 +153,8 @@ def ensure_server() -> None:
     if alive():
         return
     if not AUTOSTART:
-        raise ConnectionError(f"nothing is running at {BASE} — start it with run.sh "
-                              f"or {identity.WEB_COMMAND}")
+        raise NotAnswering(f"nothing is running at {BASE} — start it with run.sh "
+                           f"or {identity.WEB_COMMAND}")
     port = urllib.parse.urlparse(BASE).port or identity.DEFAULT_PORT
     log(f"nothing on {BASE} — starting {identity.WEB_COMMAND}")
     subprocess.Popen(
@@ -106,7 +167,7 @@ def ensure_server() -> None:
         if alive():
             log(f"ready at {BASE}")
             return
-    raise ConnectionError(f"started {identity.WEB_COMMAND} but {BASE} never answered")
+    raise NotAnswering(f"started {identity.WEB_COMMAND} but {BASE} never answered")
 
 
 def add_core_tools(server: Any) -> None:

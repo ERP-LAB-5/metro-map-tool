@@ -13,6 +13,8 @@ The blueprint gives the page:
 
     GET  /api/health       tool name and version; what launchers and MCP poll
     GET  /api/version      installed vs published, plus everything the About box shows
+    GET  /api/services     each part of the tool: up, down, or not part of it
+    POST /api/mcp/heartbeat  the MCP server saying it is still running
     POST /api/update       pip-upgrade an installed copy (loopback only)
     POST /api/restart      re-exec on the same port (loopback only)
     POST /api/shutdown     exit (loopback only)
@@ -37,6 +39,7 @@ from werkzeug.exceptions import HTTPException
 
 from . import agent
 from . import identity
+from . import services
 from . import version as ver
 
 bp = Blueprint("core", __name__,
@@ -72,7 +75,9 @@ def create_app(import_name: str, **flask_kwargs) -> Flask:
         # the only way the page can know an agent is working here: a stdio
         # server has no port to find and no pid to look up.
         client = request.headers.get("X-Agent")
-        if client:
+        # a heartbeat says the server is running, not that an agent is working:
+        # counting it would light the Agent dot for as long as a client is open
+        if client and request.path != "/api/mcp/heartbeat":
             agent.seen(client)
 
     @app.errorhandler(HTTPException)
@@ -142,6 +147,23 @@ def version_info():
         "web_command": identity.WEB_COMMAND,
         "extras": extras,
     })
+
+
+@bp.get("/api/services")
+def services_info():
+    """Every part of the tool and its state, for the About box. Never fails."""
+    return jsonify({"services": services.describe()})
+
+
+@bp.post("/api/mcp/heartbeat")
+def mcp_heartbeat():
+    """The MCP server's pulse. Loopback only: nothing off the machine is ours."""
+    only_local("the MCP heartbeat")
+    data = request.get_json(silent=True) or {}
+    pid = data.get("pid")
+    services.beat(str(request.headers.get("X-Agent") or ""),
+                  pid if isinstance(pid, int) else None)
+    return jsonify({"ok": True, "every": services.BEAT_EVERY})
 
 
 @bp.get("/api/agent")
@@ -278,6 +300,7 @@ def serve(app: Flask, args: argparse.Namespace,
     up four kilobytes later is no use to anyone.
     """
     ver.UPDATE_CHECK = not args.no_update_check
+    services.listening(args.host, args.port)
     say = lambda text="": print(text, flush=True)   # noqa: E731
     for line in lines:
         say(line)

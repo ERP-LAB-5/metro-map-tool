@@ -339,6 +339,15 @@ button.stop:hover { filter: brightness(1.1); border-color: var(--danger); }
 .live .grow { flex: 1 1 auto; }
 .live button { padding: 3px 10px; }
 
+/* an agent holds the open map: the page follows it read-only */
+.lockbar {
+  background: color-mix(in srgb, #f6a821 18%, var(--paper));
+  border-top-color: #f6a821;
+}
+.lockbar .note { display: block; }
+body.is-locked .side { pointer-events: none; opacity: .55; }
+body.is-locked #btn-save, body.is-locked #btn-import { pointer-events: none; opacity: .45; }
+
 /* ------------------------------------------------ station editor buttons -- */
 
 .row-btns { display: flex; gap: 8px; }
@@ -386,6 +395,12 @@ button.icon {
   color: var(--muted);
 }
 body.side-hidden .side { display: none; }
+/* on the panel button while an agent holds the map: why the panel went away */
+.side-lock {
+  margin-left: 6px; padding: 0 6px; border-radius: 8px; font-size: 10px;
+  font-weight: 600; letter-spacing: .03em; vertical-align: 2px;
+  color: #3b2a00; background: #f6a821;
+}
 
 /* ------------------------------------------------------- ride controls -- */
 
