@@ -32,6 +32,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     f.add_argument("input", help="a Metrofy input (JSON), or - for stdin")
     f.add_argument("output", help="the HTML page to write")
     f.add_argument("--spec", metavar="FILE", help="also write the metro-map spec Metrofy placed")
+    f.add_argument("--parts", metavar="FILE",
+                   help="also write {svg, data}: the map for an app to show in its own layout")
     f.add_argument("--json", action="store_true", help="the whole receipt, not the summary")
     c = sub.add_parser("check", help="the input's problems, one per line")
     c.add_argument("input")
@@ -53,6 +55,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1 if problems else 0
 
     receipt, out = finalize(doc)
+    if receipt["ok"] and args.parts:
+        from .build import parts
+        _, made = parts(doc)
+        Path(args.parts).write_text(json.dumps(made, ensure_ascii=False, sort_keys=True) + "\n",
+                                    encoding="utf-8", newline="\n")
     if receipt["ok"]:
         Path(args.output).write_text(out, encoding="utf-8", newline="\n")
         if args.spec:

@@ -156,6 +156,36 @@ class Finalize(unittest.TestCase):
         self.assertNotIn("</script><script>alert(2)", page)
 
 
+class Parts(unittest.TestCase):
+    """The map for an app to show in its own layout: the SVG and its data."""
+
+    def test_parts_are_the_svg_and_data_keyed_as_the_svg_marks_them(self):
+        from metro_map_tool.metrofy import parts
+        receipt, made = parts(example())
+        self.assertTrue(receipt["ok"])
+        svg, d = made["svg"], made["data"]
+        self.assertTrue(svg.lstrip().startswith("<svg"))
+        for sid in d["steps"]:
+            self.assertIn(f'data-station="{sid}"', svg)
+        for i, ln in enumerate(d["lines"]):                  # a route's l<i> is data["lines"][i]
+            self.assertRegex(svg, rf'<path class="route[^"]*\bl{i}\b[^"]*"[^>]*stroke="{ln["color"]}"')
+        self.assertEqual(d["lines"][0]["name"], build.SPINE_NAME)
+        self.assertEqual([t["id"] for t in d["trips"]], ["maker-as-metaobject", "maker-as-tag"])
+        self.assertEqual(d["trips"][0]["color"], d["lines"][1]["color"])   # a trip takes its story's colour
+        self.assertEqual(d["steps"]["classify"]["parent"], "present")
+
+    def test_the_page_is_made_from_the_same_parts(self):
+        from metro_map_tool.metrofy import parts
+        _, made = parts(example())
+        self.assertIn(made["svg"], finalize(example())[1])
+
+    def test_failed_parts_are_empty(self):
+        from metro_map_tool.metrofy import parts
+        receipt, made = parts({"metrofy": 1})
+        self.assertFalse(receipt["ok"])
+        self.assertEqual(made, {})
+
+
 class CommandLine(unittest.TestCase):
     def test_finalize_writes_the_page_and_exits_by_the_receipt(self):
         import tempfile, io, contextlib
@@ -165,6 +195,10 @@ class CommandLine(unittest.TestCase):
                 self.assertEqual(cli.main(["finalize", str(EXAMPLE), str(out)]), 0)
             self.assertTrue(json.loads(said.getvalue())["ok"])
             self.assertTrue(out.read_text(encoding="utf-8").startswith("<!doctype html>"))
+            with contextlib.redirect_stdout(io.StringIO()):
+                cli.main(["finalize", str(EXAMPLE), str(out), "--parts", str(Path(d) / "parts.json")])
+            made = json.loads((Path(d) / "parts.json").read_text(encoding="utf-8"))
+            self.assertEqual(sorted(made), ["data", "svg"])
             bad = Path(d) / "bad.json"
             bad.write_text(json.dumps({"metrofy": 2}), encoding="utf-8")
             with contextlib.redirect_stdout(io.StringIO()):

@@ -41,6 +41,8 @@ ZONE_COLOURS = ["#0098d4", "#7b3fb5", "#ee7c0e", "#007d32", "#9b0058", "#00a4a7"
 STEP_GAP = 2
 LANE_ROWS = 3
 SPINE_NAME = "The process"
+#: the renderer's own colour for a trip that names none
+TRIP_COLOUR = "#e1251b"
 #: a tighter grid than the designer's default, so the text stays readable once
 #: the map is scaled to the page: a generated map has no hand-tuned spacing
 STYLE = {"cell": 80.0, "label_size": 15.0, "zone_label_size": 14.0, "legend_size": 14.0}
@@ -339,30 +341,48 @@ dl {{ margin: 0; }} dt {{ color: var(--muted); font-size: 13px; margin-top: 6px;
 """
 
 
-def page(doc: dict, spec: dict, svg: str, version: str) -> str:
-    """The standalone page: the map, its trips, and a details panel. No network."""
+def data(doc: dict, spec: dict) -> dict:
+    """What an app needs beside the SVG to make the map its own.
+
+    Keyed the way the SVG marks things, so a click can be answered without
+    reading the drawing: `steps` by the `data-station` id, `lines` by the
+    index in a route's `l<i>` class (the process line, when drawn, is 0), and
+    `trips` in the order of the children of the SVG's `#scenarios` group.
+    """
     zone_name = {z["id"]: z["name"] for z in doc["zones"]}
     spine = [{"name": SPINE_NAME, "status": "live", "steps": [s["label"] for s in doc["steps"]],
               "details": {"what": "every step, in process order"}}] if doc.get("spine", True) else []
     label = {s["id"]: s["label"] for s in doc["steps"]}
-    data = {
-        "steps": {s["id"]: {"label": s["label"], "zone": zone_name[s["zone"]], "details": s.get("details") or {}}
+    out = {
+        "title": doc["title"],
+        "subtitle": doc.get("subtitle") or "",
+        "steps": {s["id"]: {"label": s["label"], "zone": zone_name[s["zone"]], "parent": s.get("parent"),
+                            "details": s.get("details") or {}}
                   for s in doc["steps"]},
-        "lines": spine + [{"name": ln["name"], "status": STATUS_WORD[ln.get("status", "planned")],
+        "lines": spine + [{"id": ln["id"], "name": ln["name"], "status": STATUS_WORD[ln.get("status", "planned")],
                            "steps": [label[x] for x in spec["lines"][k + len(spine)]["stations"]],
                            "details": ln.get("details") or {}}
                           for k, ln in enumerate(doc.get("lines") or [])],
-        "trips": [{"name": t["name"], "stops": [label[x] for x in t["stops"]],
+        "trips": [{"id": t["id"], "name": t["name"], "stops": [label[x] for x in t["stops"]],
                    "line": next((ln["name"] for ln in doc.get("lines") or [] if ln["id"] == t.get("line")), None),
-                   "details": t.get("details") or {}} for t in doc.get("trips") or []],
+                   "color": sc.get("color") or TRIP_COLOUR, "details": t.get("details") or {}}
+                  for t, sc in zip(doc.get("trips") or [], spec.get("scenarios") or [])],
     }
-    colours = [sc.get("color") or "#e1251b" for sc in spec.get("scenarios") or []]
+    for ln, drawn in zip(out["lines"], spec["lines"]):
+        ln["color"] = drawn["color"]
+    return out
+
+
+def page(doc: dict, spec: dict, svg: str, version: str) -> str:
+    """The standalone page: the map, its trips, and a details panel. No network."""
+    d = data(doc, spec)
+    colours = [t["color"] for t in d["trips"]]
     trips = "\n      ".join(
         f'<button type="button" aria-pressed="false"><span class="swatch" style="background:{html.escape(c)}">'
         f'</span>{html.escape(t["name"])}</button>' for t, c in zip(doc.get("trips") or [], colours)) \
         or '<p class="hint">No trips on this map.</p>'
     sub = f'<p class="sub">{html.escape(doc["subtitle"])}</p>' if doc.get("subtitle") else ""
-    blob = json.dumps(data, ensure_ascii=False, sort_keys=True).replace("</", "<\\/")
+    blob = json.dumps({k: d[k] for k in ("steps", "lines", "trips")}, ensure_ascii=False, sort_keys=True).replace("</", "<\\/")
     return PAGE.format(title=html.escape(doc["title"]), subtitle=sub, svg=svg, trips=trips,
                        data=blob, version=html.escape(version))
 
@@ -376,7 +396,21 @@ def _sha(text: str) -> str:
 def finalize(doc: Any, version: str = "") -> Tuple[Dict[str, Any], str]:
     """(receipt, page). The page is empty unless the receipt says ok."""
     from .. import __version__
-    version = version or __version__
+    receipt, made = parts(doc)
+    if not receipt["ok"]:
+        return receipt, ""
+    out = page(doc, receipt["spec"], made["svg"], version or __version__)
+    receipt["output"] = _sha(out)
+    return receipt, out
+
+
+def parts(doc: Any) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """(receipt, {svg, data}): the map for an app to show in its own layout.
+
+    The same gates as `finalize`, which is built on this. The SVG is the
+    renderer's, light and dark, with its trips; `data` is `data()`. Both are
+    empty unless the receipt says ok.
+    """
     receipt: Dict[str, Any] = {"ok": False, "format": FORMAT, "gates": [], "errors": [], "warnings": []}
 
     def gate(name: str, problems: List[str]) -> bool:
@@ -385,17 +419,17 @@ def finalize(doc: Any, version: str = "") -> Tuple[Dict[str, Any], str]:
         return not problems
 
     if not gate("input", check(doc)):
-        return receipt, ""
+        return receipt, {}
     receipt["input"] = _sha(json.dumps(doc, ensure_ascii=False, sort_keys=True))
     spec = place(doc)
     if not gate("spec", mm.validate_spec(spec)):
-        return receipt, ""
+        return receipt, {}
     warnings = mm.spec_warnings(spec)
     # A trip the renderer would skip, or a step outside its lane, is a broken
     # map, not a cosmetic note: it fails here instead of shipping half drawn.
     fatal = [w for w in warnings if "not drawn" in w or "outside every swimlane" in w or "overlap" in w]
     if not gate("trips and lanes", fatal):
-        return receipt, ""
+        return receipt, {}
     receipt["warnings"] = [w for w in warnings if w not in fatal]
     svg = mm.render(spec, mm.style_from(spec["style"]), "auto")
     drawn = set(re.findall(r'data-station="([^"]+)"', svg))
@@ -403,9 +437,8 @@ def finalize(doc: Any, version: str = "") -> Tuple[Dict[str, Any], str]:
     if spec.get("scenarios") and 'id="scenarios"' not in svg:
         missing.append("the trips were not drawn")
     if not gate("render", missing):
-        return receipt, ""
-    out = page(doc, spec, svg, version)
-    receipt.update(ok=True, output=_sha(out), counts={
+        return receipt, {}
+    receipt.update(ok=True, svg=_sha(svg), counts={
         "zones": len(doc["zones"]), "steps": len(doc["steps"]), "lines": len(doc.get("lines") or []),
         "trips": len(doc.get("trips") or [])}, spec=spec)
-    return receipt, out
+    return receipt, {"svg": svg, "data": data(doc, spec)}

@@ -22,10 +22,16 @@ what came out. A map that would be drawn with a trip missing or a step
 outside its lane is refused, not shipped half drawn.
 
     metrofy finalize input.json map.html     # receipt on stdout, exit 1 on failure
+    metrofy finalize input.json map.html --parts map.json
+                                             # also the SVG and the data, for an
+                                             # app to show the map in its own layout
+
+`parts(doc)` gives an app the same as a dict: the SVG, and the data keyed the
+way the SVG marks things, so the app draws its own list, details and buttons.
     metrofy check input.json                 # the input's problems only
     metrofy schema                           # the input's JSON Schema
 
 Standard library only.
 """
 
-from .build import FORMAT, check, finalize, page, place  # noqa: F401
+from .build import FORMAT, check, data, finalize, page, parts, place  # noqa: F401
