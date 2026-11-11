@@ -106,3 +106,21 @@ keep the part as a map to edit.
 
 **What we would need to know.** Whether a saved cut should stay linked to the whole map (and
 re-cut when the whole changes) or become a separate copy.
+
+## Metrofy: what format 1 leaves out
+
+**What.** Three things [ADR 0015](../adr/0015-metrofy.md) names and does not build:
+
+- a `roadmap` view of the same input, with the lines placed on sprints;
+- an ArchiMate reader, so a model of work packages, plateaus and gaps becomes Metrofy input
+  directly (ADR 0013 already reads the same vocabulary for the designer);
+- a `metrofy` MCP tool beside `render_map`.
+
+**Why parked.** Format 1 is driven by its first user, OntoVibeShift's story map, which needs
+none of them yet. The command line and the skill cover an agent.
+
+**What we would need to know.**
+- For the roadmap view: where sprint dates come from (the input, or a timeline computed from
+  the work, ADR 0013's rule for plateaus).
+- For the ArchiMate reader: which elements become steps (business processes) rather than
+  lines (work packages).

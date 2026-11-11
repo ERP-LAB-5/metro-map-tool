@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ERP-LAB-5/metro-map-tool/metrofy/schema.json",
+  "title": "Metrofy input, format 1",
+  "description": "A process and the work riding it. Names things, never positions them: Metrofy places everything. metrofy check says the same as this schema, in sentences, plus the cross-references a schema cannot express (a line's steps exist, a parent comes first).",
+  "type": "object",
+  "required": ["metrofy", "title", "zones", "steps"],
+  "additionalProperties": false,
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"},
+    "colour": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
+    "details": {
+      "description": "Shown in the page's details panel when the item is chosen, in this order.",
+      "type": "object", "additionalProperties": {"type": "string"}
+    }
+  },
+  "properties": {
+    "metrofy": {"const": 1},
+    "title": {"type": "string", "minLength": 1},
+    "subtitle": {"type": "string"},
+    "details": {"$ref": "#/$defs/details"},
+    "spine": {"type": "boolean", "default": true,
+              "description": "Draw 'The process', a grey line through every step in order. Trips may ride it."},
+    "zones": {
+      "description": "Lanes, top to bottom. A step sits in one.",
+      "type": "array", "minItems": 1,
+      "items": {"type": "object", "required": ["id", "name"], "additionalProperties": false,
+                "properties": {"id": {"$ref": "#/$defs/id"}, "name": {"type": "string", "minLength": 1},
+                               "color": {"$ref": "#/$defs/colour"}}}
+    },
+    "steps": {
+      "description": "Stations, in process order. A parent is listed before its children and drawn as an interchange.",
+      "type": "array", "minItems": 2,
+      "items": {"type": "object", "required": ["id", "label", "zone"], "additionalProperties": false,
+                "properties": {"id": {"$ref": "#/$defs/id"}, "label": {"type": "string", "minLength": 1},
+                               "zone": {"$ref": "#/$defs/id"}, "parent": {"$ref": "#/$defs/id"},
+                               "details": {"$ref": "#/$defs/details"}}}
+    },
+    "lines": {
+      "description": "Work riding the process: a story, a stream. Visits its steps in process order.",
+      "type": "array",
+      "items": {"type": "object", "required": ["id", "name", "steps"], "additionalProperties": false,
+                "properties": {"id": {"$ref": "#/$defs/id"}, "name": {"type": "string", "minLength": 1},
+                               "status": {"enum": ["planned", "building", "live", "dropped"], "default": "planned"},
+                               "steps": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+                               "color": {"$ref": "#/$defs/colour"}, "details": {"$ref": "#/$defs/details"}}}
+    },
+    "trips": {
+      "description": "A traveller riding a route: a scenario played out. Consecutive stops must be joined by a line.",
+      "type": "array",
+      "items": {"type": "object", "required": ["id", "name", "stops"], "additionalProperties": false,
+                "properties": {"id": {"$ref": "#/$defs/id"}, "name": {"type": "string", "minLength": 1},
+                               "line": {"$ref": "#/$defs/id"},
+                               "stops": {"type": "array", "minItems": 2, "items": {"$ref": "#/$defs/id"}},
+                               "duration": {"type": "number", "exclusiveMinimum": 0, "maximum": 600},
+                               "color": {"$ref": "#/$defs/colour"}, "details": {"$ref": "#/$defs/details"}}}
+    }
+  }
+}

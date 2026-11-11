@@ -45,10 +45,11 @@ metro-map = "metro_map_tool.metro_map:main"
 metro-map-designer = "metro_map_tool.app:main"
 metro-map-mcp = "metro_map_tool.mcp_server:main"
 metro-map-skill = "metro_map_tool.core.skill_install:main"
+metrofy = "metro_map_tool.metrofy.cli:main"
 
 [tool.setuptools]
 packages = ["metro_map_tool", "metro_map_tool.core", "metro_map_tool.sources",
-            "metro_map_tool.sources.jira"]
+            "metro_map_tool.sources.jira", "metro_map_tool.metrofy"]
 
 # Flask resolves templates/ and static/ relative to app.py, and app.py resolves
 # shared-maps/ the same way, so all three have to be installed beside it — and
@@ -58,6 +59,7 @@ packages = ["metro_map_tool", "metro_map_tool.core", "metro_map_tool.sources",
 metro_map_tool = ["VERSION", "templates/*.html", "static/*", "shared-maps/*.json",
                   "skill/*.md"]
 "metro_map_tool.core" = ["static/*", "templates/core/*.html"]
+"metro_map_tool.metrofy" = ["schema.json", "examples/*.json"]
 
 [tool.setuptools.dynamic]
 version = { file = "metro_map_tool/VERSION" }
