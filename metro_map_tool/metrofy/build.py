@@ -41,6 +41,8 @@ ZONE_COLOURS = ["#0098d4", "#7b3fb5", "#ee7c0e", "#007d32", "#9b0058", "#00a4a7"
 STEP_GAP = 2
 LANE_ROWS = 3
 SPINE_NAME = "The process"
+#: a phase's band, when it names no colour: quiet, so the lanes stay readable
+PHASE_COLOUR = "#8f9aa4"
 #: the renderer's own colour for a trip that names none
 TRIP_COLOUR = "#e1251b"
 #: a tighter grid than the designer's default, so the text stays readable once
@@ -97,7 +99,7 @@ def check(doc: Any) -> List[str]:
     if doc.get("metrofy") != FORMAT:
         errors.append(f'"metrofy" must be {FORMAT}, the input format this version reads')
     _text(doc, "title", "the map", errors)
-    allowed = {"metrofy", "title", "subtitle", "zones", "steps", "lines", "trips", "spine", "details"}
+    allowed = {"metrofy", "title", "subtitle", "zones", "phases", "steps", "lines", "trips", "spine", "details"}
     for k in sorted(set(doc) - allowed):
         errors.append(f'unknown field "{k}": a Metrofy input has only ' + ", ".join(sorted(allowed)))
     _details(doc, "the map", errors)
@@ -112,8 +114,16 @@ def check(doc: Any) -> List[str]:
     if not zones:
         errors.append("at least one zone is needed: every step sits in one")
 
+    phases = _ids(doc["phases"], "phase", errors) if "phases" in doc else []
+    for i, ph in enumerate(doc.get("phases") or [], 1):
+        if isinstance(ph, dict):
+            _text(ph, "name", f"phase {i}", errors)
+            _colour(ph, f"phase {i}", errors)
+            _details(ph, f"phase {i}", errors)
+
     steps = _ids(doc.get("steps"), "step", errors)
     seen: List[str] = []
+    cells: Dict[Tuple[Any, Any], str] = {}
     for i, s in enumerate(doc.get("steps") or [], 1):
         if not isinstance(s, dict):
             continue
@@ -122,6 +132,16 @@ def check(doc: Any) -> List[str]:
         _details(s, where, errors)
         if s.get("zone") not in zones:
             errors.append(f"{where}: zone must be one of the zones' ids (got {s.get('zone')!r})")
+        if "phases" in doc:
+            if s.get("phase") not in phases:
+                errors.append(f"{where}: phase must be one of the phases' ids (got {s.get('phase')!r})")
+            elif (s.get("phase"), s.get("zone")) in cells:
+                errors.append(f"{where}: shares phase '{s.get('phase')}' and zone '{s.get('zone')}' with step "
+                              f"'{cells[(s.get('phase'), s.get('zone'))]}'; one station per phase and zone")
+            else:
+                cells[(s.get("phase"), s.get("zone"))] = s.get("id")
+        elif s.get("phase") is not None:
+            errors.append(f"{where}: has a phase, but the map lists no phases")
         parent = s.get("parent")
         if parent is not None and parent not in seen:
             errors.append(f"{where}: parent '{parent}' must be a step listed before it")
@@ -180,8 +200,19 @@ def check(doc: Any) -> List[str]:
     return errors
 
 
-def _order(doc: dict) -> Dict[str, int]:
+def _column(doc: dict) -> Dict[str, int]:
+    """Each step's column: its phase's place when there are phases, else its own."""
+    if doc.get("phases"):
+        at = {ph["id"]: k for k, ph in enumerate(doc["phases"])}
+        return {s["id"]: at[s["phase"]] for s in doc["steps"]}
     return {s["id"]: i for i, s in enumerate(doc["steps"])}
+
+
+def _order(doc: dict) -> Dict[str, Tuple[int, int]]:
+    """Process order: by column, then by zone (top to bottom), then as listed."""
+    col = _column(doc)
+    lane = {z["id"]: k for k, z in enumerate(doc["zones"])}
+    return {s["id"]: (col[s["id"]], lane[s["zone"]], i) for i, s in enumerate(doc["steps"])}
 
 
 def place(doc: dict) -> dict:
@@ -189,23 +220,26 @@ def place(doc: dict) -> dict:
 
     Steps keep the order they are listed in, which is the process order, one
     column pair apart; each sits on the middle row of its zone's swimlane.
+    With phases, the column is the phase's: the steps of one phase stand one
+    above the other, one per zone, and the phase is a named band around them.
     Lines visit their steps in that order whatever order they were listed in,
     so a story can never run backwards through the process.
     """
     order = _order(doc)
+    col = _column(doc)
     zones = doc["zones"]
     row = {z["id"]: k * LANE_ROWS + 1 for k, z in enumerate(zones)}
     parents = {s.get("parent") for s in doc["steps"] if s.get("parent")}
     stations = {}
     for i, s in enumerate(doc["steps"]):
-        st = {"label": s["label"], "gx": i * STEP_GAP, "gy": row[s["zone"]]}
+        st = {"label": s["label"], "gx": col[s["id"]] * STEP_GAP, "gy": row[s["zone"]]}
         if s["id"] in parents:
             st["interchange"] = True
         stations[s["id"]] = st
     lines = []
     if doc.get("spine", True):
         lines.append({"name": SPINE_NAME, "color": SPINE_COLOUR, "status": "live",
-                      "stations": [s["id"] for s in doc["steps"]]})
+                      "stations": sorted((s["id"] for s in doc["steps"]), key=order.__getitem__)})
     for k, ln in enumerate(doc.get("lines") or []):
         lines.append({"name": ln["name"], "color": ln.get("color") or LINE_COLOURS[k % len(LINE_COLOURS)],
                       "status": STATUS[ln.get("status", "planned")],
@@ -233,6 +267,10 @@ def place(doc: dict) -> dict:
         "legend": "bottom",
         "style": dict(STYLE),
     }
+    if doc.get("phases"):
+        spec["zones"] = [{"name": ph["name"], "color": ph.get("color") or PHASE_COLOUR,
+                          "stations": [s["id"] for s in doc["steps"] if s["phase"] == ph["id"]]}
+                         for ph in doc["phases"] if any(s["phase"] == ph["id"] for s in doc["steps"])]
     if scenarios:
         spec["scenarios"] = scenarios
     spec["format"] = mm.needs_format(spec)
@@ -350,15 +388,18 @@ def data(doc: dict, spec: dict) -> dict:
     `trips` in the order of the children of the SVG's `#scenarios` group.
     """
     zone_name = {z["id"]: z["name"] for z in doc["zones"]}
-    spine = [{"name": SPINE_NAME, "status": "live", "steps": [s["label"] for s in doc["steps"]],
-              "details": {"what": "every step, in process order"}}] if doc.get("spine", True) else []
+    phase_name = {ph["id"]: ph["name"] for ph in doc.get("phases") or []}
     label = {s["id"]: s["label"] for s in doc["steps"]}
+    spine = [{"name": SPINE_NAME, "status": "live", "steps": [label[x] for x in spec["lines"][0]["stations"]],
+              "details": {"what": "every step, in process order"}}] if doc.get("spine", True) else []
     out = {
         "title": doc["title"],
         "subtitle": doc.get("subtitle") or "",
         "steps": {s["id"]: {"label": s["label"], "zone": zone_name[s["zone"]], "parent": s.get("parent"),
-                            "details": s.get("details") or {}}
+                            "phase": phase_name.get(s.get("phase")), "details": s.get("details") or {}}
                   for s in doc["steps"]},
+        "phases": [{"id": ph["id"], "name": ph["name"], "details": ph.get("details") or {}}
+                   for ph in doc.get("phases") or []],
         "lines": spine + [{"id": ln["id"], "name": ln["name"], "status": STATUS_WORD[ln.get("status", "planned")],
                            "steps": [label[x] for x in spec["lines"][k + len(spine)]["stations"]],
                            "details": ln.get("details") or {}}

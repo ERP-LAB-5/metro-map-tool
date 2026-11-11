@@ -15,6 +15,7 @@ from pathlib import Path
 from metro_map_tool import metro_map as mm
 from metro_map_tool.metrofy import build, check, finalize, place
 from metro_map_tool.metrofy import cli
+from metro_map_tool.metrofy import parts
 
 EXAMPLE = Path(build.__file__).with_name("examples") / "shop-migration.json"
 SCHEMA = Path(build.__file__).with_name("schema.json")
@@ -73,7 +74,8 @@ class TheInput(unittest.TestCase):
     def test_the_schema_names_the_same_fields_check_allows(self):
         schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
         self.assertEqual(set(schema["properties"]),
-                         {"metrofy", "title", "subtitle", "zones", "steps", "lines", "trips", "spine", "details"})
+                         {"metrofy", "title", "subtitle", "zones", "phases", "steps", "lines", "trips", "spine",
+                          "details"})
         self.assertEqual(schema["properties"]["lines"]["items"]["properties"]["status"]["enum"],
                          list(build.STATUS))
 
@@ -110,6 +112,59 @@ class Placement(unittest.TestCase):
         a, b = finalize(example())[1], finalize(copy.deepcopy(example()))[1]
         self.assertTrue(a)
         self.assertEqual(a, b)
+
+
+def phased():
+    """Three phases, two zones: alternatives stand one above the other."""
+    return {
+        "metrofy": 1, "title": "Phased", "spine": False,
+        "zones": [{"id": "a", "name": "A"}, {"id": "b", "name": "B"}],
+        "phases": [{"id": "p1", "name": "One"}, {"id": "p2", "name": "Two"}, {"id": "p3", "name": "Three"}],
+        "steps": [{"id": "p1-a", "label": "1a", "zone": "a", "phase": "p1"},
+                  {"id": "p2-a", "label": "2a", "zone": "a", "phase": "p2"},
+                  {"id": "p2-b", "label": "2b", "zone": "b", "phase": "p2"},
+                  {"id": "p3-a", "label": "3a", "zone": "a", "phase": "p3"}],
+        "lines": [{"id": "via-a", "name": "Via A", "status": "live", "steps": ["p1-a", "p2-a", "p3-a"]},
+                  {"id": "via-b", "name": "Via B", "status": "planned", "steps": ["p3-a", "p2-b", "p1-a"]}],
+        "trips": [{"id": "t", "name": "Via B", "line": "via-b", "stops": ["p1-a", "p2-b", "p3-a"]}],
+    }
+
+
+class Phases(unittest.TestCase):
+    def test_the_steps_of_a_phase_share_its_column(self):
+        spec = place(phased())
+        st = spec["stations"]
+        self.assertEqual(st["p2-a"]["gx"], st["p2-b"]["gx"])
+        self.assertLess(st["p2-a"]["gy"], st["p2-b"]["gy"])
+        self.assertEqual([st[s]["gx"] for s in ("p1-a", "p2-a", "p3-a")], [0, 2, 4])
+
+    def test_a_phase_is_a_named_band_around_its_steps(self):
+        zones = {z["name"]: z["stations"] for z in place(phased())["zones"]}
+        self.assertEqual(zones["Two"], ["p2-a", "p2-b"])
+
+    def test_lines_split_and_join_and_run_forward(self):
+        lines = {ln["name"]: ln["stations"] for ln in place(phased())["lines"]}
+        self.assertEqual(lines["Via B"], ["p1-a", "p2-b", "p3-a"])
+        receipt, _ = parts(phased())
+        self.assertTrue(receipt["ok"], receipt["errors"])
+
+    def test_one_station_per_phase_and_zone(self):
+        doc = phased()
+        doc["steps"].append({"id": "p2-a2", "label": "2a again", "zone": "a", "phase": "p2"})
+        self.assertTrue(any("one station per phase and zone" in p for p in check(doc)))
+
+    def test_a_step_names_a_phase_that_exists(self):
+        doc = phased()
+        doc["steps"][0]["phase"] = "p9"
+        self.assertTrue(any("phase must be one of the phases' ids" in p for p in check(doc)))
+        doc = small()
+        doc["steps"][0]["phase"] = "p1"
+        self.assertTrue(any("the map lists no phases" in p for p in check(doc)))
+
+    def test_the_data_names_each_step_s_phase(self):
+        d = parts(phased())[1]["data"]
+        self.assertEqual(d["steps"]["p2-b"]["phase"], "Two")
+        self.assertEqual([p["name"] for p in d["phases"]], ["One", "Two", "Three"])
 
 
 class Finalize(unittest.TestCase):
