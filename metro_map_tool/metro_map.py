@@ -30,6 +30,7 @@ Input JSON
                "interval": "day"|"week"|"month"|"quarter"|"year"}?,  # roadmap only
   "format": <int>?,                              # the spec shape; stamped on save
   "legend": "hide"|"top"|"left"|"bottom"|"right"?,  # bottom is the default
+  "angles": "octilinear"|"free"?,                # octilinear is the default
   "scenarios": [ {"name": str, "stations": ["<id>", ...],
                   "color": "#rrggbb"?, "duration": <seconds>?} ]?,
   "interchanges": [ {"stations": ["<id>", ...], "label": str?,
@@ -46,7 +47,10 @@ Geometry rules
 --------------
 1. gx/gy are grid cells, not pixels, and need not be whole: a half or quarter
    cell puts two stations closer together. One cell = --cell px.
-2. Every segment is octilinear (0° / 45° / 90°). A station pair that is neither
+2. Every segment is octilinear (0° / 45° / 90°), unless the spec says
+   "angles": "free": then each hop is one straight segment at whatever angle
+   its two stations make (format 4; a generated map uses it to stay compact).
+   Octilinear: a station pair that is neither
    axis-aligned nor a perfect diagonal is routed straight-then-diagonal, with
    the straight leg on the longer axis.
 3. Lines that share a corridor — same infinite line, overlapping span — are
@@ -236,13 +240,23 @@ def join_legs(legs: Sequence[Tuple[Point, Point]], keep_turns: bool = False) -> 
     Two legs that have been pushed apart into parallel tracks no longer meet;
     extending each to where they cross closes the corner rather than leaving a
     step in it. Parallel legs never cross, so those fall back to the midpoint.
+
+    Nearly parallel legs do cross, but far away: with free angles two legs on
+    different tracks can meet a few degrees apart, and their crossing lies
+    off the map. A crossing more than three gaps from where the legs end is
+    such a miter, and falls back to the midpoint as well. Octilinear legs turn
+    by 45 degrees or more, which keeps every crossing within 1.5 gaps, so this
+    never changes an octilinear map.
     """
     if not legs:
         return []
     pts = [legs[0][0]]
     for a, b in zip(legs, legs[1:]):
         x = intersect(a[0], sub(a[1], a[0]), b[0], sub(b[1], b[0]))
-        pts.append(x or scale(add(a[1], b[0]), 0.5))
+        mid = scale(add(a[1], b[0]), 0.5)
+        if x is not None and dist(x, mid) > 3 * dist(a[1], b[0]) + 1.0:
+            x = None
+        pts.append(x or mid)
     pts.append(legs[-1][1])
     out: List[Point] = [pts[0]]
     for p in pts[1:]:
@@ -332,6 +346,9 @@ class Map:
         # the grid so lines can be routed through it, but it is not a station,
         # so nothing draws a marker or a label for it and no zone can hold one.
         self.junctions = spec.get("junctions") or {}
+        # "free": a hop is one straight leg at any angle, rather than routed
+        # through octilinear bends; everything else is drawn the same way
+        self.free_angles = spec.get("angles") == "free"
         self.pos: Dict[str, Point] = {
             sid: (st["gx"] * style.cell, st["gy"] * style.cell)
             for sid, st in list(self.stations.items()) + list(self.junctions.items())
@@ -394,7 +411,7 @@ class Map:
                 for hop, (a, b) in enumerate(zip(ids, ids[1:])):
                     pa = self.pos[a]
                     first = None
-                    for q in octilinear(pa, self.pos[b]):
+                    for q in ([self.pos[b]] if self.free_angles else octilinear(pa, self.pos[b])):
                         seg = self._leg(li, si, hop, pa, q)
                         self.segments.append(seg)
                         first = first or seg
@@ -1202,6 +1219,8 @@ def open_outline(x0: float, y0: float, x1: float, y1: float, r: float,
 
 
 LEGEND_AT = ("hide", "top", "left", "bottom", "right")
+#: how a hop between two stations is drawn: octilinear bends, or one straight leg
+ANGLES = ("octilinear", "free")
 DEFAULT_LEGEND = "bottom"
 
 # The route dash patterns are written in multiples of style.stroke, which on a
@@ -2295,7 +2314,7 @@ MODES = ("metro", "roadmap")
 # apart later; a file without it predates the stamp, which is unambiguous only
 # because the stamping started before any migration was needed. Raise this when
 # a change cannot be read by the old code, and add the step to migrate().
-SPEC_FORMAT = 3
+SPEC_FORMAT = 4
 
 
 def spec_format(spec: dict) -> int:
@@ -2332,6 +2351,10 @@ def needs_format(spec: dict) -> int:
     actually having a junction or a branch — which an older renderer would drop
     silently, drawing a different network and saying nothing.
     """
+    # Format 4: free angles. An older renderer would route every hop through
+    # octilinear bends, drawing a different shape without saying so.
+    if spec.get("angles") == "free":
+        return 4
     # Format 3: swimlanes, and rides routed from a start to an end. An older
     # renderer would draw neither — no bands, and no traveller for a ride that
     # lists no stops of its own.
@@ -2392,6 +2415,10 @@ def validate_spec(spec: object) -> List[str]:
     at = spec.get("legend")
     if at is not None and at not in LEGEND_AT:
         errors.append("spec.legend must be one of " + ", ".join(LEGEND_AT))
+
+    angles = spec.get("angles")
+    if angles is not None and angles not in ANGLES:
+        errors.append("spec.angles must be one of " + ", ".join(ANGLES))
 
     mode = spec.get("mode") or "metro"
     if mode not in MODES:

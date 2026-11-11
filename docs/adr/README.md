@@ -27,6 +27,7 @@ status says so.
 | [0013](0013-archimate-import.md) | Read an ArchiMate implementation-and-migration model as a roadmap | Accepted | 2026-09-12 |
 | [0014](0014-a-cut-is-made-on-the-spec.md) | Exporting some swimlanes and phases cuts the spec, not the picture | Accepted | 2026-09-15 |
 | [0015](0015-metrofy.md) | Metrofy makes a metro map from code, for display, and refuses rather than draws half | Accepted | 2026-11-11 |
+| [0016](0016-free-angles-for-generated-maps.md) | A map may ask for free angles; octilinear stays the default | Accepted | 2026-11-11 |
 
 ## Writing one
 

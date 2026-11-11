@@ -221,6 +221,11 @@
           }
         }
       }
+    },
+    "legend": {
+      "type": "boolean",
+      "default": true,
+      "description": "Draw the legend under the map. An app that lists the lines itself turns it off to save height."
     }
   }
 }

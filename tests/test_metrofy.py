@@ -75,7 +75,7 @@ class TheInput(unittest.TestCase):
         schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
         self.assertEqual(set(schema["properties"]),
                          {"metrofy", "title", "subtitle", "zones", "phases", "steps", "lines", "trips", "spine",
-                          "details"})
+                          "legend", "details"})
         self.assertEqual(schema["properties"]["lines"]["items"]["properties"]["status"]["enum"],
                          list(build.STATUS))
 
@@ -131,23 +131,39 @@ def phased():
 
 
 class Phases(unittest.TestCase):
-    def test_a_phase_is_a_staircase_so_zone_changes_run_at_45_degrees(self):
-        st = place(phased())["stations"]
+    def test_a_phase_is_a_staircase_so_zone_changes_run_at_60_degrees(self):
+        import math
+        spec = place(phased())
+        st = spec["stations"]
+        self.assertEqual(spec["angles"], "free")
         dx = st["p2-b"]["gx"] - st["p2-a"]["gx"]
         dy = st["p2-b"]["gy"] - st["p2-a"]["gy"]
         self.assertGreater(dy, 0)
-        self.assertEqual(dx, dy)                         # one stair right per stair down
+        self.assertAlmostEqual(math.degrees(math.atan2(dy, dx)), 60.0, delta=0.5)
         # the same zone in the next phase is straight across
         self.assertEqual(st["p1-a"]["gy"], st["p2-a"]["gy"])
         self.assertLess(st["p1-a"]["gx"], st["p2-a"]["gx"])
 
-    def test_no_line_between_stations_ever_runs_steeper_than_45_degrees(self):
-        spec = place(phased())
+    def test_no_line_runs_steeper_than_60_degrees(self):
+        import math
+        doc = phased()
+        doc["zones"].append({"id": "c", "name": "C"})
+        doc["steps"].append({"id": "p1-c", "label": "1c", "zone": "c", "phase": "p1"})
+        doc["lines"].append({"id": "low-high", "name": "Low to high", "steps": ["p1-c", "p2-a"]})
+        spec = place(doc)
         st = spec["stations"]
         for ln in spec["lines"]:
             for a, b in zip(ln["stations"], ln["stations"][1:]):
                 dx, dy = abs(st[b]["gx"] - st[a]["gx"]), abs(st[b]["gy"] - st[a]["gy"])
-                self.assertGreaterEqual(dx, dy, (ln["name"], a, b))
+                angle = math.degrees(math.atan2(dy, dx))
+                self.assertLessEqual(angle, 60.5, (ln["name"], a, b, angle))
+
+    def test_the_legend_can_be_left_to_the_app(self):
+        doc = phased()
+        self.assertEqual(place(doc)["legend"], "bottom")
+        doc["legend"] = False
+        self.assertEqual(place(doc)["legend"], "hide")
+        self.assertNotIn('id="legend"', parts(doc)[1]["svg"])
 
     def test_a_phase_is_a_named_band_around_its_steps(self):
         zones = {z["name"]: z["stations"] for z in place(phased())["zones"]}

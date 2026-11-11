@@ -16,6 +16,7 @@ Standard library only, like the renderer it drives.
 from __future__ import annotations
 
 import hashlib
+import math
 import html
 import json
 import re
@@ -39,15 +40,20 @@ LINE_COLOURS = [c for n, c in mm.PALETTE if n != "grey"]
 ZONE_COLOURS = ["#0098d4", "#7b3fb5", "#ee7c0e", "#007d32", "#9b0058", "#00a4a7"]
 #: grid: columns between steps, rows per zone, and the row a zone's steps sit on
 STEP_GAP = 2
-#: with phases, the grid is a staircase: within a phase each zone's station
-#: stands STAIR columns right of the one above, and zones are STAIR rows
-#: apart, so a line changing zones inside a phase runs at exactly 45 degrees
-#: and never straight down. Between phases the next phase starts far enough
-#: on that the steepest change (the bottom zone to the top one) still runs
-#: at 45 degrees or flatter, never vertical.
-STAIR = 1.5
-#: the least room between two phases' bands, in columns
-PHASE_MARGIN = 2.0
+#: with phases, the grid is a compact staircase drawn with free angles (the
+#: renderer's "angles": "free"): zones are LANE rows apart, and within a
+#: phase each zone's station stands a little right of the one above, so a
+#: line changing zones inside a phase runs at STEEPEST degrees, never
+#: straight down. Between phases the next phase starts just far enough on
+#: that even the steepest change (the bottom zone to the top one) is no
+#: steeper than that: every line is horizontal or between about 20 and 60
+#: degrees, which keeps the map far shorter than 45-degree routing can.
+LANE = 1.25
+STEEPEST = 60.0
+#: the least room between two phases' bands, in columns, and the least step
+#: from one phase to the next, so labels in one lane do not meet
+PHASE_MARGIN = 1.0
+PHASE_MIN = 2.6
 #: how far a phase band reaches past its stations: slimmer than a zone's
 PHASE_PAD = 12.0
 LANE_ROWS = 3
@@ -110,12 +116,15 @@ def check(doc: Any) -> List[str]:
     if doc.get("metrofy") != FORMAT:
         errors.append(f'"metrofy" must be {FORMAT}, the input format this version reads')
     _text(doc, "title", "the map", errors)
-    allowed = {"metrofy", "title", "subtitle", "zones", "phases", "steps", "lines", "trips", "spine", "details"}
+    allowed = {"metrofy", "title", "subtitle", "zones", "phases", "steps", "lines", "trips", "spine", "legend",
+               "details"}
     for k in sorted(set(doc) - allowed):
         errors.append(f'unknown field "{k}": a Metrofy input has only ' + ", ".join(sorted(allowed)))
     _details(doc, "the map", errors)
     if "spine" in doc and not isinstance(doc["spine"], bool):
         errors.append("spine must be true or false")
+    if "legend" in doc and not isinstance(doc["legend"], bool):
+        errors.append("legend must be true or false")
 
     zones = _ids(doc.get("zones"), "zone", errors)
     for i, z in enumerate(doc.get("zones") or [], 1):
@@ -240,19 +249,21 @@ def place(doc: dict) -> dict:
     col = _column(doc)
     zones = doc["zones"]
     phased = bool(doc.get("phases"))
-    lane_rows = STAIR if phased else LANE_ROWS
+    lane_rows = LANE if phased else LANE_ROWS
+    stair = LANE / math.tan(math.radians(STEEPEST))           # columns per zone inside a phase
     row = {z["id"]: k * lane_rows + 1 for k, z in enumerate(zones)}
     lane_at = {z["id"]: k for k, z in enumerate(zones)}
     half = (lane_rows - 0.1) / 2 if phased else 1
     # a phase is (zones - 1) stairs wide; the next starts when the steepest
     # change from its last stair to the next phase's first is still 45 degrees
-    span = STAIR * (len(zones) - 1)
-    phase_step = max(2 * span + PHASE_MARGIN * (span == 0), span + PHASE_MARGIN, 3.0)
+    span = stair * (len(zones) - 1)                             # a phase's own width
+    drop = LANE * (len(zones) - 1)                              # the steepest change between phases
+    phase_step = max(span + drop / math.tan(math.radians(STEEPEST)) + PHASE_MARGIN * (span > 0), PHASE_MIN)
     parents = {s.get("parent") for s in doc["steps"] if s.get("parent")}
     stations = {}
     for i, s in enumerate(doc["steps"]):
         if phased:
-            gx = col[s["id"]] * phase_step + lane_at[s["zone"]] * STAIR
+            gx = round(col[s["id"]] * phase_step + lane_at[s["zone"]] * stair, 3)
         else:
             gx = col[s["id"]] * STEP_GAP
         st = {"label": s["label"], "gx": gx, "gy": row[s["zone"]]}
@@ -289,11 +300,12 @@ def place(doc: dict) -> dict:
         "swimlanes": [{"name": z["name"], "rows": [row[z["id"]] - half, row[z["id"]] + half],
                        "color": z.get("color") or ZONE_COLOURS[k % len(ZONE_COLOURS)]}
                       for k, z in enumerate(zones)],
-        "legend": "bottom",
+        "legend": "bottom" if doc.get("legend", True) else "hide",
         "style": dict(STYLE),
     }
     if doc.get("phases"):
         spec["style"]["zone_pad"] = PHASE_PAD
+        spec["angles"] = "free"
         spec["zones"] = [{"name": ph["name"], "color": ph.get("color") or PHASE_COLOUR,
                           "stations": [s["id"] for s in doc["steps"] if s["phase"] == ph["id"]]}
                          for ph in doc["phases"] if any(s["phase"] == ph["id"] for s in doc["steps"])]
