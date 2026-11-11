@@ -207,6 +207,14 @@ class Ends(unittest.TestCase):
         self.assertIn('class="dead-end smoke"', made["svg"])
         self.assertEqual(made["data"]["steps"]["p3-a"]["dead_end"], "smoke")
 
+    def test_a_line_may_keep_its_own_order(self):
+        doc = phased()
+        doc["lines"][1]["steps"] = ["p1-a", "p2-b", "p2-a", "p3-a"]     # down to b, back up to a, in phase 2
+        doc["lines"][1]["order"] = "as-listed"
+        self.assertEqual(place(doc)["lines"][1]["stations"], ["p1-a", "p2-b", "p2-a", "p3-a"])
+        del doc["lines"][1]["order"]
+        self.assertEqual(place(doc)["lines"][1]["stations"], ["p1-a", "p2-a", "p2-b", "p3-a"])
+
     def test_only_the_three_dead_ends(self):
         doc = phased()
         doc["steps"][0]["dead_end"] = "wall"

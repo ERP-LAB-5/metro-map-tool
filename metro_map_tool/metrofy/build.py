@@ -183,6 +183,8 @@ def check(doc: Any) -> List[str]:
         _text(ln, "name", where, errors)
         _colour(ln, where, errors)
         _details(ln, where, errors)
+        if ln.get("order", "process") not in ("process", "as-listed"):
+            errors.append(f"{where}: order must be process or as-listed")
         if ln.get("status", "planned") not in STATUS:
             errors.append(f"{where}: status must be one of " + ", ".join(STATUS))
         st = ln.get("steps")
@@ -285,7 +287,10 @@ def place(doc: dict) -> dict:
     for k, ln in enumerate(doc.get("lines") or []):
         lines.append({"name": ln["name"], "color": ln.get("color") or LINE_COLOURS[k % len(LINE_COLOURS)],
                       "status": STATUS[ln.get("status", "planned")],
-                      "stations": sorted(dict.fromkeys(ln["steps"]), key=order.__getitem__)})
+                      # process order unless the line says its own: a document that
+                      # crosses from one zone to another inside a phase keeps its way
+                      "stations": (list(dict.fromkeys(ln["steps"])) if ln.get("order") == "as-listed"
+                                   else sorted(dict.fromkeys(ln["steps"]), key=order.__getitem__))})
     for ln in lines:
         if ln["status"] == "live":
             del ln["status"]

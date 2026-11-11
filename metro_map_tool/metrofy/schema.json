@@ -160,6 +160,14 @@
           },
           "details": {
             "$ref": "#/$defs/details"
+          },
+          "order": {
+            "enum": [
+              "process",
+              "as-listed"
+            ],
+            "default": "process",
+            "description": "process: the line visits its steps in process order, whatever order they are listed in. as-listed: in the order given, for a line that crosses between zones inside a phase in a direction of its own."
           }
         }
       }
