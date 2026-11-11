@@ -30,7 +30,7 @@ Input JSON
                "interval": "day"|"week"|"month"|"quarter"|"year"}?,  # roadmap only
   "format": <int>?,                              # the spec shape; stamped on save
   "legend": "hide"|"top"|"left"|"bottom"|"right"?,  # bottom is the default
-  "angles": "octilinear"|"free"?,                # octilinear is the default
+  "angles": "octilinear"|"free"|"60"?,           # octilinear is the default
   "scenarios": [ {"name": str, "stations": ["<id>", ...],
                   "color": "#rrggbb"?, "duration": <seconds>?} ]?,
   "interchanges": [ {"stations": ["<id>", ...], "label": str?,
@@ -49,7 +49,9 @@ Geometry rules
    cell puts two stations closer together. One cell = --cell px.
 2. Every segment is octilinear (0° / 45° / 90°), unless the spec says
    "angles": "free": then each hop is one straight segment at whatever angle
-   its two stations make (format 4; a generated map uses it to stay compact).
+   its two stations make, or "60": then a hop runs level, climbs or falls at
+   60 degrees, and runs level again into the next stop, the slope centred
+   between them (format 4; generated maps use these to stay compact).
    Octilinear: a station pair that is neither
    axis-aligned nor a perfect diagonal is routed straight-then-diagonal, with
    the straight leg on the longer axis.
@@ -205,6 +207,29 @@ def octilinear(a: Point, b: Point) -> List[Point]:
     return [(a[0], a[1] + sign(dy) * (abs(dy) - abs(dx))), b]  # straight along y
 
 
+#: the slope of a "60" map, in degrees from the horizontal
+SLOPE = 60.0
+
+
+def sloped(a: Point, b: Point, degrees: float = SLOPE) -> List[Point]:
+    """Waypoints from a to b, excluding a: level, one slope, level again.
+
+    The slope is centred, so a stop is always entered and left level and two
+    lanes are joined by the ↘ — ↗ shape of a transit diagram rather than by
+    one long slant. A pair too close for the slope is joined straight.
+    """
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    if abs(dy) < EPS or abs(dx) < EPS:
+        return [b]
+    run = abs(dy) / math.tan(math.radians(degrees))        # how far the slope reaches across
+    if abs(dx) <= run + EPS:
+        return [b]
+    level = (abs(dx) - run) / 2
+    x1 = a[0] + sign(dx) * level
+    x2 = x1 + sign(dx) * run
+    return [(x1, a[1]), (x2, b[1]), b]
+
+
 def intersect(p1: Point, d1: Point, p2: Point, d2: Point) -> Optional[Point]:
     """Intersection of the infinite lines p1+t*d1 and p2+s*d2."""
     den = d1[0] * d2[1] - d1[1] * d2[0]
@@ -348,7 +373,7 @@ class Map:
         self.junctions = spec.get("junctions") or {}
         # "free": a hop is one straight leg at any angle, rather than routed
         # through octilinear bends; everything else is drawn the same way
-        self.free_angles = spec.get("angles") == "free"
+        self.angles = spec.get("angles") or "octilinear"
         self.pos: Dict[str, Point] = {
             sid: (st["gx"] * style.cell, st["gy"] * style.cell)
             for sid, st in list(self.stations.items()) + list(self.junctions.items())
@@ -411,7 +436,9 @@ class Map:
                 for hop, (a, b) in enumerate(zip(ids, ids[1:])):
                     pa = self.pos[a]
                     first = None
-                    for q in ([self.pos[b]] if self.free_angles else octilinear(pa, self.pos[b])):
+                    route = ([self.pos[b]] if self.angles == "free" else sloped(pa, self.pos[b])
+                             if self.angles == "60" else octilinear(pa, self.pos[b]))
+                    for q in route:
                         seg = self._leg(li, si, hop, pa, q)
                         self.segments.append(seg)
                         first = first or seg
@@ -1220,7 +1247,7 @@ def open_outline(x0: float, y0: float, x1: float, y1: float, r: float,
 
 LEGEND_AT = ("hide", "top", "left", "bottom", "right")
 #: how a hop between two stations is drawn: octilinear bends, or one straight leg
-ANGLES = ("octilinear", "free")
+ANGLES = ("octilinear", "free", "60")
 DEFAULT_LEGEND = "bottom"
 
 # The route dash patterns are written in multiples of style.stroke, which on a
@@ -2353,7 +2380,7 @@ def needs_format(spec: dict) -> int:
     """
     # Format 4: free angles. An older renderer would route every hop through
     # octilinear bends, drawing a different shape without saying so.
-    if spec.get("angles") == "free":
+    if spec.get("angles") in ("free", "60"):
         return 4
     # Format 3: swimlanes, and rides routed from a start to an end. An older
     # renderer would draw neither — no bands, and no traveller for a ride that

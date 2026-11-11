@@ -49,6 +49,31 @@ class FreeAngles(unittest.TestCase):
         self.assertNotEqual(ds[0], ds[1])                          # offset from each other, not on top
 
 
+class Sixty(unittest.TestCase):
+    def test_a_hop_runs_level_then_60_degrees_then_level(self):
+        import math
+        a, b = (0.0, 0.0), (300.0, 100.0)
+        pts = [a] + mm.sloped(a, b)
+        self.assertEqual(len(pts), 4)
+        (x0, y0), (x1, y1), (x2, y2), (x3, y3) = pts
+        self.assertEqual(y1, y0)                                  # level out of a
+        self.assertAlmostEqual(math.degrees(math.atan2(y2 - y1, x2 - x1)), 60.0, places=6)
+        self.assertEqual(y2, y3)                                  # level into b
+        self.assertAlmostEqual(x1 - x0, x3 - x2)                  # the slope is centred
+
+    def test_a_pair_too_close_for_the_slope_is_joined_straight(self):
+        self.assertEqual(mm.sloped((0.0, 0.0), (10.0, 100.0)), [(10.0, 100.0)])
+        self.assertEqual(mm.sloped((0.0, 0.0), (100.0, 0.0)), [(100.0, 0.0)])
+
+    def test_sixty_is_format_4_and_drawn_with_level_runs(self):
+        s = spec(angles="60")
+        s["stations"]["b"]["gx"] = 4
+        self.assertEqual(mm.needs_format(s), 4)
+        self.assertEqual(mm.validate_spec(s), [])
+        d = route_d(mm.render(s, mm.Style()))
+        self.assertGreaterEqual(d.count("Q"), 2)                   # two rounded bends
+
+
 class Miters(unittest.TestCase):
     def test_nearly_parallel_legs_on_different_tracks_do_not_shoot_off(self):
         # two legs a few degrees apart, pushed onto different tracks

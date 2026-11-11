@@ -1,4 +1,4 @@
-# ADR 0016: A map may ask for free angles; octilinear stays the default
+# ADR 0016: A map may ask for free or 60-degree angles; octilinear stays the default
 
 ## Status
 
@@ -34,8 +34,14 @@ the columns close up.
   off the map. A crossing more than three gaps from where the legs end falls back to the
   midpoint. Octilinear legs turn by 45° or more, which keeps every crossing within 1.5 gaps,
   so this never changes an octilinear map.
-- Metrofy uses free angles for maps with phases. A change of lane inside a phase runs at 60°.
-  The next phase starts just far enough on that no change between phases is steeper.
+- **`"angles": "60"`**, added the same day after looking at the result. Each hop runs level,
+  then climbs or falls at 60°, then runs level into the next stop, with the slope centred. A
+  change of lane reads as the ↘ — ↗ of a transit diagram rather than as one long slant, and a
+  stop is always entered and left level. A pair too close for the slope is joined straight.
+  It is format 4, like `"free"`.
+- Metrofy uses `"60"` for maps with phases. A change of lane inside a phase is one 60° slope,
+  and between phases a line runs level, slopes and runs level again. The next phase starts
+  just far enough on that no change is steeper than 60°.
 
 ## Consequences
 

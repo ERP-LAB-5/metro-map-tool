@@ -135,7 +135,7 @@ class Phases(unittest.TestCase):
         import math
         spec = place(phased())
         st = spec["stations"]
-        self.assertEqual(spec["angles"], "free")
+        self.assertEqual(spec["angles"], "60")
         dx = st["p2-b"]["gx"] - st["p2-a"]["gx"]
         dy = st["p2-b"]["gy"] - st["p2-a"]["gy"]
         self.assertGreater(dy, 0)

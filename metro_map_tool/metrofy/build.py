@@ -305,7 +305,9 @@ def place(doc: dict) -> dict:
     }
     if doc.get("phases"):
         spec["style"]["zone_pad"] = PHASE_PAD
-        spec["angles"] = "free"
+        # level runs and 60-degree slopes: inside a phase a change of lane is
+        # one slope; between phases it runs level, slopes, and runs level again
+        spec["angles"] = "60"
         spec["zones"] = [{"name": ph["name"], "color": ph.get("color") or PHASE_COLOUR,
                           "stations": [s["id"] for s in doc["steps"] if s["phase"] == ph["id"]]}
                          for ph in doc["phases"] if any(s["phase"] == ph["id"] for s in doc["steps"])]
