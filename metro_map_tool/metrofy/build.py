@@ -39,9 +39,15 @@ LINE_COLOURS = [c for n, c in mm.PALETTE if n != "grey"]
 ZONE_COLOURS = ["#0098d4", "#7b3fb5", "#ee7c0e", "#007d32", "#9b0058", "#00a4a7"]
 #: grid: columns between steps, rows per zone, and the row a zone's steps sit on
 STEP_GAP = 2
-#: columns between phases: a phase holds a station per zone, each labelled,
-#: and its band must not reach into its neighbour's
-PHASE_GAP = 3
+#: with phases, the grid is a staircase: within a phase each zone's station
+#: stands STAIR columns right of the one above, and zones are STAIR rows
+#: apart, so a line changing zones inside a phase runs at exactly 45 degrees
+#: and never straight down. Between phases the next phase starts far enough
+#: on that the steepest change (the bottom zone to the top one) still runs
+#: at 45 degrees or flatter, never vertical.
+STAIR = 1.5
+#: the least room between two phases' bands, in columns
+PHASE_MARGIN = 2.0
 #: how far a phase band reaches past its stations: slimmer than a zone's
 PHASE_PAD = 12.0
 LANE_ROWS = 3
@@ -233,12 +239,23 @@ def place(doc: dict) -> dict:
     order = _order(doc)
     col = _column(doc)
     zones = doc["zones"]
-    row = {z["id"]: k * LANE_ROWS + 1 for k, z in enumerate(zones)}
+    phased = bool(doc.get("phases"))
+    lane_rows = STAIR if phased else LANE_ROWS
+    row = {z["id"]: k * lane_rows + 1 for k, z in enumerate(zones)}
+    lane_at = {z["id"]: k for k, z in enumerate(zones)}
+    half = (lane_rows - 0.1) / 2 if phased else 1
+    # a phase is (zones - 1) stairs wide; the next starts when the steepest
+    # change from its last stair to the next phase's first is still 45 degrees
+    span = STAIR * (len(zones) - 1)
+    phase_step = max(2 * span + PHASE_MARGIN * (span == 0), span + PHASE_MARGIN, 3.0)
     parents = {s.get("parent") for s in doc["steps"] if s.get("parent")}
     stations = {}
     for i, s in enumerate(doc["steps"]):
-        st = {"label": s["label"], "gx": col[s["id"]] * (PHASE_GAP if doc.get("phases") else STEP_GAP),
-              "gy": row[s["zone"]]}
+        if phased:
+            gx = col[s["id"]] * phase_step + lane_at[s["zone"]] * STAIR
+        else:
+            gx = col[s["id"]] * STEP_GAP
+        st = {"label": s["label"], "gx": gx, "gy": row[s["zone"]]}
         if s["id"] in parents:
             st["interchange"] = True
         stations[s["id"]] = st
@@ -267,7 +284,9 @@ def place(doc: dict) -> dict:
     spec = {
         "stations": stations,
         "lines": lines,
-        "swimlanes": [{"name": z["name"], "rows": [row[z["id"]] - 1, row[z["id"]] + 1],
+        # lanes may not touch (the renderer reads touching as overlapping):
+        # phased lanes leave a tenth of a row between them
+        "swimlanes": [{"name": z["name"], "rows": [row[z["id"]] - half, row[z["id"]] + half],
                        "color": z.get("color") or ZONE_COLOURS[k % len(ZONE_COLOURS)]}
                       for k, z in enumerate(zones)],
         "legend": "bottom",
@@ -408,10 +427,12 @@ def data(doc: dict, spec: dict) -> dict:
         "phases": [{"id": ph["id"], "name": ph["name"], "details": ph.get("details") or {}}
                    for ph in doc.get("phases") or []],
         "lines": spine + [{"id": ln["id"], "name": ln["name"], "status": STATUS_WORD[ln.get("status", "planned")],
+                           "stations": list(spec["lines"][k + len(spine)]["stations"]),
                            "steps": [label[x] for x in spec["lines"][k + len(spine)]["stations"]],
                            "details": ln.get("details") or {}}
                           for k, ln in enumerate(doc.get("lines") or [])],
         "trips": [{"id": t["id"], "name": t["name"], "stops": [label[x] for x in t["stops"]],
+                   "stations": list(t["stops"]),
                    "line": next((ln["name"] for ln in doc.get("lines") or [] if ln["id"] == t.get("line")), None),
                    "color": sc.get("color") or TRIP_COLOUR, "details": t.get("details") or {}}
                   for t, sc in zip(doc.get("trips") or [], spec.get("scenarios") or [])],

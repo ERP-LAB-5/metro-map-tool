@@ -131,12 +131,23 @@ def phased():
 
 
 class Phases(unittest.TestCase):
-    def test_the_steps_of_a_phase_share_its_column(self):
+    def test_a_phase_is_a_staircase_so_zone_changes_run_at_45_degrees(self):
+        st = place(phased())["stations"]
+        dx = st["p2-b"]["gx"] - st["p2-a"]["gx"]
+        dy = st["p2-b"]["gy"] - st["p2-a"]["gy"]
+        self.assertGreater(dy, 0)
+        self.assertEqual(dx, dy)                         # one stair right per stair down
+        # the same zone in the next phase is straight across
+        self.assertEqual(st["p1-a"]["gy"], st["p2-a"]["gy"])
+        self.assertLess(st["p1-a"]["gx"], st["p2-a"]["gx"])
+
+    def test_no_line_between_stations_ever_runs_steeper_than_45_degrees(self):
         spec = place(phased())
         st = spec["stations"]
-        self.assertEqual(st["p2-a"]["gx"], st["p2-b"]["gx"])
-        self.assertLess(st["p2-a"]["gy"], st["p2-b"]["gy"])
-        self.assertEqual([st[s]["gx"] for s in ("p1-a", "p2-a", "p3-a")], [0, 3, 6])
+        for ln in spec["lines"]:
+            for a, b in zip(ln["stations"], ln["stations"][1:]):
+                dx, dy = abs(st[b]["gx"] - st[a]["gx"]), abs(st[b]["gy"] - st[a]["gy"])
+                self.assertGreaterEqual(dx, dy, (ln["name"], a, b))
 
     def test_a_phase_is_a_named_band_around_its_steps(self):
         zones = {z["name"]: z["stations"] for z in place(phased())["zones"]}
@@ -228,6 +239,9 @@ class Parts(unittest.TestCase):
         self.assertEqual([t["id"] for t in d["trips"]], ["maker-as-metaobject", "maker-as-tag"])
         self.assertEqual(d["trips"][0]["color"], d["lines"][1]["color"])   # a trip takes its story's colour
         self.assertEqual(d["steps"]["classify"]["parent"], "present")
+        # the station ids too, so an app can walk a trip stop by stop
+        self.assertEqual(d["trips"][0]["stations"], ["present", "classify", "describe"])
+        self.assertEqual(d["lines"][1]["stations"], ["present", "classify", "describe"])
 
     def test_the_page_is_made_from_the_same_parts(self):
         from metro_map_tool.metrofy import parts
