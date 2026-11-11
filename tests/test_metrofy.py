@@ -194,6 +194,25 @@ class Phases(unittest.TestCase):
         self.assertEqual([p["name"] for p in d["phases"]], ["One", "Two", "Three"])
 
 
+class Ends(unittest.TestCase):
+    def test_a_dead_end_and_an_interchange_pass_through_and_draw(self):
+        doc = phased()
+        doc["steps"][3]["dead_end"] = "smoke"
+        doc["steps"][0]["interchange"] = True
+        spec = place(doc)
+        self.assertEqual(spec["stations"]["p3-a"]["dead_end"], "smoke")
+        self.assertTrue(spec["stations"]["p1-a"]["interchange"])
+        receipt, made = parts(doc)
+        self.assertTrue(receipt["ok"], receipt["errors"])
+        self.assertIn('class="dead-end smoke"', made["svg"])
+        self.assertEqual(made["data"]["steps"]["p3-a"]["dead_end"], "smoke")
+
+    def test_only_the_three_dead_ends(self):
+        doc = phased()
+        doc["steps"][0]["dead_end"] = "wall"
+        self.assertTrue(any("dead_end must be one of buffer, smoke, fire" in p for p in check(doc)))
+
+
 class Finalize(unittest.TestCase):
     def test_the_example_passes_every_gate(self):
         receipt, page = finalize(example())

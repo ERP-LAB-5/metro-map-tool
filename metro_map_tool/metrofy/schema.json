@@ -103,6 +103,18 @@
           },
           "phase": {
             "$ref": "#/$defs/id"
+          },
+          "dead_end": {
+            "enum": [
+              "buffer",
+              "smoke",
+              "fire"
+            ],
+            "description": "A line ends here, and how loudly: buffer stops, smoke says watch out, fire says get off."
+          },
+          "interchange": {
+            "type": "boolean",
+            "description": "Drawn as an interchange: where lines meet and a traveller may change. A parent is one anyway."
           }
         }
       }

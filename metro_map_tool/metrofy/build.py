@@ -58,6 +58,8 @@ PHASE_MIN = 2.6
 PHASE_PAD = 12.0
 LANE_ROWS = 3
 SPINE_NAME = "The process"
+#: where a line stops, and how loudly: it stops, watch out, get off
+DEAD_ENDS = ("buffer", "smoke", "fire")
 #: a phase's band, when it names no colour: quiet, so the lanes stay readable
 PHASE_COLOUR = "#8f9aa4"
 #: the renderer's own colour for a trip that names none
@@ -150,6 +152,10 @@ def check(doc: Any) -> List[str]:
         where = f"step {i} ('{s.get('id')}')"
         _text(s, "label", where, errors)
         _details(s, where, errors)
+        if s.get("dead_end") is not None and s["dead_end"] not in DEAD_ENDS:
+            errors.append(f"{where}: dead_end must be one of " + ", ".join(DEAD_ENDS))
+        if "interchange" in s and not isinstance(s["interchange"], bool):
+            errors.append(f"{where}: interchange must be true or false")
         if s.get("zone") not in zones:
             errors.append(f"{where}: zone must be one of the zones' ids (got {s.get('zone')!r})")
         if "phases" in doc:
@@ -267,8 +273,10 @@ def place(doc: dict) -> dict:
         else:
             gx = col[s["id"]] * STEP_GAP
         st = {"label": s["label"], "gx": gx, "gy": row[s["zone"]]}
-        if s["id"] in parents:
+        if s["id"] in parents or s.get("interchange"):
             st["interchange"] = True
+        if s.get("dead_end"):
+            st["dead_end"] = s["dead_end"]
         stations[s["id"]] = st
     lines = []
     if doc.get("spine", True):
@@ -436,7 +444,8 @@ def data(doc: dict, spec: dict) -> dict:
         "title": doc["title"],
         "subtitle": doc.get("subtitle") or "",
         "steps": {s["id"]: {"label": s["label"], "zone": zone_name[s["zone"]], "parent": s.get("parent"),
-                            "phase": phase_name.get(s.get("phase")), "details": s.get("details") or {}}
+                            "phase": phase_name.get(s.get("phase")), "dead_end": s.get("dead_end"),
+                            "details": s.get("details") or {}}
                   for s in doc["steps"]},
         "phases": [{"id": ph["id"], "name": ph["name"], "details": ph.get("details") or {}}
                    for ph in doc.get("phases") or []],
