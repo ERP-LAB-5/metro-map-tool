@@ -1,0 +1,37 @@
+{
+  "metrofy": 1,
+  "title": "ACME shop: from the ERP to the storefront",
+  "subtitle": "Stories riding the to-be process; trips are scenarios played out",
+  "zones": [
+    {"id": "erp", "name": "ERP (back office)"},
+    {"id": "both", "name": "Both"},
+    {"id": "shop", "name": "Storefront"}
+  ],
+  "steps": [
+    {"id": "present", "label": "Present", "zone": "both", "details": {"does": "present the catalogue"}},
+    {"id": "classify", "label": "Classify", "zone": "shop", "parent": "present"},
+    {"id": "describe", "label": "Describe", "zone": "shop", "parent": "present"},
+    {"id": "price", "label": "Price", "zone": "both"},
+    {"id": "avail", "label": "Availability", "zone": "erp"},
+    {"id": "capture", "label": "Capture", "zone": "both"},
+    {"id": "settle", "label": "Settle", "zone": "both"},
+    {"id": "fulfil", "label": "Fulfil", "zone": "erp"}
+  ],
+  "lines": [
+    {"id": "by-maker", "name": "Browse by maker", "status": "building",
+     "steps": ["present", "classify", "describe"],
+     "details": {"story": "As a shopper I want to filter lamps by their maker, so I find the one I like.",
+                 "accept when": "every lamp shows its maker, and the filter lists every maker"}},
+    {"id": "prices", "name": "Prices per market", "status": "planned", "steps": ["describe", "price"]},
+    {"id": "stock", "name": "Stock on the page", "status": "planned", "steps": ["price", "avail", "capture"]},
+    {"id": "catalogue", "name": "The catalogue", "status": "live", "steps": ["present", "describe"]}
+  ],
+  "trips": [
+    {"id": "maker-as-metaobject", "name": "Maker as a metaobject", "line": "by-maker",
+     "stops": ["present", "classify", "describe"],
+     "details": {"what if": "the maker is a metaobject with a page of its own", "cost": "theme section, no app"}},
+    {"id": "maker-as-tag", "name": "Maker as a tag", "line": "by-maker",
+     "stops": ["present", "describe"],
+     "details": {"what if": "the maker is a product tag", "cost": "none; no maker page"}}
+  ]
+}
