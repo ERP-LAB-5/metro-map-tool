@@ -39,6 +39,11 @@ LINE_COLOURS = [c for n, c in mm.PALETTE if n != "grey"]
 ZONE_COLOURS = ["#0098d4", "#7b3fb5", "#ee7c0e", "#007d32", "#9b0058", "#00a4a7"]
 #: grid: columns between steps, rows per zone, and the row a zone's steps sit on
 STEP_GAP = 2
+#: columns between phases: a phase holds a station per zone, each labelled,
+#: and its band must not reach into its neighbour's
+PHASE_GAP = 3
+#: how far a phase band reaches past its stations: slimmer than a zone's
+PHASE_PAD = 12.0
 LANE_ROWS = 3
 SPINE_NAME = "The process"
 #: a phase's band, when it names no colour: quiet, so the lanes stay readable
@@ -232,7 +237,8 @@ def place(doc: dict) -> dict:
     parents = {s.get("parent") for s in doc["steps"] if s.get("parent")}
     stations = {}
     for i, s in enumerate(doc["steps"]):
-        st = {"label": s["label"], "gx": col[s["id"]] * STEP_GAP, "gy": row[s["zone"]]}
+        st = {"label": s["label"], "gx": col[s["id"]] * (PHASE_GAP if doc.get("phases") else STEP_GAP),
+              "gy": row[s["zone"]]}
         if s["id"] in parents:
             st["interchange"] = True
         stations[s["id"]] = st
@@ -268,6 +274,7 @@ def place(doc: dict) -> dict:
         "style": dict(STYLE),
     }
     if doc.get("phases"):
+        spec["style"]["zone_pad"] = PHASE_PAD
         spec["zones"] = [{"name": ph["name"], "color": ph.get("color") or PHASE_COLOUR,
                           "stations": [s["id"] for s in doc["steps"] if s["phase"] == ph["id"]]}
                          for ph in doc["phases"] if any(s["phase"] == ph["id"] for s in doc["steps"])]

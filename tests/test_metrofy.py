@@ -136,7 +136,7 @@ class Phases(unittest.TestCase):
         st = spec["stations"]
         self.assertEqual(st["p2-a"]["gx"], st["p2-b"]["gx"])
         self.assertLess(st["p2-a"]["gy"], st["p2-b"]["gy"])
-        self.assertEqual([st[s]["gx"] for s in ("p1-a", "p2-a", "p3-a")], [0, 2, 4])
+        self.assertEqual([st[s]["gx"] for s in ("p1-a", "p2-a", "p3-a")], [0, 3, 6])
 
     def test_a_phase_is_a_named_band_around_its_steps(self):
         zones = {z["name"]: z["stations"] for z in place(phased())["zones"]}
